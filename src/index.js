@@ -50,6 +50,8 @@ const ECONOMY_SINK_LABELS={
   vehicle_mod:'載具改裝',
   airline_registration:'航空公司註冊費',
   airline_operation:'航空公司航線營運成本',
+  transport_registration:'交通公司行號註冊費',
+  transport_operation:'交通事業營運成本',
   transfer_fee:'玩家轉帳手續費'
 };
 const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer']);
@@ -550,6 +552,31 @@ db.exec(`
     channel_notified_at INTEGER,
     PRIMARY KEY (guild_id,user_id)
   );
+  CREATE TABLE IF NOT EXISTS transport_companies (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    station_id TEXT,
+    route_id TEXT,
+    registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id)
+  );
+  CREATE TABLE IF NOT EXISTS transport_operations (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    station_id TEXT NOT NULL,
+    route_id TEXT NOT NULL,
+    gross_revenue INTEGER NOT NULL,
+    operating_cost INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    completes_at INTEGER NOT NULL,
+    dm_notified_at INTEGER,
+    channel_notified_at INTEGER,
+    PRIMARY KEY (guild_id,user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_transport_operations_completion
+    ON transport_operations(completes_at,dm_notified_at,channel_notified_at);
   DROP TRIGGER IF EXISTS ledger_collect_casino_vault;
   CREATE TRIGGER ledger_collect_casino_vault
   AFTER INSERT ON ledger
@@ -885,6 +912,9 @@ const assetCatalog={
   amazon_canopy_international_airport:{name:'🌿 亞馬遜樹冠國際機場',category:'房地產',price:17888888,description:'以綠屋頂、太陽能機坪與架高航廈守護雨林的永續航空門戶。可經營短途及跨洲航線，營收加成 24%。',image:'properties/airports/amazon_canopy_international_airport.jpg',rarity:'神話',unique:true,airportTier:2,airlineMultiplier:1.24},
   aegean_sapphire_international_airport:{name:'💎 愛琴海藍寶石國際機場',category:'房地產',price:22888888,description:'坐擁藍寶石海灣、白崖與度假島鏈的地中海航空樞紐。可經營短途及跨洲航線，營收加成 30%。',image:'properties/airports/aegean_sapphire_international_airport.jpg',rarity:'神話',unique:true,airportTier:2,airlineMultiplier:1.3},
   obsidian_aurora_intercontinental_airport:{name:'🌋 黑曜極光洲際機場',category:'房地產',price:35888888,description:'建於北境火山半島，擁有黑曜航廈、三跑道與寬體機坪的頂級樞紐。開放全部航線，營收加成 44%。',image:'properties/airports/obsidian_aurora_intercontinental_airport.jpg',rarity:'限定',unique:true,airportTier:3,airlineMultiplier:1.44},
+  grand_bay_high_speed_rail_terminal:{name:'🚄 金灣中央火車站',category:'房地產',price:6888888,description:'串聯都會通勤、城際商務與夜間特快的高鐵樞紐。購買後可支付手續費註冊交通公司行號，鐵路營收加成 10%。',image:'properties/stations/grand_bay_high_speed_rail_terminal.png',rarity:'傳說',unique:true,transportType:'rail',transportMultiplier:1.1},
+  lotus_metropolitan_coach_terminal:{name:'🚌 蓮都國際客運站',category:'房地產',price:3888888,description:'擁有多層候車大廳與城際月台的豪華客運轉運中心。購買後可註冊交通公司行號，經營通勤、城際與觀光客運。',image:'properties/stations/lotus_metropolitan_coach_terminal.png',rarity:'史詩',unique:true,transportType:'coach',transportMultiplier:0.95},
+  harbor_crown_freight_terminal:{name:'🚛 皇冠港物流貨運站',category:'房地產',price:9888888,description:'整合鐵路貨場、卡車月台、智慧倉儲與貨櫃調度的物流基地。購買後可註冊交通公司行號，貨運營收加成 25%。',image:'properties/stations/harbor_crown_freight_terminal.png',rarity:'神話',unique:true,transportType:'freight',transportMultiplier:1.25},
   yacht:{name:'🛥️ 私人遊艇',category:'郵輪',price:350000,description:'小型私人海上娛樂空間。'},
   cruise:{name:'🛳️ 豪華郵輪｜Ocean Majesty',category:'郵輪',price:1200000,description:'燈火璀璨的海上宮殿，設有泳池、宴會廳、劇院與直升機坪，整晚派對能為賭場之夜帶來好運。',image:'ships/luxury_cruise.jpg',rarity:'傳說',buff:'casino'},
   going_merry:{name:'☠️ 梅莉號 Going Merry',category:'郵輪',price:3500000,description:'承載冒險、友情與無數回憶的傳奇海賊船；羊首船艏會在最危急的時刻帶領船員突破封鎖。',image:'ships/going_merry.jpg',rarity:'限定',buff:'getaway',buffMultiplier:3},
@@ -1244,6 +1274,8 @@ const weeklyMysteryIds=weeklyMysteryNames.map((name,index)=>{
 const assetCategories=['房地產','郵輪','汽車','機車','飛行器','收藏品','武器','彈藥'];
 const AIRLINE_REGISTRATION_FEE=500000;
 const AIRLINE_COMPLETION_CHANNEL_ID='1531857208781045831';
+const TRANSPORT_REGISTRATION_FEE=300000;
+const TRANSPORT_COMPLETION_CHANNEL_ID=AIRLINE_COMPLETION_CHANNEL_ID;
 const airportAssetIds=[
   'macau_bay_international_airport','pearl_delta_international_airport','imperial_global_aviation_city',
   'fuji_sakura_international_airport','liberty_star_international_airport','coral_coast_international_airport',
@@ -1268,6 +1300,27 @@ const airlineRoutes={
   aegean_resort_hop:{name:'🏖️ 愛琴海度假短航',description:'串聯地中海度假島嶼與海岸城市的精品短途航線。',durationMs:45*60*1000,baseRevenue:360000,operatingCost:120000,stamina:24,minTier:2},
   polar_night_longhaul:{name:'🌌 極夜洲際長程航線',description:'跨越極圈與大洋的三小時長程航班，需要大型國際機場支援。',durationMs:3*60*60*1000,baseRevenue:2100000,operatingCost:780000,stamina:55,minTier:2},
   grand_world_odyssey:{name:'🌍 環球天際遠征航線',description:'歷時四小時、橫跨多個大洲的最高階遠征航線。',durationMs:4*60*60*1000,baseRevenue:3400000,operatingCost:1350000,stamina:70,minTier:3}
+};
+const transportStationIds=[
+  'grand_bay_high_speed_rail_terminal',
+  'lotus_metropolitan_coach_terminal',
+  'harbor_crown_freight_terminal'
+];
+const transportBusinessTypes={
+  rail:{name:'鐵路運輸',emoji:'🚄',stationLabel:'火車站',operationLabel:'列車班次',color:0xE53935},
+  coach:{name:'城際客運',emoji:'🚌',stationLabel:'客運站',operationLabel:'客運班次',color:0x1565C0},
+  freight:{name:'物流貨運',emoji:'🚛',stationLabel:'貨運站',operationLabel:'物流任務',color:0xF57C00}
+};
+const transportRoutes={
+  rail_metro_commuter:{name:'🚆 都會通勤快線',type:'rail',description:'高密度城市通勤列車，週轉快速且收益穩定。',durationMs:10*60*1000,baseRevenue:72000,operatingCost:22000,stamina:8},
+  rail_intercity_business:{name:'🚄 城際商務特快',type:'rail',description:'串聯主要商業城市的高鐵班次。',durationMs:30*60*1000,baseRevenue:245000,operatingCost:80000,stamina:18},
+  rail_night_express:{name:'🌙 跨區夜行特快',type:'rail',description:'長距離夜間列車，提供臥鋪與高價商務運輸。',durationMs:60*60*1000,baseRevenue:620000,operatingCost:220000,stamina:32},
+  coach_city_shuttle:{name:'🏙️ 都會接駁客運',type:'coach',description:'往返市中心與觀光區的高頻短程班次。',durationMs:8*60*1000,baseRevenue:45000,operatingCost:14000,stamina:6},
+  coach_intercity_line:{name:'🛣️ 城際豪華客運',type:'coach',description:'以豪華巴士連結鄰近城市與轉運中心。',durationMs:20*60*1000,baseRevenue:125000,operatingCost:40000,stamina:12},
+  coach_resort_tour:{name:'🎡 海灣觀光專線',type:'coach',description:'承接大型旅行團與度假區包車需求。',durationMs:45*60*1000,baseRevenue:360000,operatingCost:120000,stamina:24},
+  freight_city_distribution:{name:'📦 城市配送專案',type:'freight',description:'處理商圈、倉庫與門市間的快速配送。',durationMs:15*60*1000,baseRevenue:120000,operatingCost:38000,stamina:10},
+  freight_port_logistics:{name:'🏗️ 港區貨櫃聯運',type:'freight',description:'整合貨櫃場、鐵路與卡車的港區物流任務。',durationMs:50*60*1000,baseRevenue:440000,operatingCost:150000,stamina:24},
+  freight_continental_contract:{name:'🌐 跨境物流合約',type:'freight',description:'承攬高價值跨境貨物與長途供應鏈合約。',durationMs:2*60*60*1000,baseRevenue:1300000,operatingCost:500000,stamina:42}
 };
 function airlineCompany(g,u) {
   return db.prepare('SELECT * FROM airline_companies WHERE guild_id=? AND user_id=?').get(g,u)||null;
@@ -1498,6 +1551,270 @@ async function notifyCompletedAirlineFlights() {
     console.error(`檢查航線完成通知失敗：${error.message}`);
   } finally {
     airlineCompletionNotificationRunning=false;
+  }
+}
+function transportCompany(g,u) {
+  return db.prepare('SELECT * FROM transport_companies WHERE guild_id=? AND user_id=?').get(g,u)||null;
+}
+function transportOperation(g,u) {
+  return db.prepare('SELECT * FROM transport_operations WHERE guild_id=? AND user_id=?').get(g,u)||null;
+}
+function ownedTransportStations(g,u) {
+  return transportStationIds.filter(id=>assetQuantity(g,u,id)>0);
+}
+function normalizeTransportCompanyName(value) {
+  return String(value||'').trim().replace(/\s+/g,' ').replace(/@/g,'＠');
+}
+function registerTransportCompany(g,u,name) {
+  name=normalizeTransportCompanyName(name);
+  if(name.length<2||name.length>30) throw new Error('公司行號名稱必須是 2～30 個字');
+  if(!ownedTransportStations(g,u).length) throw new Error('請先到資產商城購買火車站、客運站或貨運站');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if(transportCompany(g,u)) throw new Error('你已經註冊過交通公司行號');
+    changeBalanceUnlocked(g,u,-TRANSPORT_REGISTRATION_FEE,'transport_registration',u,`註冊交通公司行號：${name}`);
+    db.prepare('INSERT INTO transport_companies(guild_id,user_id,company_name) VALUES(?,?,?)').run(g,u,name);
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return transportCompany(g,u);
+}
+function transportSelectionName(id,fallback='尚未選擇') {
+  return assetCatalog[id]?.name||transportRoutes[id]?.name||fallback;
+}
+function transportDashboardEmbed(g,u,notice='') {
+  const stations=ownedTransportStations(g,u),company=transportCompany(g,u),operation=transportOperation(g,u);
+  if(!stations.length) {
+    return new EmbedBuilder()
+      .setColor(0x607D8B)
+      .setTitle('🚉 交通事業經營中心')
+      .setDescription(`${notice?`${notice}\n\n`:''}你目前沒有可營運的車站資產。\n\n請到 \`/資產商城 分類:房地產\` 購買：\n${transportStationIds.map(id=>`• ${assetCatalog[id].name}｜**${fmt(assetCatalog[id].price)}**｜營收 ×${assetCatalog[id].transportMultiplier}`).join('\n')}\n\n購買任一車站後，需支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}** 手續費註冊公司行號，才能開始營運。`);
+  }
+  if(!company) {
+    return new EmbedBuilder()
+      .setColor(0x1565C0)
+      .setTitle('🚉 交通事業經營中心')
+      .setDescription(`${notice?`${notice}\n\n`:''}你已擁有 **${stations.length} 座交通場站**，下一步是註冊公司行號。\n\n註冊手續費：**${fmt(TRANSPORT_REGISTRATION_FEE)}**\n完成註冊後，可選擇自己的火車站、客運站或貨運站及相符路線開始營運。\n\n目前金庫：**${fmt(balance(g,u))}**`);
+  }
+  const station=assetCatalog[company.station_id],route=transportRoutes[company.route_id];
+  const type=transportBusinessTypes[station?.transportType];
+  const operationText=operation
+    ? Date.now()>=operation.completes_at
+      ? `✅ **${transportBusinessTypes[transportRoutes[operation.route_id]?.type]?.operationLabel||'營運任務'}已完成，可以領取營收**\n${transportSelectionName(operation.route_id)}｜可領營收 **${fmt(operation.gross_revenue)}**`
+      : `${transportBusinessTypes[transportRoutes[operation.route_id]?.type]?.emoji||'🚉'} **${transportBusinessTypes[transportRoutes[operation.route_id]?.type]?.operationLabel||'營運任務'}進行中**\n${transportSelectionName(operation.route_id)}｜<t:${Math.floor(operation.completes_at/1000)}:R> 完成\n預計營收：**${fmt(operation.gross_revenue)}**`
+    : '目前沒有進行中的交通營運任務。';
+  const routeEstimate=station&&route&&station.transportType===route.type
+    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier))}**（另有市場需求浮動）\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
+    : '';
+  return new EmbedBuilder()
+    .setColor(operation&&Date.now()>=operation.completes_at?0x35C46A:(type?.color||0x455A64))
+    .setTitle(`${type?.emoji||'🚉'} ${company.company_name}`)
+    .setDescription(`${notice?`${notice}\n\n`:''}**營運配置**\n公司行號：**${company.company_name}**\n事業類別：**${type?.name||'尚未選擇'}**\n營運場站：${transportSelectionName(company.station_id)}\n營運路線：${transportSelectionName(company.route_id)}\n\n**營運狀態**\n${operationText}${routeEstimate}\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+}
+function transportDashboardComponents(g,u) {
+  const stations=ownedTransportStations(g,u),company=transportCompany(g,u);
+  if(!stations.length) return [];
+  if(!company) {
+    return [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`transport_register:${u}`).setLabel(`註冊公司行號｜${fmt(TRANSPORT_REGISTRATION_FEE)}`).setEmoji('🏢').setStyle(ButtonStyle.Success)
+    )];
+  }
+  const rows=[],operation=transportOperation(g,u),station=assetCatalog[company.station_id];
+  rows.push(new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`transport_station:${u}`)
+      .setPlaceholder('選擇營運場站')
+      .setDisabled(!!operation)
+      .addOptions(stations.map(id=>{
+        const asset=assetCatalog[id],type=transportBusinessTypes[asset.transportType];
+        return {
+          label:asset.name.slice(0,100),
+          value:id,
+          description:`${type.name}｜營收 ×${asset.transportMultiplier}`,
+          default:company.station_id===id
+        };
+      }))
+  ));
+  const routeEntries=Object.entries(transportRoutes).filter(([,route])=>!station||route.type===station.transportType);
+  rows.push(new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`transport_route:${u}`)
+      .setPlaceholder(station?`選擇${transportBusinessTypes[station.transportType].name}路線`:'先選擇場站，再選擇營運路線')
+      .setDisabled(!!operation)
+      .addOptions(routeEntries.map(([id,route])=>({
+        label:route.name.slice(0,100),
+        value:id,
+        description:`${airlineDurationLabel(route.durationMs)}｜成本 ${fmt(route.operatingCost)}｜體力 ${route.stamina}`,
+        default:company.route_id===id
+      })))
+  ));
+  const ready=operation&&Date.now()>=operation.completes_at;
+  const validConfiguration=station&&stations.includes(company.station_id)&&transportRoutes[company.route_id]?.type===station.transportType;
+  const actionButtons=[operation
+    ? new ButtonBuilder().setCustomId(ready?`transport_claim:${u}`:`transport_refresh:${u}`).setLabel(ready?'領取交通事業營收':'重新整理營運狀態').setEmoji(ready?'💰':'🔄').setStyle(ready?ButtonStyle.Success:ButtonStyle.Secondary)
+    : new ButtonBuilder().setCustomId(`transport_start:${u}`).setLabel('確認配置並開始營運').setEmoji('🚦').setStyle(ButtonStyle.Primary).setDisabled(!validConfiguration)];
+  if(!operation||ready) actionButtons.push(new ButtonBuilder().setCustomId(`transport_refresh:${u}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary));
+  rows.push(new ActionRowBuilder().addComponents(actionButtons));
+  return rows;
+}
+function updateTransportSelection(g,u,column,value) {
+  const company=transportCompany(g,u);
+  if(!company) throw new Error('請先註冊交通公司行號');
+  if(transportOperation(g,u)) throw new Error('營運進行中，完成並領取營收後才能變更配置');
+  if(column==='station_id') {
+    if(!transportStationIds.includes(value)||assetQuantity(g,u,value)<1) throw new Error('你沒有這座交通場站');
+    const currentRoute=transportRoutes[company.route_id];
+    const nextRouteId=currentRoute?.type===assetCatalog[value].transportType?company.route_id:null;
+    db.prepare('UPDATE transport_companies SET station_id=?,route_id=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?')
+      .run(value,nextRouteId,g,u);
+    return;
+  }
+  if(column==='route_id') {
+    const route=transportRoutes[value],station=assetCatalog[company.station_id];
+    if(!station||!transportStationIds.includes(company.station_id)||assetQuantity(g,u,company.station_id)<1) throw new Error('請先選擇自己持有的交通場站');
+    if(!route||route.type!==station.transportType) throw new Error('這條路線與目前選擇的場站類型不符');
+    db.prepare('UPDATE transport_companies SET route_id=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(value,g,u);
+    return;
+  }
+  throw new Error('無效的交通事業營運選項');
+}
+function startTransportOperation(g,u) {
+  const company=transportCompany(g,u);
+  if(!company) throw new Error('請先註冊交通公司行號');
+  if(transportOperation(g,u)) throw new Error('目前已有交通營運任務進行中');
+  const station=assetCatalog[company.station_id],route=transportRoutes[company.route_id];
+  if(!station||!transportStationIds.includes(company.station_id)||assetQuantity(g,u,company.station_id)<1) throw new Error('請先選擇自己持有的交通場站');
+  if(!route) throw new Error('請先選擇營運路線');
+  if(station.transportType!==route.type) throw new Error('這條路線與目前選擇的場站類型不符');
+  if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理交通事業');
+  const staminaUsed=staminaCost(g,u,route.stamina),currentStamina=stamina(g,u);
+  if(currentStamina<staminaUsed) throw new Error(`體力不足，需要 ${staminaUsed} 點`);
+  if(balance(g,u)<route.operatingCost) throw new Error(`營運資金不足，需要 ${fmt(route.operatingCost)}`);
+  const demandMultiplier=0.90+Math.random()*0.21;
+  const grossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*demandMultiplier);
+  const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    changeBalanceUnlocked(g,u,-route.operatingCost,'transport_operation',u,`${company.company_name}｜${route.name} 營運成本`);
+    db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(staminaUsed,g,u);
+    db.prepare('INSERT INTO transport_operations(guild_id,user_id,station_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?)')
+      .run(g,u,company.station_id,company.route_id,grossRevenue,route.operatingCost,startedAt,completesAt);
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return {company,station,route,type:transportBusinessTypes[route.type],grossRevenue,staminaUsed,startedAt,completesAt};
+}
+function claimTransportRevenue(g,u) {
+  const company=transportCompany(g,u),operation=transportOperation(g,u);
+  if(!operation) throw new Error('目前沒有可結算的交通營運任務');
+  if(Date.now()<operation.completes_at) throw new Error('交通營運任務尚未完成，請稍後再領取營收');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const next=changeBalanceUnlocked(g,u,operation.gross_revenue,'transport_revenue',u,`${company?.company_name||'交通公司行號'}｜${transportSelectionName(operation.route_id)} 營運收入`);
+    db.prepare('DELETE FROM transport_operations WHERE guild_id=? AND user_id=?').run(g,u);
+    db.exec('COMMIT');
+    return {operation,next,profit:operation.gross_revenue-operation.operating_cost};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+let transportCompletionNotificationRunning=false;
+async function notifyCompletedTransportOperations() {
+  if(transportCompletionNotificationRunning) return;
+  transportCompletionNotificationRunning=true;
+  try {
+    const completedOperations=db.prepare(`
+      SELECT operation.*,company.company_name
+      FROM transport_operations operation
+      LEFT JOIN transport_companies company
+        ON company.guild_id=operation.guild_id AND company.user_id=operation.user_id
+      WHERE operation.completes_at<=?
+        AND (operation.dm_notified_at IS NULL OR operation.channel_notified_at IS NULL)
+      ORDER BY operation.completes_at
+    `).all(Date.now());
+    for(const operation of completedOperations) {
+      const companyName=operation.company_name||'交通公司行號';
+      const route=transportRoutes[operation.route_id],type=transportBusinessTypes[route?.type];
+      const routeName=transportSelectionName(operation.route_id);
+      const stationName=transportSelectionName(operation.station_id);
+      const profit=operation.gross_revenue-operation.operating_cost;
+      const completedTimestamp=Math.floor(operation.completes_at/1000);
+      if(operation.dm_notified_at===null) {
+        try {
+          const user=await client.users.fetch(operation.user_id);
+          await user.send({
+            embeds:[new EmbedBuilder()
+              .setColor(0x35C46A)
+              .setTitle(`${type?.emoji||'🚉'} 交通事業行程已完成`)
+              .setDescription(`你的${type?.operationLabel||'交通營運任務'}已順利完成！\n\n請回到伺服器開啟 \`/交通事業\` 面板，領取本次營收。`)
+              .addFields(
+                {name:'🏢 公司行號',value:companyName,inline:false},
+                {name:'🧭 事業類別',value:type?.name||'交通事業',inline:true},
+                {name:'🗺️ 完成路線',value:routeName,inline:true},
+                {name:'🚉 營運場站',value:stationName,inline:false},
+                {name:'💰 可領營收',value:fmt(operation.gross_revenue),inline:true},
+                {name:'📈 本次淨收益',value:fmt(profit),inline:true},
+                {name:'🕒 完成時間',value:`<t:${completedTimestamp}:F>`,inline:false}
+              )
+              .setFooter({text:'營收需由玩家在交通事業面板中手動領取'})
+              .setTimestamp(new Date(operation.completes_at))],
+            allowedMentions:{parse:[]}
+          });
+          db.prepare('UPDATE transport_operations SET dm_notified_at=? WHERE guild_id=? AND user_id=? AND started_at=?')
+            .run(Date.now(),operation.guild_id,operation.user_id,operation.started_at);
+        } catch(error) {
+          const errorCode=Number(error?.code||error?.rawError?.code||0);
+          if(errorCode===50007) {
+            db.prepare('UPDATE transport_operations SET dm_notified_at=-1 WHERE guild_id=? AND user_id=? AND started_at=?')
+              .run(operation.guild_id,operation.user_id,operation.started_at);
+            console.warn(`交通事業完成私訊無法送達（玩家關閉私訊） guild=${operation.guild_id} user=${operation.user_id}`);
+          } else {
+            console.error(`交通事業完成私訊失敗 guild=${operation.guild_id} user=${operation.user_id}: ${error.message}`);
+          }
+        }
+      }
+      if(operation.channel_notified_at===null) {
+        try {
+          const channel=await client.channels.fetch(TRANSPORT_COMPLETION_CHANNEL_ID);
+          if(!channel?.isTextBased()||typeof channel.send!=='function') throw new Error('指定的交通事業完成頻道不是可發送訊息的文字頻道');
+          const message=await channel.send({
+            embeds:[new EmbedBuilder()
+              .setColor(type?.color||0x455A64)
+              .setTitle('📡 交通事業完成推播')
+              .setDescription(`玩家 <@${operation.user_id}> 的${type?.operationLabel||'交通營運任務'}已完成。`)
+              .addFields(
+                {name:'🏢 公司行號',value:companyName,inline:false},
+                {name:'🧭 事業類別',value:type?.name||'交通事業',inline:true},
+                {name:'👤 事業擁有者',value:`<@${operation.user_id}>`,inline:true},
+                {name:'🚉 營運場站',value:stationName,inline:false},
+                {name:'🗺️ 完成路線',value:routeName,inline:false},
+                {name:'💰 可領營收',value:fmt(operation.gross_revenue),inline:true},
+                {name:'📈 本次淨收益',value:fmt(profit),inline:true},
+                {name:'🕒 完成時間',value:`<t:${completedTimestamp}:F>`,inline:false}
+              )
+              .setTimestamp(new Date(operation.completes_at))],
+            allowedMentions:{parse:[]}
+          });
+          if(channel.type===ChannelType.GuildAnnouncement) {
+            try { await message.crosspost(); }
+            catch(error) { console.error(`交通事業完成公告發布失敗 channel=${TRANSPORT_COMPLETION_CHANNEL_ID}: ${error.message}`); }
+          }
+          db.prepare('UPDATE transport_operations SET channel_notified_at=? WHERE guild_id=? AND user_id=? AND started_at=?')
+            .run(Date.now(),operation.guild_id,operation.user_id,operation.started_at);
+        } catch(error) {
+          console.error(`交通事業完成頻道推播失敗 channel=${TRANSPORT_COMPLETION_CHANNEL_ID} guild=${operation.guild_id} user=${operation.user_id}: ${error.message}`);
+        }
+      }
+    }
+  } catch(error) {
+    console.error(`檢查交通事業完成通知失敗：${error.message}`);
+  } finally {
+    transportCompletionNotificationRunning=false;
   }
 }
 const HIDEOUT_MAX_LEVEL=5;
@@ -4318,7 +4635,7 @@ const gameHelpDetails={
   heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
   money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/每日\` 領取獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。大多數行動會消耗體力，食物與飲料可恢復；所有合法工作、冒險、搶劫與賭場收益皆無每日金幣上限。`},
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、車庫與交易',title:'🏎️ 資產收藏',body:'使用 `/資產商城` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 `/車庫`、`/停機坪`、`/碼頭` 展示；目前共有 **16 座國際機場**，持有機場與客機後可用 `/機場` 註冊航空公司，經營包含 15、25、45 分鐘短途航線及 3、4 小時長途航線。'},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；目前共有 **16 座國際機場**，持有機場與客機後可用 \`/機場\` 註冊航空公司並經營航線。\n\n另有 **金灣中央火車站、蓮都國際客運站、皇冠港物流貨運站**三種交通事業資產。持有任一場站後，可用 \`/交通事業\` 支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}** 手續費註冊公司行號，再從鐵路、城際客運或物流貨運專屬路線中選擇任務賺取收入。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
   pets:{label:'寵物系統',emoji:'🐾',hint:'領養、陪伴、照顧與特殊增益',title:'🐾 寵物陪伴系統',body:'使用 `/寵物店` 預覽並領養寵物，或購買罐頭、玩具與洗護用品。再用 `/我的寵物` 設定同行夥伴與使用用品。寵物每天心情 -10，心情低於 20 時特殊功能暫停；好好照顧即可持續獲得小幅工作、賭場、商城或體力加成。'}
 };
@@ -4327,11 +4644,11 @@ const commandHelpCategories={
   account:{label:'👤 玩家與經濟',description:'個人資料、金庫、轉帳、銀行、體力與每日獎勵',commands:['金庫','轉帳','個人資料','成就','稱號','每日增益','銀行','體力','每日回體力','每日']},
   shop:{label:'🛒 商城與背包',description:'購買、查看及使用補給品',commands:['商城','背包','購買','使用']},
   pets:{label:'🐾 寵物與陪伴',description:'領養寵物、購買用品並設定同行同伴',commands:['寵物店','我的寵物']},
-  assets:{label:'🏎️ 資產與交易',description:'房產、機場經營、載具、改裝、盲盒、展示與二手市場',commands:['資產商城','購買資產','我的資產','藏身處','機場','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','變賣資產','回收廠','二手市場']},
+  assets:{label:'🏎️ 資產與交易',description:'房產、航空與交通事業、載具、改裝、展示與二手市場',commands:['資產商城','購買資產','我的資產','藏身處','機場','交通事業','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','變賣資產','回收廠','二手市場']},
   heist:{label:'🚓 團隊與小黑屋',description:'隊伍搶劫、情報、救援、逃獄與暴動',commands:['隊伍','團隊搶銀行','銀行情報','賄絡迷子','減刑','逃獄','小黑屋暴動','救援同伴']},
   admin:{label:'🛡️ 管理員與系統',description:'玩法入口及限管理員使用的維護指令',commands:['玩法','搶劫公告頻道','單人搶劫機率','稱號設定','資產調整','金幣調整','管理員入金','帳務紀錄','經濟監控']}
 };
-const detailedHelpCommandKeys={小遊戲:'miniGames',比大小:'highlow',射龍門:'dragon',賽馬:'horse',競速:'race',寵物競賽:'petRace',競速pvp:'racePvp',寵物競速pvp:'petRacePvp',骰盅吹牛:'liarDice',大老二:'big2',角子機:'slots',幸運輪盤:'wheel',大樂透:'lottery',賓果:'bingo',刮刮樂:'scratch',麻將:'mahjong',決鬥:'duel',團隊搶銀行:'heist',賺錢:'money',轉帳:'transfers',資產商城:'assets',藏身處:'hideout',寵物店:'pets',我的寵物:'pets'};
+const detailedHelpCommandKeys={小遊戲:'miniGames',比大小:'highlow',射龍門:'dragon',賽馬:'horse',競速:'race',寵物競賽:'petRace',競速pvp:'racePvp',寵物競速pvp:'petRacePvp',骰盅吹牛:'liarDice',大老二:'big2',角子機:'slots',幸運輪盤:'wheel',大樂透:'lottery',賓果:'bingo',刮刮樂:'scratch',麻將:'mahjong',決鬥:'duel',團隊搶銀行:'heist',賺錢:'money',轉帳:'transfers',資產商城:'assets',交通事業:'assets',藏身處:'hideout',寵物店:'pets',我的寵物:'pets'};
 function commandHelpCategoryRow(selected='casino') {
   return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('game_help_category').setPlaceholder('第一步：選擇指令分類').addOptions(
     Object.entries(commandHelpCategories).map(([value,category])=>({label:category.label,description:category.description,value,default:value===selected}))
@@ -4480,6 +4797,7 @@ const commands = [
   new SlashCommandBuilder().setName('我的資產').setDescription('查看玩家擁有的房地產與載具').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
   new SlashCommandBuilder().setName('藏身處').setDescription('將現有房地產設為藏身處並進行高階升級'),
   new SlashCommandBuilder().setName('機場').setDescription('註冊航空公司並使用自己的機場與客機經營航線'),
+  new SlashCommandBuilder().setName('交通事業').setDescription('註冊公司行號並經營火車站、客運站或貨運站'),
   new SlashCommandBuilder().setName('車庫').setDescription('查看自己的汽車、機車與資產增益')
     .addStringOption(o=>o.setName('展示').setDescription('輸入名稱搜尋車輛').setAutocomplete(true)),
   new SlashCommandBuilder().setName('改裝').setDescription('開啟車庫改裝選單並即時合成預覽')
@@ -5857,6 +6175,63 @@ async function handleInteraction(i) {
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以操作。',ephemeral:true});
     return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId)],components:airlineDashboardComponents(i.guildId,ownerId)});
   }
+  if(i.isButton()&&i.customId.startsWith('transport_register:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有交通場站擁有者可以註冊公司行號。',ephemeral:true});
+    if(transportCompany(i.guildId,ownerId)) return i.reply({content:'⚠️ 你已經註冊過交通公司行號。',ephemeral:true});
+    if(!ownedTransportStations(i.guildId,ownerId).length) return i.reply({content:'⚠️ 請先購買火車站、客運站或貨運站。',ephemeral:true});
+    const input=new TextInputBuilder().setCustomId('company_name').setLabel(`公司行號名稱｜手續費 ${fmt(TRANSPORT_REGISTRATION_FEE)}`).setPlaceholder('例如：澳門金運交通').setStyle(TextInputStyle.Short).setMinLength(2).setMaxLength(30).setRequired(true);
+    return i.showModal(new ModalBuilder().setCustomId(`transport_register_modal:${ownerId}`).setTitle('🏢 註冊交通公司行號').addComponents(new ActionRowBuilder().addComponents(input)));
+  }
+  if(i.isModalSubmit()&&i.customId.startsWith('transport_register_modal:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有交通場站擁有者可以註冊公司行號。',ephemeral:true});
+    try {
+      const company=registerTransportCompany(i.guildId,ownerId,i.fields.getTextInputValue('company_name'));
+      return i.update({embeds:[transportDashboardEmbed(i.guildId,ownerId,`✅ **${company.company_name}** 註冊完成，已支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}** 手續費。請選擇場站與相符路線。`)],components:transportDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ 註冊失敗：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isStringSelectMenu()&&['transport_station:','transport_route:'].some(prefix=>i.customId.startsWith(prefix))&&i.guildId) {
+    const [kind,ownerId]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有公司行號擁有者可以變更營運配置。',ephemeral:true});
+    const columns={transport_station:'station_id',transport_route:'route_id'};
+    try {
+      updateTransportSelection(i.guildId,ownerId,columns[kind],i.values[0]);
+      const notice=kind==='transport_station'?'✅ 營運場站已更新；請選擇相符路線。':'✅ 營運路線已更新；開始營運前不會扣款。';
+      return i.update({embeds:[transportDashboardEmbed(i.guildId,ownerId,notice)],components:transportDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('transport_start:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有公司行號擁有者可以開始營運。',ephemeral:true});
+    try {
+      const result=startTransportOperation(i.guildId,ownerId);
+      const notice=`${result.type.emoji} **${result.route.name} 已開始營運！**\n場站：${result.station.name}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n完成時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+      return i.update({embeds:[transportDashboardEmbed(i.guildId,ownerId,notice)],components:transportDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ 無法開始營運：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('transport_claim:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有公司行號擁有者可以領取營收。',ephemeral:true});
+    try {
+      const result=claimTransportRevenue(i.guildId,ownerId);
+      const notice=`💰 **交通事業營收已入帳！**\n營收：**${fmt(result.operation.gross_revenue)}**｜本次淨收益：**${fmt(result.profit)}**\n目前金庫：**${fmt(result.next)}**`;
+      return i.update({embeds:[transportDashboardEmbed(i.guildId,ownerId,notice)],components:transportDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ 無法領取營收：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('transport_refresh:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有公司行號擁有者可以操作。',ephemeral:true});
+    return i.update({embeds:[transportDashboardEmbed(i.guildId,ownerId)],components:transportDashboardComponents(i.guildId,ownerId)});
+  }
   if(i.isButton()&&(i.customId.startsWith('pvp_race_accept:')||i.customId.startsWith('pvp_race_reject:'))&&i.guildId) {
     const token=i.customId.split(':')[1],session=pvpRaceSessions.get(token);
     if(!session||session.expiresAt<Date.now()||session.status!=='pending') return i.reply({content:'這項 PVP 挑戰已失效。',ephemeral:true});
@@ -6330,6 +6705,9 @@ async function handleInteraction(i) {
     }
     if(i.commandName==='機場') {
       return i.reply({embeds:[airlineDashboardEmbed(g,u)],components:airlineDashboardComponents(g,u),ephemeral:true});
+    }
+    if(i.commandName==='交通事業') {
+      return i.reply({embeds:[transportDashboardEmbed(g,u)],components:transportDashboardComponents(g,u),ephemeral:true});
     }
     if(i.commandName==='改裝') {
       let assetId=i.options.getString('車輛');
@@ -7358,12 +7736,14 @@ client.once('clientReady',()=>{
   setInterval(announceTomorrowBank,60000);
   setInterval(announceSundayCasinoVault,60000);
   setInterval(notifyCompletedAirlineFlights,60000);
+  setInterval(notifyCompletedTransportOperations,60000);
   setInterval(notifyPendingAllInHeroUnlocks,60000);
   setInterval(()=>notifyPendingCasinoAllIns().catch(error=>console.error(`待補發歐印警報失敗：${error.message}`)),60000);
   setInterval(expireWebJengaGames,60000);
   announceTomorrowBank();
   announceSundayCasinoVault();
   notifyCompletedAirlineFlights();
+  notifyCompletedTransportOperations();
   notifyPendingAllInHeroUnlocks();
   notifyPendingCasinoAllIns().catch(error=>console.error(`啟動補發歐印警報失敗：${error.message}`));
   expireWebJengaGames();

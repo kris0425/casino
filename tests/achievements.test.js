@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 const source=readFileSync(new URL('../src/index.js',import.meta.url),'utf8');
@@ -91,10 +91,63 @@ test('完成歐印時排入自由大廳自動播報',()=>{
   assert.equal(pending.all_in_count,3);
 });
 
+test('三種交通場站可註冊公司行號並營運收益',()=>{
+  const stationAssets=[
+    ['grand_bay_high_speed_rail_terminal','properties/stations/grand_bay_high_speed_rail_terminal.png','rail'],
+    ['lotus_metropolitan_coach_terminal','properties/stations/lotus_metropolitan_coach_terminal.png','coach'],
+    ['harbor_crown_freight_terminal','properties/stations/harbor_crown_freight_terminal.png','freight']
+  ];
+  for(const [id,image,type] of stationAssets) {
+    assert.match(source,new RegExp(`${id}:\\{[^\\n]+transportType:'${type}'`),`缺少交通場站 ${id}`);
+    assert.ok(existsSync(new URL(`../assets/${image}`,import.meta.url)),`缺少交通場站圖片 ${image}`);
+  }
+  assert.match(source,/const TRANSPORT_REGISTRATION_FEE=300000/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_companies/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_operations/);
+  assert.match(source,/setName\('交通事業'\)/);
+  assert.match(source,/registerTransportCompany\(g,u,name\)/);
+  assert.match(source,/changeBalanceUnlocked\(g,u,-TRANSPORT_REGISTRATION_FEE,'transport_registration'/);
+  assert.match(source,/station\.transportType!==route\.type/);
+  assert.match(source,/changeBalanceUnlocked\(g,u,-route\.operatingCost,'transport_operation'/);
+  assert.match(source,/changeBalanceUnlocked\(g,u,operation\.gross_revenue,'transport_revenue'/);
+  assert.match(source,/setInterval\(notifyCompletedTransportOperations,60000\)/);
+
+  const db=new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE transport_companies (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, company_name TEXT NOT NULL,
+    station_id TEXT, route_id TEXT,
+    PRIMARY KEY (guild_id,user_id)
+  );
+  CREATE TABLE transport_operations (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, station_id TEXT NOT NULL,
+    route_id TEXT NOT NULL, gross_revenue INTEGER NOT NULL, operating_cost INTEGER NOT NULL,
+    started_at INTEGER NOT NULL, completes_at INTEGER NOT NULL,
+    dm_notified_at INTEGER, channel_notified_at INTEGER,
+    PRIMARY KEY (guild_id,user_id)
+  );`);
+  db.prepare('INSERT INTO transport_companies(guild_id,user_id,company_name,station_id,route_id) VALUES(?,?,?,?,?)')
+    .run('guild','player','金運交通','grand_bay_high_speed_rail_terminal','rail_intercity_business');
+  db.prepare('INSERT INTO transport_operations(guild_id,user_id,station_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?)')
+    .run('guild','player','grand_bay_high_speed_rail_terminal','rail_intercity_business',270000,80000,1000,2000);
+  const operation=db.prepare('SELECT * FROM transport_operations WHERE guild_id=? AND user_id=?').get('guild','player');
+  assert.equal(operation.gross_revenue-operation.operating_cost,190000);
+  assert.equal(operation.dm_notified_at,null);
+  assert.equal(operation.channel_notified_at,null);
+});
+
 test('公告檔案包含成就與轉帳規則',()=>{
   const update=JSON.parse(readFileSync(new URL('../updates/2026-07-30-transfer-achievements.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-07-30-transfer-achievements');
   assert.equal(update.changes.length,7);
   assert.match(update.summary,/10 個一般成就、3 個隱藏成就/);
   assert.match(update.changes.join('\n'),/2% 手續費/);
+});
+
+test('交通事業更新公告包含三種場站與註冊費',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-07-30-transport-stations.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-07-30-transport-stations');
+  assert.equal(update.changes.length,7);
+  assert.match(update.summary,/火車站、客運站與貨運站/);
+  assert.match(update.changes.join('\n'),/300,000 金幣手續費/);
+  assert.match(update.note,/賭場中央寶庫/);
 });
