@@ -178,6 +178,7 @@ function settleGamePayout(g,u,bet,payout,game,{balanceChanger=changeBalance,allI
   const allInProgress=allIn?recordCasinoAllIn(g,u,game):null;
   let titleMultiplier=1,titleInitialMultiplier=1,titleActive=false,titleSkillTriggered=false,titleId='';
   if(payout>bet) {
+    recordCasinoGameWin(g,u,game);
     if(allIn&&equippedTitleId(g,u)==='all_in_hero') {
       titleId='all_in_hero';
       titleActive=true;
@@ -361,6 +362,16 @@ db.exec(`
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, achievement_id TEXT NOT NULL,
     unlocked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id, user_id, achievement_id)
+  );
+  CREATE TABLE IF NOT EXISTS achievement_progress (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, metric TEXT NOT NULL,
+    value INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id, metric)
+  );
+  CREATE TABLE IF NOT EXISTS casino_game_wins (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, game_id TEXT NOT NULL,
+    wins INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id, game_id)
   );
   CREATE TABLE IF NOT EXISTS casino_all_in_stats (
     guild_id TEXT NOT NULL,
@@ -563,6 +574,12 @@ if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.n
 if(!db.prepare('PRAGMA table_info(web_scratch_tickets)').all().some(column=>column.name==='all_in')) {
   db.exec('ALTER TABLE web_scratch_tickets ADD COLUMN all_in INTEGER NOT NULL DEFAULT 0');
 }
+db.exec(`INSERT OR IGNORE INTO casino_game_wins(guild_id,user_id,game_id,wins)
+  SELECT guild_id,user_id,reason,COUNT(*)
+  FROM ledger
+  WHERE kind='payout' AND delta>0
+    AND reason IN ('比大小','射龍門','賽馬','競速','寵物競賽','角子機','大樂透','賓果','大老二','刮刮樂','抽積木','麻將')
+  GROUP BY guild_id,user_id,reason`);
 
 function migrateLegacyAmmo(sourceIds,targetId) {
   const placeholders=sourceIds.map(()=>'?').join(',');
@@ -602,6 +619,7 @@ function changeBalanceUnlocked(g, u, delta, kind, actor = null, reason = '') {
   db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next, g, u);
   db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
     .run(g, u, delta, next, kind, actor, reason);
+  trackComebackProgress(g,u,current,next,delta,kind);
   return next;
 }
 function changeBalance(g, u, delta, kind, actor = null, reason = '') {
@@ -2452,7 +2470,20 @@ const profileTitles={
   fierce_bird:'🦅 猛禽',
   cat_returns:'🐈 貓的報恩',
   dog_returns:'🐕 犬的報恩',
-  all_in_hero:'🔥 歐印勇者'
+  all_in_hero:'🔥 歐印勇者',
+  transfer_mogul:'💸 地下匯兌王',
+  mizi_hunter:'🕵️ 迷子獵人',
+  extra_zero_god:'🔟 手滑之神',
+  tower_top:'🧱 塔頂之人',
+  casino_all_rounder:'🎰 全能賭徒',
+  macau_sheriff:'🚓 澳門警長',
+  sky_overlord:'✈️ 天空霸主',
+  pet_godfather:'🐾 毛孩教父',
+  comeback_king:'📈 逆風之王',
+  shadow_thief:'🎭 無影怪盜',
+  pomeranian_toy:'🐕‍🦺 博美指定玩具',
+  hao_photographer:'📸 Hao 御用攝影師',
+  jail_keeper:'🧹 小黑屋管家'
 };
 const returnTitleSkillNames={cat_returns:'借看一下',dog_returns:'再聞一下'};
 function equippedTitleId(g,u) {
@@ -2546,6 +2577,43 @@ async function notifyPendingAllInHeroUnlocks() {
     catch(error) { console.error(`待補發歐印勇者私訊失敗 guild=${row.guild_id} user=${row.user_id}: ${error.message}`); }
   }
 }
+function achievementProgressValue(g,u,metric) {
+  return db.prepare('SELECT value FROM achievement_progress WHERE guild_id=? AND user_id=? AND metric=?').get(g,u,metric)?.value||0;
+}
+function incrementAchievementProgress(g,u,metric,amount=1) {
+  if(!Number.isSafeInteger(amount)||amount<1) throw new Error('成就進度增量必須是正安全整數');
+  db.prepare(`INSERT INTO achievement_progress(guild_id,user_id,metric,value)
+    VALUES(?,?,?,?)
+    ON CONFLICT(guild_id,user_id,metric) DO UPDATE SET
+      value=value+excluded.value,updated_at=CURRENT_TIMESTAMP`).run(g,u,metric,amount);
+  return achievementProgressValue(g,u,metric);
+}
+function markAchievementProgress(g,u,metric,value=1) {
+  if(!Number.isSafeInteger(value)||value<0) throw new Error('成就進度必須是安全整數');
+  db.prepare(`INSERT INTO achievement_progress(guild_id,user_id,metric,value)
+    VALUES(?,?,?,?)
+    ON CONFLICT(guild_id,user_id,metric) DO UPDATE SET
+      value=MAX(value,excluded.value),updated_at=CURRENT_TIMESTAMP`).run(g,u,metric,value);
+  return achievementProgressValue(g,u,metric);
+}
+function recordCasinoGameWin(g,u,game) {
+  const gameId=String(game||'').trim().slice(0,64);
+  if(!gameId) return 0;
+  db.prepare(`INSERT INTO casino_game_wins(guild_id,user_id,game_id,wins)
+    VALUES(?,?,?,1)
+    ON CONFLICT(guild_id,user_id,game_id) DO UPDATE SET
+      wins=wins+1,updated_at=CURRENT_TIMESTAMP`).run(g,u,gameId);
+  return db.prepare('SELECT COUNT(*) count FROM casino_game_wins WHERE guild_id=? AND user_id=?').get(g,u).count||0;
+}
+const COMEBACK_EXCLUDED_INCOME_KINDS=new Set([
+  'admin_adjust','player_transfer','transfer_mizi_recovery','loan','bank_withdraw',
+  'asset_trade','market_sale','theft','wager_return','pvp_wager'
+]);
+function trackComebackProgress(g,u,current,next,delta,kind) {
+  if(current<=1000||next<=1000) markAchievementProgress(g,u,'comebackEligible');
+  if(delta<=0||next<1_000_000||COMEBACK_EXCLUDED_INCOME_KINDS.has(kind)) return;
+  if(achievementProgressValue(g,u,'comebackEligible')>0) markAchievementProgress(g,u,'comebackReached');
+}
 const achievementDefinitions=[
   {id:'first_bet',name:'🐣 初試啼聲',description:'完成第 1 次下注',metric:'bets',target:1,titleReward:'cute_bird'},
   {id:'busy_pup',name:'🐶 勤勞萌犬',description:'完成 5 次有收入的工作',metric:'jobs',target:5,titleReward:'cute_dog'},
@@ -2555,22 +2623,67 @@ const achievementDefinitions=[
   {id:'vault_master',name:'💰 金庫達人',description:'金庫餘額達到 100,000',metric:'coins',target:100000},
   {id:'collector',name:'🏎️ 收藏家',description:'持有 10 件資產',metric:'assetCount',target:10},
   {id:'casino_legend',name:'👑 百勝傳奇',description:'累積 100 次獲勝紀錄',metric:'wins',target:100},
-  {id:'all_in_hero',name:'🔥 歐印勇者',description:'在單人賭場遊戲完成 50 次歐印',metric:'allIns',target:ALL_IN_HERO_TARGET,titleReward:'all_in_hero'}
+  {id:'all_in_hero',name:'🔥 歐印勇者',description:'在單人賭場遊戲完成 50 次歐印',metric:'allIns',target:ALL_IN_HERO_TARGET,titleReward:'all_in_hero',rarity:'傳奇'},
+  {id:'transfer_tycoon',name:'💸 金流大亨',description:'玩家轉出本金累計達 100,000,000',metric:'transferAmount',target:100_000_000,titleReward:'transfer_mogul',rarity:'稀有'},
+  {id:'mizi_nemesis',name:'🕵️ 迷子剋星',description:'成功追回迷子盜領的轉帳款項 5 次',metric:'miziRecoveries',target:5,titleReward:'mizi_hunter',rarity:'史詩'},
+  {id:'too_many_zeroes',name:'🔟 零太多了',description:'觸發轉帳「多按一個 0」事件 3 次',metric:'extraZeroEvents',target:3,titleReward:'extra_zero_god',rarity:'史詩'},
+  {id:'gravity_defier',name:'🧱 重力叛徒',description:'堆積木完整完成六次抽取 3 次',metric:'jengaCompletions',target:3,titleReward:'tower_top',rarity:'史詩'},
+  {id:'casino_decathlon',name:'🎰 十項全能',description:'在 10 種不同賭場遊戲中各獲勝至少 1 次',metric:'uniqueGameWins',target:10,titleReward:'casino_all_rounder',rarity:'史詩'},
+  {id:'justice_served',name:'🚓 正義執行',description:'擔任玩家警察並成功阻止團隊搶劫 10 次',metric:'policeStops',target:10,titleReward:'macau_sheriff',rarity:'史詩'},
+  {
+    id:'airline_mogul',name:'✈️ 航空巨擘',description:'持有 5 座不同機場並完成 100 趟航線',
+    metric:'airlineFlights',target:100,titleReward:'sky_overlord',rarity:'傳奇',
+    complete:stats=>stats.airportsOwned>=5&&stats.airlineFlights>=100,
+    progressText:stats=>`機場 ${fmt(Math.min(stats.airportsOwned,5))}/5｜航線 ${fmt(Math.min(stats.airlineFlights,100))}/100`
+  },
+  {id:'best_partner',name:'🐾 最佳拍檔',description:'寵物幸福度至少 80 時贏得 20 場寵物競賽',metric:'happyPetRaceWins',target:20,titleReward:'pet_godfather',rarity:'史詩'},
+  {id:'rise_again',name:'📈 東山再起',description:'金庫曾不高於 1,000，之後靠非轉帳、非管理員收入升至 1,000,000',metric:'comebackReached',target:1,titleReward:'comeback_king',rarity:'傳奇'},
+  {id:'perfect_crime',name:'🎭 完美犯罪',description:'團隊搶劫在最終成功率不高於 25% 時成功',metric:'perfectHeists',target:1,titleReward:'shadow_thief',rarity:'傳奇'},
+  {id:'pomeranian_target',name:'🐕‍🦺 博美指定玩具',description:'被警犬猛博美強制判定搶劫失敗 5 次',metric:'pomeranianVictim',target:5,titleReward:'pomeranian_toy',rarity:'隱藏',hidden:true},
+  {id:'hao_camera',name:'📸 Hao 御用攝影師',description:'完成「幫 Hao 拍女僕寫真」工作 30 次',metric:'haoPhotos',target:30,titleReward:'hao_photographer',rarity:'隱藏',hidden:true},
+  {id:'jail_housekeeper',name:'🧹 小黑屋管家',description:'幫迷子倒垃圾或打掃小黑屋合計 50 次',metric:'miziChores',target:50,titleReward:'jail_keeper',rarity:'隱藏',hidden:true}
 ];
 function achievementStats(g,u) {
-  const ledger=db.prepare("SELECT COUNT(*) actions, SUM(CASE WHEN kind IN ('bet','duel_bet') THEN 1 ELSE 0 END) bets, SUM(CASE WHEN kind='payout' AND delta>0 THEN 1 ELSE 0 END) wins, SUM(CASE WHEN kind='job' AND delta>0 THEN 1 ELSE 0 END) jobs FROM ledger WHERE guild_id=? AND user_id=?").get(g,u);
+  const ledger=db.prepare(`SELECT
+    COUNT(*) actions,
+    SUM(CASE WHEN kind IN ('bet','duel_bet') THEN 1 ELSE 0 END) bets,
+    SUM(CASE WHEN kind='payout' AND delta>0 THEN 1 ELSE 0 END) wins,
+    SUM(CASE WHEN kind='job' AND delta>0 THEN 1 ELSE 0 END) jobs,
+    SUM(CASE WHEN kind='job' AND reason='阻止團隊搶銀行' THEN 1 ELSE 0 END) police_stops,
+    SUM(CASE WHEN kind='airline_revenue' AND delta>0 THEN 1 ELSE 0 END) airline_flights,
+    SUM(CASE WHEN kind='job' AND reason='📸 幫 Hao 拍女僕寫真' THEN 1 ELSE 0 END) hao_photos,
+    SUM(CASE WHEN kind='job' AND reason IN ('🗑️ 幫迷子倒垃圾','🧹 幫迷子打掃小黑屋') THEN 1 ELSE 0 END) mizi_chores
+    FROM ledger WHERE guild_id=? AND user_id=?`).get(g,u);
+  const transfers=db.prepare(`SELECT
+    MIN(COALESCE(SUM(amount),0),100000000) transfer_amount,
+    SUM(CASE WHEN status='recovered' THEN 1 ELSE 0 END) mizi_recoveries,
+    SUM(CASE WHEN event='extra_zero' AND status='completed' THEN 1 ELSE 0 END) extra_zero_events
+    FROM player_transfers WHERE guild_id=? AND sender_id=?`).get(g,u);
+  const progress=Object.fromEntries(db.prepare('SELECT metric,value FROM achievement_progress WHERE guild_id=? AND user_id=?').all(g,u).map(row=>[row.metric,row.value]));
+  const uniqueGameWins=db.prepare('SELECT COUNT(*) count FROM casino_game_wins WHERE guild_id=? AND user_id=?').get(g,u)?.count||0;
+  const completedWebJenga=db.prepare("SELECT COUNT(*) count FROM web_jenga_games WHERE guild_id=? AND user_id=? AND status='settled' AND pulls>=6").get(g,u)?.count||0;
   const owned=assetsOf(g,u);
   return {
     actions:ledger.actions||0,bets:ledger.bets||0,wins:ledger.wins||0,jobs:ledger.jobs||0,allIns:casinoAllInCount(g,u),
     coins:balance(g,u),assetCount:owned.reduce((sum,row)=>sum+row.quantity,0),
-    assetValue:owned.reduce((sum,row)=>sum+(assetCatalog[row.asset_id]?.price||0)*row.quantity,0)
+    assetValue:owned.reduce((sum,row)=>sum+(assetCatalog[row.asset_id]?.price||0)*row.quantity,0),
+    transferAmount:transfers.transfer_amount||0,miziRecoveries:transfers.mizi_recoveries||0,extraZeroEvents:transfers.extra_zero_events||0,
+    jengaCompletions:completedWebJenga+(progress.jengaCompletions||0),uniqueGameWins,
+    policeStops:ledger.police_stops||0,airlineFlights:ledger.airline_flights||0,
+    airportsOwned:owned.filter(row=>row.quantity>0&&airportAssetIds.includes(row.asset_id)).length,
+    happyPetRaceWins:progress.happyPetRaceWins||0,comebackReached:progress.comebackReached||0,
+    perfectHeists:progress.perfectHeists||0,pomeranianVictim:progress.pomeranianVictim||0,
+    haoPhotos:ledger.hao_photos||0,miziChores:ledger.mizi_chores||0
   };
+}
+function achievementComplete(achievement,stats) {
+  return achievement.complete?achievement.complete(stats):(stats[achievement.metric]||0)>=achievement.target;
 }
 function syncAchievements(g,u) {
   const stats=achievementStats(g,u),newlyUnlocked=[];
   const existing=new Set(db.prepare('SELECT achievement_id FROM player_achievements WHERE guild_id=? AND user_id=?').all(g,u).map(row=>row.achievement_id));
   for(const achievement of achievementDefinitions) {
-    if(existing.has(achievement.id)||(stats[achievement.metric]||0)<achievement.target) continue;
+    if(existing.has(achievement.id)||!achievementComplete(achievement,stats)) continue;
     db.prepare('INSERT OR IGNORE INTO player_achievements(guild_id,user_id,achievement_id) VALUES(?,?,?)').run(g,u,achievement.id);
     existing.add(achievement.id); newlyUnlocked.push(achievement);
   }
@@ -2587,9 +2700,17 @@ function achievementLines(g,u) {
   const {stats,unlocked}=syncAchievements(g,u);
   return achievementDefinitions.map(item=>{
     const current=Math.min(stats[item.metric]||0,item.target),done=unlocked.has(item.id);
+    if(item.hidden&&!done) return '❔ **隱藏成就**\n達成特殊條件後才會揭曉';
     const reward=item.titleReward?`｜稱號：${profileTitles[item.titleReward]}`:'';
-    return `${done?'✅':'🔒'} **${item.name}**${reward}\n${item.description}（${fmt(current)}/${fmt(item.target)}）`;
+    const rarity=item.rarity?`｜稀有度：${item.rarity}`:'';
+    const progress=item.progressText?item.progressText(stats):`${fmt(current)}/${fmt(item.target)}`;
+    return `${done?'✅':'🔒'} **${item.name}**${rarity}${reward}\n${item.description}（${progress}）`;
   });
+}
+function achievementBadgeText(g,u) {
+  const rows=db.prepare('SELECT achievement_id FROM player_achievements WHERE guild_id=? AND user_id=? ORDER BY unlocked_at DESC LIMIT 3').all(g,u);
+  const names=rows.map(row=>achievementDefinitions.find(item=>item.id===row.achievement_id)?.name).filter(Boolean);
+  return names.length?names.join('、'):'尚未解鎖';
 }
 function taipeiWeekday() {
   const label=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Taipei',weekday:'short'}).format(new Date());
@@ -3881,6 +4002,7 @@ function scheduleLiarDiceExpiry(token) {
 async function runCompetition(i,token,session) {
   const g=session.guildId,u=session.userId,selected=raceChoiceInfo(g,u,session.type,session.selectedId);
   if(!selected) throw new Error('參賽資產已不存在，請重新建立比賽。');
+  const happyPetAtStart=session.type==='pet'&&selected.pet.happiness>=80;
   validBet(g,u,session.bet);
   consumeStamina(g,u,session.type==='vehicle'?10:8);
   changeBalance(g,u,-session.bet,'bet',u,session.type==='vehicle'?'競速':'寵物競賽');
@@ -3909,6 +4031,7 @@ async function runCompetition(i,token,session) {
   const ranking=[...entrants].sort((a,b)=>b.distance-a.distance),place=ranking.findIndex(entry=>entry.id==='player')+1;
   const multiplier=place===1?(session.type==='vehicle'?2.5:3):place===2?(session.type==='vehicle'?1.2:1.25):0;
   const payout=Math.floor(session.bet*multiplier),settlement=settleGamePayout(g,u,session.bet,payout,session.type==='vehicle'?'競速':'寵物競賽',{allIn:session.allIn});
+  if(session.type==='pet'&&place===1&&happyPetAtStart) incrementAchievementProgress(g,u,'happyPetRaceWins');
   const profit=settlement.credited-session.bet,components=settlement.dog?dogChaseRow(u,settlement.stolen):undefined;
   const resultLines=ranking.map((entry,index)=>`${index+1}. ${entry.icon} **${entry.name}**`).join('\n');
   const resultMessage=competitionResultMessage(session.type,place);
@@ -4242,7 +4365,14 @@ const commands = [
   new SlashCommandBuilder().setName('個人資料').setDescription('查看類似 Tatsu 的玩家資料卡').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
   new SlashCommandBuilder().setName('成就').setDescription('查看自己或其他玩家的成就進度').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
   new SlashCommandBuilder().setName('稱號').setDescription('裝備由成就解鎖的個人稱號').addStringOption(o=>o.setName('選擇').setDescription('選擇已解鎖的稱號').setRequired(true).addChoices(
-    {name:'🐣 萌禽',value:'cute_bird'},{name:'🐶 萌犬',value:'cute_dog'},{name:'🐕 猛犬',value:'fierce_dog'},{name:'🦅 猛禽',value:'fierce_bird'},{name:'🐈 貓的報恩｜派彩全靠運氣',value:'cat_returns'},{name:'🐕 犬的報恩｜派彩全靠運氣',value:'dog_returns'},{name:'🔥 歐印勇者｜傳奇',value:'all_in_hero'},{name:'❌ 取消目前稱號',value:'clear'})),
+    {name:'🐣 萌禽',value:'cute_bird'},{name:'🐶 萌犬',value:'cute_dog'},{name:'🐕 猛犬',value:'fierce_dog'},{name:'🦅 猛禽',value:'fierce_bird'},
+    {name:'🐈 貓的報恩｜派彩全靠運氣',value:'cat_returns'},{name:'🐕 犬的報恩｜派彩全靠運氣',value:'dog_returns'},{name:'🔥 歐印勇者｜傳奇',value:'all_in_hero'},
+    {name:'💸 地下匯兌王｜稀有',value:'transfer_mogul'},{name:'🕵️ 迷子獵人｜史詩',value:'mizi_hunter'},{name:'🔟 手滑之神｜史詩',value:'extra_zero_god'},
+    {name:'🧱 塔頂之人｜史詩',value:'tower_top'},{name:'🎰 全能賭徒｜史詩',value:'casino_all_rounder'},{name:'🚓 澳門警長｜史詩',value:'macau_sheriff'},
+    {name:'✈️ 天空霸主｜傳奇',value:'sky_overlord'},{name:'🐾 毛孩教父｜史詩',value:'pet_godfather'},{name:'📈 逆風之王｜傳奇',value:'comeback_king'},
+    {name:'🎭 無影怪盜｜傳奇',value:'shadow_thief'},{name:'🐕‍🦺 博美指定玩具｜隱藏',value:'pomeranian_toy'},
+    {name:'📸 Hao 御用攝影師｜隱藏',value:'hao_photographer'},{name:'🧹 小黑屋管家｜隱藏',value:'jail_keeper'},
+    {name:'❌ 取消目前稱號',value:'clear'})),
   new SlashCommandBuilder().setName('每日增益').setDescription('查看週一到週日的輪替增益'),
   new SlashCommandBuilder().setName('銀行').setDescription('查詢、借款或償還虛擬金幣')
     .addSubcommand(s=>s.setName('查詢').setDescription('查看金庫、負債與可借額度'))
@@ -5312,6 +5442,9 @@ async function handleInteraction(i) {
     await sleep(2400);
     activeHeists.delete(token);
     if(policeReinforcements||escapeEvent.forceFail||Math.random()*100>=finalChance) {
+      if(escapeEvent.forceFail) {
+        for(const memberId of heist.members) incrementAchievementProgress(i.guildId,memberId,'pomeranianVictim');
+      }
       escapeImage=escapeEvent.scene||(escapeEvent.forceFail?'arrested':'surrounded');
       const jailDurationMs=Math.max(3*60_000,8*60_000-hideoutJailReductionMs(heist.guildId,heist.leaderId));
       const releaseAt=Date.now()+jailDurationMs;
@@ -5364,6 +5497,9 @@ async function handleInteraction(i) {
       const after=changeBalance(i.guildId,memberId,amount,deedReward?'hao_xinyi_deed':successBank.sundayOnly?'casino_vault_heist':'job',memberId,deedReward?'HAO 信義區地契變現均分':successBank.sundayOnly?'賭場中央寶庫搶劫收益':'團隊搶銀行收益');
       return `<@${memberId}>：${fmt(after-before)}`;
     });
+    if(finalChance<=25) {
+      for(const memberId of heist.members) incrementAchievementProgress(i.guildId,memberId,'perfectHeists');
+    }
     const announced=await announceHeistSuccess(i.guildId,new EmbedBuilder().setColor(0x35C46A).setTitle('🚨 團隊搶劫成功公告').setDescription(`**${heist.teamName}**（${heist.members.length} 人）成功突破警方封鎖，從 **${heistBanks[heist.bankId].name}** 帶走金幣！`).addFields(
       {name:'🗺️ 行動地圖',value:map.name,inline:true},
       {name:'🔐 金庫內容',value:`${vault.name}（${heistVaultRewardLabel(vault)}）`,inline:true},
@@ -5864,6 +6000,7 @@ async function handleInteraction(i) {
     if(session.pulls>=jengaPayoutMultipliers.length) {
       const payout=Math.floor(session.bet*jengaCurrentMultiplier(session));
       const settlement=settleGamePayout(session.guildId,session.userId,session.bet,payout,'抽積木',{allIn:session.allIn});
+      incrementAchievementProgress(session.guildId,session.userId,'jengaCompletions');
       session.settled=true;
       jengaGames.delete(token);
       return i.update({embeds:[jengaSettlementEmbed(session,settlement,{completed:true})],components:settlement.dog?[dogChaseRow(session.userId,settlement.stolen)]:[]});
@@ -5999,7 +6136,7 @@ async function handleInteraction(i) {
         {name:'💰 經濟',value:`金庫：${fmt(coins)}\n負債：${fmt(debt(g,target.id))}\n累積獲得：${fmt(earned)}`,inline:true},
         {name:'🎮 紀錄',value:`獲勝紀錄：${ledger.wins||0}\n下注次數：${ledger.bets||0}\n帳務活動：${ledger.actions||0}`,inline:true},
         {name:'🏷️ 特殊稱號',value:playerTitle(g,target.id),inline:true},
-        {name:'🏆 成就收藏',value:`已解鎖：${achievementState.unlocked.size}/${achievementDefinitions.length}\n使用 /成就 查看完整進度`,inline:true},
+        {name:'🏆 成就收藏',value:`已解鎖：${achievementState.unlocked.size}/${achievementDefinitions.length}\n徽章：${achievementBadgeText(g,target.id)}\n使用 /成就 查看完整進度`,inline:true},
         {name:'🏠 豪華資產',value:`持有數量：${assetCount}\n原價總值：${fmt(assetValue)}`,inline:true},
         {name:'🎒 社交與狀態',value:`背包物品：${items}\n隊伍：${team?`${teamDisplayName(team)}（${team.members.length} 人）`:'尚未加入'}\n狀態：${status}`,inline:false},
         {name:`${todayBuff().icon} 今日增益｜${todayBuff().name}`,value:todayBuff().text,inline:false}
@@ -6634,6 +6771,7 @@ async function handleInteraction(i) {
           const payload=heistScenePayload(new EmbedBuilder().setColor(0x35C46A).setTitle('🏦 搶銀行成功！').setDescription(`你成功甩開追兵，實際帶回 **${fmt(robberyEarned)}**！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n金庫：${fmt(next)}${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),'success');
           return publishLatestHeistResult(i,payload);
         }
+        if(escapeEvent.forceFail) incrementAchievementProgress(g,u,'pomeranianVictim');
         const failureScene=escapeEvent.scene||(escapeEvent.forceFail?'arrested':'surrounded');
         const payload=heistScenePayload(new EmbedBuilder().setColor(0x1F1F1F).setTitle('🚔 搶銀行失敗！').setDescription(`${escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美將你撲倒在地，警員立刻上前逮捕。`:'你沒有逃過追捕。'}\n你被關進 **迷子的小黑屋 8 分鐘**。\n期間不能進行任何遊戲或再次賺錢。`),failureScene);
         return publishLatestHeistResult(i,payload);
