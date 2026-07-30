@@ -67,11 +67,12 @@ test('成就累加資料表可安全累計與取最大值',()=>{
   assert.equal(db.prepare("SELECT value FROM achievement_progress WHERE metric='comebackReached'").get().value,1);
 });
 
-test('完成歐印時排入自由大廳自動播報',()=>{
+test('完成歐印時排入賭場公告自動播報',()=>{
   assert.match(source,/recordCasinoAllIn\(g,u,game,bet\)/);
   assert.match(source,/allIn\?recordCasinoAllIn\(g,u,game,bet\):null/);
   assert.match(source,/CREATE TABLE IF NOT EXISTS casino_all_in_events/);
-  assert.match(source,/FREE_LOBBY_CHANNEL_KEYWORD='自由大廳'/);
+  assert.match(source,/CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD='賭場公告'/);
+  assert.doesNotMatch(source,/FREE_LOBBY_CHANNEL_KEYWORD|自由大廳自動播報/);
   assert.match(source,/setInterval\(\(\)=>notifyPendingCasinoAllIns\(\)\.catch/);
   assert.match(source,/allowedMentions:\{parse:\[\]\}/);
 
@@ -89,6 +90,55 @@ test('完成歐印時排入自由大廳自動播報',()=>{
   assert.equal(pending.bet,50000);
   assert.equal(pending.game,'比大小');
   assert.equal(pending.all_in_count,3);
+});
+
+test('機場整合交通事業並支援最多五個同時航班機位',()=>{
+  assert.match(source,/flight_slots INTEGER NOT NULL DEFAULT 1/);
+  assert.match(source,/const AIRLINE_MAX_FLIGHT_SLOTS=5/);
+  assert.match(source,/const AIRLINE_SLOT_COSTS=\{2:1000000,3:2500000,4:5000000,5:10000000\}/);
+  assert.match(source,/changeBalanceUnlocked\(g,u,-cost,'airline_slot'/);
+  assert.match(source,/INSERT INTO airline_flights\(guild_id,user_id,flight_slot,/);
+  assert.match(source,/airlineAircraftAvailability\(g,u,company\.aircraft_id,flights\)\.available<1/);
+  assert.match(source,/setCustomId\(`airline_claim_select:\$\{u\}`\)/);
+  assert.match(source,/setCustomId\(`airline_buy_slot:\$\{u\}`\)/);
+  assert.match(source,/function transportHubEmbed\(g,u,notice=''\)/);
+  assert.match(source,/setCustomId\(`transport_hub_airline:\$\{u\}`\)/);
+  assert.match(source,/i\.commandName==='交通事業'[\s\S]+transportHubEmbed\(g,u\)/);
+
+  const db=new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE airline_flights (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, airport_id TEXT NOT NULL,
+    aircraft_id TEXT NOT NULL, route_id TEXT NOT NULL, gross_revenue INTEGER NOT NULL,
+    operating_cost INTEGER NOT NULL, started_at INTEGER NOT NULL, completes_at INTEGER NOT NULL,
+    dm_notified_at INTEGER, channel_notified_at INTEGER,
+    PRIMARY KEY (guild_id,user_id)
+  );
+  INSERT INTO airline_flights(
+    guild_id,user_id,airport_id,aircraft_id,route_id,gross_revenue,
+    operating_cost,started_at,completes_at,dm_notified_at,channel_notified_at
+  ) VALUES('guild','player','airport','aircraft','route',500000,200000,1000,2000,NULL,NULL);
+  ALTER TABLE airline_flights RENAME TO airline_flights_legacy;
+  CREATE TABLE airline_flights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, flight_slot INTEGER NOT NULL,
+    airport_id TEXT NOT NULL, aircraft_id TEXT NOT NULL, route_id TEXT NOT NULL,
+    gross_revenue INTEGER NOT NULL, operating_cost INTEGER NOT NULL,
+    started_at INTEGER NOT NULL, completes_at INTEGER NOT NULL,
+    dm_notified_at INTEGER, channel_notified_at INTEGER,
+    UNIQUE (guild_id,user_id,flight_slot)
+  );
+  INSERT INTO airline_flights(
+    guild_id,user_id,flight_slot,airport_id,aircraft_id,route_id,
+    gross_revenue,operating_cost,started_at,completes_at,dm_notified_at,channel_notified_at
+  )
+  SELECT guild_id,user_id,1,airport_id,aircraft_id,route_id,
+    gross_revenue,operating_cost,started_at,completes_at,dm_notified_at,channel_notified_at
+  FROM airline_flights_legacy;
+  DROP TABLE airline_flights_legacy;`);
+  const migrated=db.prepare('SELECT * FROM airline_flights WHERE guild_id=? AND user_id=?').get('guild','player');
+  assert.equal(migrated.flight_slot,1);
+  assert.equal(migrated.gross_revenue,500000);
+  assert.ok(migrated.id>0);
 });
 
 test('三種交通場站可註冊公司行號並營運收益',()=>{
@@ -150,4 +200,13 @@ test('交通事業更新公告包含三種場站與註冊費',()=>{
   assert.match(update.summary,/火車站、客運站與貨運站/);
   assert.match(update.changes.join('\n'),/300,000 金幣手續費/);
   assert.match(update.note,/賭場中央寶庫/);
+});
+
+test('交通事業整合與多機位更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-07-31-transport-hub-airline-slots.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-07-31-transport-hub-airline-slots');
+  assert.equal(update.changes.length,7);
+  assert.match(update.summary,/交通事業/);
+  assert.match(update.changes.join('\n'),/5 個機位/);
+  assert.match(update.changes.join('\n'),/賭場公告/);
 });

@@ -50,6 +50,7 @@ const ECONOMY_SINK_LABELS={
   vehicle_mod:'載具改裝',
   airline_registration:'航空公司註冊費',
   airline_operation:'航空公司航線營運成本',
+  airline_slot:'航空公司額外機位',
   transport_registration:'交通公司行號註冊費',
   transport_operation:'交通事業營運成本',
   transfer_fee:'玩家轉帳手續費'
@@ -534,13 +535,16 @@ db.exec(`
     airport_id TEXT,
     aircraft_id TEXT,
     route_id TEXT,
+    flight_slots INTEGER NOT NULL DEFAULT 1,
     registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id,user_id)
   );
   CREATE TABLE IF NOT EXISTS airline_flights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
+    flight_slot INTEGER NOT NULL,
     airport_id TEXT NOT NULL,
     aircraft_id TEXT NOT NULL,
     route_id TEXT NOT NULL,
@@ -550,8 +554,10 @@ db.exec(`
     completes_at INTEGER NOT NULL,
     dm_notified_at INTEGER,
     channel_notified_at INTEGER,
-    PRIMARY KEY (guild_id,user_id)
+    UNIQUE (guild_id,user_id,flight_slot)
   );
+  CREATE INDEX IF NOT EXISTS idx_airline_flights_owner
+    ON airline_flights(guild_id,user_id,completes_at);
   CREATE TABLE IF NOT EXISTS transport_companies (
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
@@ -606,12 +612,61 @@ if(!db.prepare('PRAGMA table_info(bank_accounts)').all().some(column=>column.nam
 if(!db.prepare('PRAGMA table_info(player_pets)').all().some(column=>column.name==='nickname')) {
   db.exec('ALTER TABLE player_pets ADD COLUMN nickname TEXT');
 }
+if(!db.prepare('PRAGMA table_info(airline_companies)').all().some(column=>column.name==='flight_slots')) {
+  db.exec('ALTER TABLE airline_companies ADD COLUMN flight_slots INTEGER NOT NULL DEFAULT 1');
+}
 if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='dm_notified_at')) {
   db.exec('ALTER TABLE airline_flights ADD COLUMN dm_notified_at INTEGER');
 }
 if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='channel_notified_at')) {
   db.exec('ALTER TABLE airline_flights ADD COLUMN channel_notified_at INTEGER');
 }
+function migrateAirlineFlightsForSlots() {
+  let columns=db.prepare('PRAGMA table_info(airline_flights)').all();
+  if(!columns.some(column=>column.name==='id')) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec(`
+        ALTER TABLE airline_flights RENAME TO airline_flights_legacy;
+        CREATE TABLE airline_flights (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          guild_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          flight_slot INTEGER NOT NULL,
+          airport_id TEXT NOT NULL,
+          aircraft_id TEXT NOT NULL,
+          route_id TEXT NOT NULL,
+          gross_revenue INTEGER NOT NULL,
+          operating_cost INTEGER NOT NULL,
+          started_at INTEGER NOT NULL,
+          completes_at INTEGER NOT NULL,
+          dm_notified_at INTEGER,
+          channel_notified_at INTEGER,
+          UNIQUE (guild_id,user_id,flight_slot)
+        );
+        INSERT INTO airline_flights(
+          guild_id,user_id,flight_slot,airport_id,aircraft_id,route_id,
+          gross_revenue,operating_cost,started_at,completes_at,dm_notified_at,channel_notified_at
+        )
+        SELECT guild_id,user_id,1,airport_id,aircraft_id,route_id,
+          gross_revenue,operating_cost,started_at,completes_at,dm_notified_at,channel_notified_at
+        FROM airline_flights_legacy;
+        DROP TABLE airline_flights_legacy;
+      `);
+      db.exec('COMMIT');
+    } catch(error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    columns=db.prepare('PRAGMA table_info(airline_flights)').all();
+  }
+  if(!columns.some(column=>column.name==='flight_slot')) {
+    db.exec('ALTER TABLE airline_flights ADD COLUMN flight_slot INTEGER NOT NULL DEFAULT 1');
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_airline_flights_slot ON airline_flights(guild_id,user_id,flight_slot)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_airline_flights_owner ON airline_flights(guild_id,user_id,completes_at)');
+}
+migrateAirlineFlightsForSlots();
 if(!db.prepare('PRAGMA table_info(web_scratch_tickets)').all().some(column=>column.name==='all_in')) {
   db.exec('ALTER TABLE web_scratch_tickets ADD COLUMN all_in INTEGER NOT NULL DEFAULT 0');
 }
@@ -1274,6 +1329,8 @@ const weeklyMysteryIds=weeklyMysteryNames.map((name,index)=>{
 const assetCategories=['房地產','郵輪','汽車','機車','飛行器','收藏品','武器','彈藥'];
 const AIRLINE_REGISTRATION_FEE=500000;
 const AIRLINE_COMPLETION_CHANNEL_ID='1531857208781045831';
+const AIRLINE_MAX_FLIGHT_SLOTS=5;
+const AIRLINE_SLOT_COSTS={2:1000000,3:2500000,4:5000000,5:10000000};
 const TRANSPORT_REGISTRATION_FEE=300000;
 const TRANSPORT_COMPLETION_CHANNEL_ID=AIRLINE_COMPLETION_CHANNEL_ID;
 const airportAssetIds=[
@@ -1325,14 +1382,30 @@ const transportRoutes={
 function airlineCompany(g,u) {
   return db.prepare('SELECT * FROM airline_companies WHERE guild_id=? AND user_id=?').get(g,u)||null;
 }
-function airlineFlight(g,u) {
-  return db.prepare('SELECT * FROM airline_flights WHERE guild_id=? AND user_id=?').get(g,u)||null;
+function airlineFlights(g,u) {
+  return db.prepare('SELECT * FROM airline_flights WHERE guild_id=? AND user_id=? ORDER BY flight_slot,id').all(g,u);
+}
+function airlineFlightById(g,u,flightId) {
+  if(!Number.isSafeInteger(flightId)||flightId<1) return null;
+  return db.prepare('SELECT * FROM airline_flights WHERE id=? AND guild_id=? AND user_id=?').get(flightId,g,u)||null;
+}
+function firstCompletedAirlineFlight(g,u) {
+  return db.prepare('SELECT * FROM airline_flights WHERE guild_id=? AND user_id=? AND completes_at<=? ORDER BY completes_at,id LIMIT 1').get(g,u,Date.now())||null;
 }
 function ownedAirports(g,u) {
   return airportAssetIds.filter(id=>assetQuantity(g,u,id)>0);
 }
 function ownedPassengerAirliners(g,u) {
   return assetsOf(g,u).map(row=>row.asset_id).filter(id=>passengerAirlinerIds.has(id));
+}
+function airlineAircraftAvailability(g,u,assetId,flights=airlineFlights(g,u)) {
+  const owned=assetQuantity(g,u,assetId);
+  const flying=flights.filter(flight=>flight.aircraft_id===assetId).length;
+  return {owned,flying,available:Math.max(0,owned-flying)};
+}
+function nextAirlineSlotCost(company) {
+  const nextSlot=Math.max(1,Number(company?.flight_slots)||1)+1;
+  return nextSlot<=AIRLINE_MAX_FLIGHT_SLOTS?AIRLINE_SLOT_COSTS[nextSlot]||null:null;
 }
 function airlinerRevenueMultiplier(assetId) {
   const price=assetCatalog[assetId]?.price||0;
@@ -1365,45 +1438,75 @@ function airlineSelectionName(id,fallback='尚未選擇') {
   return assetCatalog[id]?.name||airlineRoutes[id]?.name||fallback;
 }
 function airlineDashboardEmbed(g,u,notice='') {
-  const airports=ownedAirports(g,u),airliners=ownedPassengerAirliners(g,u),company=airlineCompany(g,u),flight=airlineFlight(g,u);
+  const airports=ownedAirports(g,u),airliners=ownedPassengerAirliners(g,u),company=airlineCompany(g,u);
   if(!airports.length) {
-    return new EmbedBuilder().setColor(0x607D8B).setTitle('🛫 機場經營中心').setDescription(`${notice?`${notice}\n\n`:''}你目前沒有機場。\n\n請到 \`/資產商城 分類:房地產\` 購買以下其中一座：\n${airportAssetIds.map(id=>`• ${assetCatalog[id].name}｜**${fmt(assetCatalog[id].price)}**｜營收 ×${assetCatalog[id].airlineMultiplier}`).join('\n')}\n\n購買機場後，需再支付 **${fmt(AIRLINE_REGISTRATION_FEE)}** 手續費註冊航空公司才能開啟航線。`);
+    return new EmbedBuilder().setColor(0x607D8B).setTitle('🛫 航空運輸事業').setDescription(`${notice?`${notice}\n\n`:''}你目前沒有機場。\n\n請到 \`/資產商城 分類:房地產\` 購買以下其中一座：\n${airportAssetIds.map(id=>`• ${assetCatalog[id].name}｜**${fmt(assetCatalog[id].price)}**｜營收 ×${assetCatalog[id].airlineMultiplier}`).join('\n')}\n\n購買機場後，需再支付 **${fmt(AIRLINE_REGISTRATION_FEE)}** 手續費註冊航空公司才能開啟航線。\n\n此功能已整合至 \`/交通事業\`。`);
   }
   if(!company) {
-    return new EmbedBuilder().setColor(0x1565C0).setTitle('🛫 機場經營中心').setDescription(`${notice?`${notice}\n\n`:''}你已擁有 **${airports.length} 座機場**，下一步是註冊航空公司。\n\n註冊手續費：**${fmt(AIRLINE_REGISTRATION_FEE)}**\n註冊後可選擇自己的機場、客機與航線開始營運。\n\n目前金庫：**${fmt(balance(g,u))}**`);
+    return new EmbedBuilder().setColor(0x1565C0).setTitle('🛫 航空運輸事業').setDescription(`${notice?`${notice}\n\n`:''}你已擁有 **${airports.length} 座機場**，下一步是註冊航空公司。\n\n註冊手續費：**${fmt(AIRLINE_REGISTRATION_FEE)}**\n註冊後可選擇自己的機場、客機與航線開始營運。公司起始擁有 **1 個機位**，最多可擴充至 **${AIRLINE_MAX_FLIGHT_SLOTS} 個機位**。\n\n目前金庫：**${fmt(balance(g,u))}**`);
   }
+  const flights=airlineFlights(g,u);
+  const slots=Math.max(1,Math.min(AIRLINE_MAX_FLIGHT_SLOTS,Number(company.flight_slots)||1));
   const airport=assetCatalog[company.airport_id],aircraft=assetCatalog[company.aircraft_id],route=airlineRoutes[company.route_id];
-  const flightText=flight
-    ? Date.now()>=flight.completes_at
-      ? `✅ **航班已抵達，可以領取營收**\n${airlineSelectionName(flight.route_id)}｜預計營收 **${fmt(flight.gross_revenue)}**`
-      : `🛫 **航班執飛中**\n${airlineSelectionName(flight.route_id)}｜<t:${Math.floor(flight.completes_at/1000)}:R> 抵達\n預計營收：**${fmt(flight.gross_revenue)}**`
-    : '目前沒有執飛中的航班。';
+  const flightText=Array.from({length:slots},(_,index)=>{
+    const flight=flights.find(row=>row.flight_slot===index+1);
+    if(!flight) return `**機位 #${index+1}**｜⚪ 待命中`;
+    const status=Date.now()>=flight.completes_at
+      ? '✅ 已抵達，可從下方選單領取營收'
+      : `🛫 執飛中，<t:${Math.floor(flight.completes_at/1000)}:R> 抵達`;
+    return `**機位 #${flight.flight_slot}**｜${status}\n└ ${airlineSelectionName(flight.aircraft_id)}｜${airlineSelectionName(flight.route_id)}｜**${fmt(flight.gross_revenue)}**`;
+  }).join('\n');
   const routeEstimate=airport&&aircraft&&route
     ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)))}**（另有市場需求浮動）\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜航程：**${airlineDurationLabel(route.durationMs)}**`
     : '';
-  return new EmbedBuilder().setColor(flight&&Date.now()>=flight.completes_at?0x35C46A:0x0288D1).setTitle(`✈️ ${company.company_name}`).setDescription(`${notice?`${notice}\n\n`:''}**營運配置**\n機場：${airlineSelectionName(company.airport_id)}\n客機：${airlineSelectionName(company.aircraft_id)}\n航線：${airlineSelectionName(company.route_id)}\n\n**航班狀態**\n${flightText}${routeEstimate}\n\n持有客機：**${airliners.length} 架**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+  const nextCost=nextAirlineSlotCost(company);
+  const slotText=nextCost?`下一機位：**${fmt(nextCost)}**`:'機位已擴充至上限';
+  return new EmbedBuilder().setColor(flights.some(flight=>Date.now()>=flight.completes_at)?0x35C46A:0x0288D1).setTitle(`✈️ ${company.company_name}`).setDescription(`${notice?`${notice}\n\n`:''}**營運配置**\n機場：${airlineSelectionName(company.airport_id)}\n客機：${airlineSelectionName(company.aircraft_id)}\n航線：${airlineSelectionName(company.route_id)}\n\n**航班與機位（${flights.length}/${slots}）**\n${flightText}${routeEstimate}\n\n持有客機種類：**${airliners.length} 種**｜${slotText}\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
 }
 function airlineDashboardComponents(g,u) {
   const airports=ownedAirports(g,u),company=airlineCompany(g,u);
-  if(!airports.length) return [];
+  const homeButton=()=>new ButtonBuilder().setCustomId(`transport_hub_home:${u}`).setLabel('交通事業首頁').setEmoji('🧭').setStyle(ButtonStyle.Secondary);
+  if(!airports.length) return [new ActionRowBuilder().addComponents(homeButton())];
   if(!company) {
-    return [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`airline_register:${u}`).setLabel(`註冊航空公司｜${fmt(AIRLINE_REGISTRATION_FEE)}`).setEmoji('🏢').setStyle(ButtonStyle.Success))];
+    return [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`airline_register:${u}`).setLabel(`註冊航空公司｜${fmt(AIRLINE_REGISTRATION_FEE)}`).setEmoji('🏢').setStyle(ButtonStyle.Success),
+      homeButton()
+    )];
   }
-  const rows=[],airliners=ownedPassengerAirliners(g,u),flight=airlineFlight(g,u);
+  const rows=[],airliners=ownedPassengerAirliners(g,u),flights=airlineFlights(g,u);
+  const slots=Math.max(1,Math.min(AIRLINE_MAX_FLIGHT_SLOTS,Number(company.flight_slots)||1));
   rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`airline_airport:${u}`).setPlaceholder('選擇營運機場').addOptions(airports.map(id=>({
     label:assetCatalog[id].name.slice(0,100),value:id,description:`第 ${assetCatalog[id].airportTier} 級｜航線營收 ×${assetCatalog[id].airlineMultiplier}`,default:company.airport_id===id
   })))));
-  if(airliners.length) rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`airline_aircraft:${u}`).setPlaceholder('選擇自己的客機').addOptions(airliners.slice(0,25).map(id=>({
-    label:assetCatalog[id].name.slice(0,100),value:id,description:`營收倍率 ×${airlinerRevenueMultiplier(id).toFixed(2)}｜${assetCatalog[id].rarity||'一般'}`,default:company.aircraft_id===id
-  })))));
+  if(airliners.length) rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`airline_aircraft:${u}`).setPlaceholder('選擇自己的客機').addOptions(airliners.slice(0,25).map(id=>{
+    const availability=airlineAircraftAvailability(g,u,id,flights);
+    return {
+      label:assetCatalog[id].name.slice(0,100),value:id,
+      description:`可用 ${availability.available}/${availability.owned}｜執飛 ${availability.flying}｜營收 ×${airlinerRevenueMultiplier(id).toFixed(2)}`,
+      default:company.aircraft_id===id
+    };
+  }))));
   rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`airline_route:${u}`).setPlaceholder('選擇要經營的航線').addOptions(Object.entries(airlineRoutes).map(([id,route])=>({
     label:route.name.slice(0,100),value:id,description:`機場 Lv.${route.minTier}｜${airlineDurationLabel(route.durationMs)}｜成本 ${fmt(route.operatingCost)}`,default:company.route_id===id
   })))));
-  const ready=flight&&Date.now()>=flight.completes_at;
-  const actionButtons=[flight
-    ? new ButtonBuilder().setCustomId(ready?`airline_claim:${u}`:`airline_refresh:${u}`).setLabel(ready?'領取航線營收':'重新整理航班狀態').setEmoji(ready?'💰':'🔄').setStyle(ready?ButtonStyle.Success:ButtonStyle.Secondary)
-    : new ButtonBuilder().setCustomId(`airline_start:${u}`).setLabel('確認配置並開啟航線').setEmoji('🛫').setStyle(ButtonStyle.Primary).setDisabled(!airliners.length)];
-  if(!flight||ready) actionButtons.push(new ButtonBuilder().setCustomId(`airline_refresh:${u}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary));
+  const readyFlights=flights.filter(flight=>Date.now()>=flight.completes_at);
+  if(readyFlights.length) rows.push(new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`airline_claim_select:${u}`).setPlaceholder('選擇已抵達航班並領取營收').addOptions(readyFlights.slice(0,25).map(flight=>({
+      label:`機位 #${flight.flight_slot}｜${airlineSelectionName(flight.route_id)}`.slice(0,100),
+      value:String(flight.id),
+      description:`${airlineSelectionName(flight.aircraft_id)}｜可領 ${fmt(flight.gross_revenue)}`.slice(0,100)
+    })))
+  ));
+  const availability=company.aircraft_id?airlineAircraftAvailability(g,u,company.aircraft_id,flights):{available:0};
+  const route=airlineRoutes[company.route_id],airport=assetCatalog[company.airport_id];
+  const validConfiguration=airports.includes(company.airport_id)&&airliners.includes(company.aircraft_id)&&availability.available>0&&route&&airport?.airportTier>=route.minTier;
+  const nextCost=nextAirlineSlotCost(company);
+  const actionButtons=[
+    new ButtonBuilder().setCustomId(`airline_start:${u}`).setLabel('派遣新航班').setEmoji('🛫').setStyle(ButtonStyle.Primary).setDisabled(flights.length>=slots||!validConfiguration),
+    new ButtonBuilder().setCustomId(`airline_buy_slot:${u}`).setLabel(nextCost?`購買機位｜${fmt(nextCost)}`:'機位已達上限').setEmoji('➕').setStyle(ButtonStyle.Success).setDisabled(!nextCost),
+    new ButtonBuilder().setCustomId(`airline_refresh:${u}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+    homeButton()
+  ];
   rows.push(new ActionRowBuilder().addComponents(actionButtons));
   return rows;
 }
@@ -1418,10 +1521,13 @@ function updateAirlineSelection(g,u,column,value) {
 function startAirlineFlight(g,u) {
   const company=airlineCompany(g,u);
   if(!company) throw new Error('請先註冊航空公司');
-  if(airlineFlight(g,u)) throw new Error('目前已有航班執飛中');
+  const flights=airlineFlights(g,u);
+  const slots=Math.max(1,Math.min(AIRLINE_MAX_FLIGHT_SLOTS,Number(company.flight_slots)||1));
+  if(flights.length>=slots) throw new Error(`目前 ${slots} 個機位都在使用中，請等待航班抵達或購買額外機位`);
   const airport=assetCatalog[company.airport_id],aircraft=assetCatalog[company.aircraft_id],route=airlineRoutes[company.route_id];
   if(!airport||!airportAssetIds.includes(company.airport_id)||assetQuantity(g,u,company.airport_id)<1) throw new Error('請先選擇自己持有的機場');
   if(!aircraft||!passengerAirlinerIds.has(company.aircraft_id)||assetQuantity(g,u,company.aircraft_id)<1) throw new Error('請先選擇自己持有的客機');
+  if(airlineAircraftAvailability(g,u,company.aircraft_id,flights).available<1) throw new Error('這款客機目前全部執飛中；請改選其他客機，或再購買一架同型客機');
   if(!route) throw new Error('請先選擇航線');
   if(airport.airportTier<route.minTier) throw new Error(`${route.name} 需要第 ${route.minTier} 級機場，目前選擇的機場無法開航`);
   if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理航空公司');
@@ -1431,27 +1537,48 @@ function startAirlineFlight(g,u) {
   const demandMultiplier=0.90+Math.random()*0.21;
   const grossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*demandMultiplier);
   const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
+  const flightSlot=Array.from({length:slots},(_,index)=>index+1).find(slot=>!flights.some(flight=>flight.flight_slot===slot));
+  let flightId=0;
   db.exec('BEGIN IMMEDIATE');
   try {
     changeBalanceUnlocked(g,u,-route.operatingCost,'airline_operation',u,`${company.company_name}｜${route.name} 營運成本`);
     db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(staminaUsed,g,u);
-    db.prepare('INSERT INTO airline_flights(guild_id,user_id,airport_id,aircraft_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?)')
-      .run(g,u,company.airport_id,company.aircraft_id,company.route_id,grossRevenue,route.operatingCost,startedAt,completesAt);
+    const inserted=db.prepare('INSERT INTO airline_flights(guild_id,user_id,flight_slot,airport_id,aircraft_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+      .run(g,u,flightSlot,company.airport_id,company.aircraft_id,company.route_id,grossRevenue,route.operatingCost,startedAt,completesAt);
+    flightId=Number(inserted.lastInsertRowid);
     db.exec('COMMIT');
   } catch(error) {
     db.exec('ROLLBACK');
     throw error;
   }
-  return {company,airport,aircraft,route,grossRevenue,staminaUsed,startedAt,completesAt};
+  return {company,airport,aircraft,route,grossRevenue,staminaUsed,startedAt,completesAt,flightId,flightSlot};
 }
-function claimAirlineRevenue(g,u) {
-  const company=airlineCompany(g,u),flight=airlineFlight(g,u);
+function buyAdditionalAirlineSlot(g,u) {
+  const company=airlineCompany(g,u);
+  if(!company) throw new Error('請先註冊航空公司');
+  const cost=nextAirlineSlotCost(company);
+  if(!cost) throw new Error(`航空公司最多只能擁有 ${AIRLINE_MAX_FLIGHT_SLOTS} 個機位`);
+  if(balance(g,u)<cost) throw new Error(`金庫不足，購買下一個機位需要 ${fmt(cost)}`);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    changeBalanceUnlocked(g,u,-cost,'airline_slot',u,`${company.company_name}｜購買第 ${Number(company.flight_slots||1)+1} 個機位`);
+    db.prepare('UPDATE airline_companies SET flight_slots=flight_slots+1,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(g,u);
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  const updated=airlineCompany(g,u);
+  return {cost,slots:updated.flight_slots,next:balance(g,u)};
+}
+function claimAirlineRevenue(g,u,flightId) {
+  const company=airlineCompany(g,u),flight=airlineFlightById(g,u,flightId);
   if(!flight) throw new Error('目前沒有可結算的航班');
   if(Date.now()<flight.completes_at) throw new Error('航班尚未抵達，請稍後再領取營收');
   db.exec('BEGIN IMMEDIATE');
   try {
     const next=changeBalanceUnlocked(g,u,flight.gross_revenue,'airline_revenue',u,`${company?.company_name||'航空公司'}｜${airlineSelectionName(flight.route_id)} 航線營收`);
-    db.prepare('DELETE FROM airline_flights WHERE guild_id=? AND user_id=?').run(g,u);
+    db.prepare('DELETE FROM airline_flights WHERE id=? AND guild_id=? AND user_id=?').run(flight.id,g,u);
     db.exec('COMMIT');
     return {flight,next,profit:flight.gross_revenue-flight.operating_cost};
   } catch(error) {
@@ -1487,7 +1614,7 @@ async function notifyCompletedAirlineFlights() {
             embeds:[new EmbedBuilder()
               .setColor(0x35C46A)
               .setTitle('✈️ 航線行程已完成')
-              .setDescription(`你的航班已安全抵達目的地！\n\n請回到伺服器開啟航空公司面板，領取本次航線營收。`)
+              .setDescription(`你的機位 #${flight.flight_slot} 航班已安全抵達目的地！\n\n請回到伺服器使用 \`/交通事業\` 開啟航空運輸面板，領取本次航線營收。`)
               .addFields(
                 {name:'🏢 航空公司',value:companyName,inline:false},
                 {name:'🗺️ 完成航線',value:routeName,inline:true},
@@ -1497,17 +1624,17 @@ async function notifyCompletedAirlineFlights() {
                 {name:'📈 本航班淨收益',value:fmt(profit),inline:true},
                 {name:'🕒 完成時間',value:`<t:${completedTimestamp}:F>`,inline:false}
               )
-              .setFooter({text:'營收需由玩家在航空公司面板中手動領取'})
+              .setFooter({text:'營收需由玩家在交通事業的航空運輸面板中手動領取'})
               .setTimestamp(new Date(flight.completes_at))],
             allowedMentions:{parse:[]}
           });
-          db.prepare('UPDATE airline_flights SET dm_notified_at=? WHERE guild_id=? AND user_id=? AND started_at=?')
-            .run(Date.now(),flight.guild_id,flight.user_id,flight.started_at);
+          db.prepare('UPDATE airline_flights SET dm_notified_at=? WHERE id=?')
+            .run(Date.now(),flight.id);
         } catch(error) {
           const errorCode=Number(error?.code||error?.rawError?.code||0);
           if(errorCode===50007) {
-            db.prepare('UPDATE airline_flights SET dm_notified_at=-1 WHERE guild_id=? AND user_id=? AND started_at=?')
-              .run(flight.guild_id,flight.user_id,flight.started_at);
+            db.prepare('UPDATE airline_flights SET dm_notified_at=-1 WHERE id=?')
+              .run(flight.id);
             console.warn(`航線完成私訊無法送達（玩家關閉私訊） guild=${flight.guild_id} user=${flight.user_id}`);
           } else {
             console.error(`航線完成私訊失敗 guild=${flight.guild_id} user=${flight.user_id}: ${error.message}`);
@@ -1522,7 +1649,7 @@ async function notifyCompletedAirlineFlights() {
             embeds:[new EmbedBuilder()
               .setColor(0x0288D1)
               .setTitle('📡 航線完成推播')
-              .setDescription(`玩家 <@${flight.user_id}> 的航空行程已完成，航班已安全抵達。`)
+              .setDescription(`玩家 <@${flight.user_id}> 的機位 #${flight.flight_slot} 航空行程已完成，航班已安全抵達。`)
               .addFields(
                 {name:'🏢 航空公司',value:companyName,inline:false},
                 {name:'🗺️ 完成航線',value:routeName,inline:true},
@@ -1540,8 +1667,8 @@ async function notifyCompletedAirlineFlights() {
             try { await message.crosspost(); }
             catch(error) { console.error(`航線完成公告發布失敗 channel=${AIRLINE_COMPLETION_CHANNEL_ID}: ${error.message}`); }
           }
-          db.prepare('UPDATE airline_flights SET channel_notified_at=? WHERE guild_id=? AND user_id=? AND started_at=?')
-            .run(Date.now(),flight.guild_id,flight.user_id,flight.started_at);
+          db.prepare('UPDATE airline_flights SET channel_notified_at=? WHERE id=?')
+            .run(Date.now(),flight.id);
         } catch(error) {
           console.error(`航線完成頻道推播失敗 channel=${AIRLINE_COMPLETION_CHANNEL_ID} guild=${flight.guild_id} user=${flight.user_id}: ${error.message}`);
         }
@@ -1584,6 +1711,28 @@ function registerTransportCompany(g,u,name) {
 function transportSelectionName(id,fallback='尚未選擇') {
   return assetCatalog[id]?.name||transportRoutes[id]?.name||fallback;
 }
+function transportHubEmbed(g,u,notice='') {
+  const airline=airlineCompany(g,u),flights=airlineFlights(g,u);
+  const airports=ownedAirports(g,u),airliners=ownedPassengerAirliners(g,u);
+  const ground=transportCompany(g,u),stations=ownedTransportStations(g,u),operation=transportOperation(g,u);
+  const airlineStatus=airline
+    ? `公司：**${airline.company_name}**\n機場：**${airports.length} 座**｜客機種類：**${airliners.length} 種**\n航班：**${flights.length}/${Math.max(1,Number(airline.flight_slots)||1)} 個機位使用中**`
+    : `尚未註冊航空公司\n持有機場：**${airports.length} 座**｜客機種類：**${airliners.length} 種**`;
+  const groundStatus=ground
+    ? `公司：**${ground.company_name}**\n場站：**${stations.length} 座**｜狀態：**${operation?'營運中':'待命中'}**`
+    : `尚未註冊交通公司行號\n持有火車站、客運站或貨運站：**${stations.length} 座**`;
+  return new EmbedBuilder()
+    .setColor(0x0D47A1)
+    .setTitle('🧭 交通事業營運總部')
+    .setDescription(`${notice?`${notice}\n\n`:''}機場航空、鐵路、城際客運與物流貨運現已集中在同一個交通事業入口。請選擇要管理的事業。\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路運輸**\n${groundStatus}\n\n目前金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .setFooter({text:'舊有 /機場 指令仍可使用，並會直接開啟航空運輸面板'});
+}
+function transportHubComponents(g,u) {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`transport_hub_airline:${u}`).setLabel('航空運輸').setEmoji('✈️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`transport_hub_ground:${u}`).setLabel('火車・客運・貨運').setEmoji('🚉').setStyle(ButtonStyle.Success)
+  )];
+}
 function transportDashboardEmbed(g,u,notice='') {
   const stations=ownedTransportStations(g,u),company=transportCompany(g,u),operation=transportOperation(g,u);
   if(!stations.length) {
@@ -1615,10 +1764,12 @@ function transportDashboardEmbed(g,u,notice='') {
 }
 function transportDashboardComponents(g,u) {
   const stations=ownedTransportStations(g,u),company=transportCompany(g,u);
-  if(!stations.length) return [];
+  const homeButton=()=>new ButtonBuilder().setCustomId(`transport_hub_home:${u}`).setLabel('交通事業首頁').setEmoji('🧭').setStyle(ButtonStyle.Secondary);
+  if(!stations.length) return [new ActionRowBuilder().addComponents(homeButton())];
   if(!company) {
     return [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`transport_register:${u}`).setLabel(`註冊公司行號｜${fmt(TRANSPORT_REGISTRATION_FEE)}`).setEmoji('🏢').setStyle(ButtonStyle.Success)
+      new ButtonBuilder().setCustomId(`transport_register:${u}`).setLabel(`註冊公司行號｜${fmt(TRANSPORT_REGISTRATION_FEE)}`).setEmoji('🏢').setStyle(ButtonStyle.Success),
+      homeButton()
     )];
   }
   const rows=[],operation=transportOperation(g,u),station=assetCatalog[company.station_id];
@@ -1656,6 +1807,7 @@ function transportDashboardComponents(g,u) {
     ? new ButtonBuilder().setCustomId(ready?`transport_claim:${u}`:`transport_refresh:${u}`).setLabel(ready?'領取交通事業營收':'重新整理營運狀態').setEmoji(ready?'💰':'🔄').setStyle(ready?ButtonStyle.Success:ButtonStyle.Secondary)
     : new ButtonBuilder().setCustomId(`transport_start:${u}`).setLabel('確認配置並開始營運').setEmoji('🚦').setStyle(ButtonStyle.Primary).setDisabled(!validConfiguration)];
   if(!operation||ready) actionButtons.push(new ButtonBuilder().setCustomId(`transport_refresh:${u}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary));
+  actionButtons.push(homeButton());
   rows.push(new ActionRowBuilder().addComponents(actionButtons));
   return rows;
 }
@@ -2847,30 +2999,30 @@ function playerTitle(g,u) {
 }
 const ALL_IN_HERO_TARGET=50;
 const allInTitleNotificationsInFlight=new Set();
-const FREE_LOBBY_CHANNEL_KEYWORD='自由大廳';
+const CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD='賭場公告';
 const allInBroadcastsInFlight=new Set();
 function casinoAllInCount(g,u) {
   return db.prepare('SELECT all_in_count FROM casino_all_in_stats WHERE guild_id=? AND user_id=?').get(g,u)?.all_in_count||0;
 }
-function freeLobbyChannelRank(name) {
+function casinoAnnouncementChannelRank(name) {
   const normalized=String(name||'').trim();
-  if(normalized===FREE_LOBBY_CHANNEL_KEYWORD) return 0;
-  if(normalized.endsWith(`｜${FREE_LOBBY_CHANNEL_KEYWORD}`)||normalized.endsWith(`|${FREE_LOBBY_CHANNEL_KEYWORD}`)) return 1;
-  return normalized.includes(FREE_LOBBY_CHANNEL_KEYWORD)?2:99;
+  if(normalized===CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD) return 0;
+  if(normalized.endsWith(`｜${CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD}`)||normalized.endsWith(`|${CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD}`)) return 1;
+  return normalized.includes(CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD)?2:99;
 }
-function freeLobbyTextChannels(channels) {
+function casinoAnnouncementTextChannels(channels) {
   return [...channels].filter(channel=>channel
     &&[ChannelType.GuildText,ChannelType.GuildAnnouncement].includes(channel.type)
     &&typeof channel.send==='function'
-    &&freeLobbyChannelRank(channel.name)<99
-  ).sort((left,right)=>freeLobbyChannelRank(left.name)-freeLobbyChannelRank(right.name)||left.position-right.position);
+    &&casinoAnnouncementChannelRank(channel.name)<99
+  ).sort((left,right)=>casinoAnnouncementChannelRank(left.name)-casinoAnnouncementChannelRank(right.name)||left.position-right.position);
 }
-async function freeLobbyChannel(guildId) {
+async function casinoAnnouncementChannel(guildId) {
   const guild=client.guilds.cache.get(guildId)||await client.guilds.fetch(guildId);
-  let matches=freeLobbyTextChannels(guild.channels.cache.values());
+  let matches=casinoAnnouncementTextChannels(guild.channels.cache.values());
   if(matches.length) return matches[0];
   const fetched=await guild.channels.fetch();
-  matches=freeLobbyTextChannels([...fetched.values()].filter(Boolean));
+  matches=casinoAnnouncementTextChannels([...fetched.values()].filter(Boolean));
   return matches[0]||null;
 }
 async function announceCasinoAllInEvent(eventId) {
@@ -2879,8 +3031,8 @@ async function announceCasinoAllInEvent(eventId) {
   if(!event) return false;
   allInBroadcastsInFlight.add(eventId);
   try {
-    const channel=await freeLobbyChannel(event.guild_id);
-    if(!channel) throw new Error(`找不到名稱包含「${FREE_LOBBY_CHANNEL_KEYWORD}」的文字頻道`);
+    const channel=await casinoAnnouncementChannel(event.guild_id);
+    if(!channel) throw new Error(`找不到名稱包含「${CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD}」的文字頻道`);
     const message=await channel.send({
       embeds:[new EmbedBuilder()
         .setColor(0xE53935)
@@ -2891,7 +3043,7 @@ async function announceCasinoAllInEvent(eventId) {
           {name:'🎮 遊戲',value:event.game,inline:true},
           {name:'🔥 累積歐印',value:`${fmt(event.all_in_count)} 次`,inline:true}
         )
-        .setFooter({text:'自由大廳自動播報｜本局結果請回原遊戲頻道查看'})
+        .setFooter({text:'賭場公告自動播報｜本局結果請回原遊戲頻道查看'})
         .setTimestamp()],
       allowedMentions:{parse:[]}
     });
@@ -4635,7 +4787,7 @@ const gameHelpDetails={
   heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
   money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/每日\` 領取獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。大多數行動會消耗體力，食物與飲料可恢復；所有合法工作、冒險、搶劫與賭場收益皆無每日金幣上限。`},
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；目前共有 **16 座國際機場**，持有機場與客機後可用 \`/機場\` 註冊航空公司並經營航線。\n\n另有 **金灣中央火車站、蓮都國際客運站、皇冠港物流貨運站**三種交通事業資產。持有任一場站後，可用 \`/交通事業\` 支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}** 手續費註冊公司行號，再從鐵路、城際客運或物流貨運專屬路線中選擇任務賺取收入。`},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；目前共有 **16 座國際機場**，持有機場與客機後可用 \`/交通事業\` 註冊航空公司並經營航線。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛；\`/機場\` 保留為航空面板捷徑。\n\n另有 **金灣中央火車站、蓮都國際客運站、皇冠港物流貨運站**三種交通事業資產。持有任一場站後，可在同一個 \`/交通事業\` 總部支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}** 手續費註冊公司行號，再從鐵路、城際客運或物流貨運專屬路線中選擇任務賺取收入。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
   pets:{label:'寵物系統',emoji:'🐾',hint:'領養、陪伴、照顧與特殊增益',title:'🐾 寵物陪伴系統',body:'使用 `/寵物店` 預覽並領養寵物，或購買罐頭、玩具與洗護用品。再用 `/我的寵物` 設定同行夥伴與使用用品。寵物每天心情 -10，心情低於 20 時特殊功能暫停；好好照顧即可持續獲得小幅工作、賭場、商城或體力加成。'}
 };
@@ -4796,8 +4948,8 @@ const commands = [
     .addStringOption(o=>o.setName('車包').setDescription('選擇要查看的汽車盲盒').addChoices(...blindBoxPackChoices)),
   new SlashCommandBuilder().setName('我的資產').setDescription('查看玩家擁有的房地產與載具').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
   new SlashCommandBuilder().setName('藏身處').setDescription('將現有房地產設為藏身處並進行高階升級'),
-  new SlashCommandBuilder().setName('機場').setDescription('註冊航空公司並使用自己的機場與客機經營航線'),
-  new SlashCommandBuilder().setName('交通事業').setDescription('註冊公司行號並經營火車站、客運站或貨運站'),
+  new SlashCommandBuilder().setName('機場').setDescription('開啟已整合至交通事業的航空公司與多機位航班面板'),
+  new SlashCommandBuilder().setName('交通事業').setDescription('統一管理機場、火車站、客運站與貨運站事業'),
   new SlashCommandBuilder().setName('車庫').setDescription('查看自己的汽車、機車與資產增益')
     .addStringOption(o=>o.setName('展示').setDescription('輸入名稱搜尋車輛').setAutocomplete(true)),
   new SlashCommandBuilder().setName('改裝').setDescription('開啟車庫改裝選單並即時合成預覽')
@@ -6119,6 +6271,17 @@ async function handleInteraction(i) {
     db.prepare('UPDATE player_pets SET nickname=? WHERE guild_id=? AND user_id=? AND pet_id=?').run(nickname,i.guildId,ownerId,petId);
     return i.update({...petProfilePayload(i.guildId,ownerId),components:petProfileComponents(i.guildId,ownerId),attachments:[]});
   }
+  if(i.isButton()&&['transport_hub_home:','transport_hub_airline:','transport_hub_ground:'].some(prefix=>i.customId.startsWith(prefix))&&i.guildId) {
+    const [kind,ownerId]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有事業擁有者可以操作這個交通事業面板。',ephemeral:true});
+    if(kind==='transport_hub_airline') {
+      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId)],components:airlineDashboardComponents(i.guildId,ownerId)});
+    }
+    if(kind==='transport_hub_ground') {
+      return i.update({embeds:[transportDashboardEmbed(i.guildId,ownerId)],components:transportDashboardComponents(i.guildId,ownerId)});
+    }
+    return i.update({embeds:[transportHubEmbed(i.guildId,ownerId)],components:transportHubComponents(i.guildId,ownerId)});
+  }
   if(i.isButton()&&i.customId.startsWith('airline_register:')&&i.guildId) {
     const ownerId=i.customId.split(':')[1];
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有機場擁有者可以註冊航空公司。',ephemeral:true});
@@ -6153,18 +6316,42 @@ async function handleInteraction(i) {
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以開啟航線。',ephemeral:true});
     try {
       const result=startAirlineFlight(i.guildId,ownerId);
-      const notice=`🛫 **${result.route.name} 已起飛！**\n客機：${result.aircraft.name}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n抵達時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+      const notice=`🛫 **機位 #${result.flightSlot}｜${result.route.name} 已起飛！**\n客機：${result.aircraft.name}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n抵達時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
       return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法開啟航線：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('airline_buy_slot:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以購買機位。',ephemeral:true});
+    try {
+      const result=buyAdditionalAirlineSlot(i.guildId,ownerId);
+      const notice=`➕ **額外機位購買完成！**\n已支付：**${fmt(result.cost)}**｜目前機位：**${result.slots}/${AIRLINE_MAX_FLIGHT_SLOTS}**\n目前金庫：**${fmt(result.next)}**`;
+      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ 無法購買機位：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('airline_claim_select:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以領取營收。',ephemeral:true});
+    try {
+      const flightId=Number(i.values[0]);
+      const result=claimAirlineRevenue(i.guildId,ownerId,flightId);
+      const notice=`💰 **機位 #${result.flight.flight_slot} 航線營收已入帳！**\n營收：**${fmt(result.flight.gross_revenue)}**｜本航班淨收益：**${fmt(result.profit)}**\n目前金庫：**${fmt(result.next)}**`;
+      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ 無法領取營收：${error.message}`,ephemeral:true});
     }
   }
   if(i.isButton()&&i.customId.startsWith('airline_claim:')&&i.guildId) {
     const ownerId=i.customId.split(':')[1];
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以領取營收。',ephemeral:true});
     try {
-      const result=claimAirlineRevenue(i.guildId,ownerId);
-      const notice=`💰 **航線營收已入帳！**\n營收：**${fmt(result.flight.gross_revenue)}**｜本航班淨收益：**${fmt(result.profit)}**\n目前金庫：**${fmt(result.next)}**`;
+      const flight=firstCompletedAirlineFlight(i.guildId,ownerId);
+      const result=claimAirlineRevenue(i.guildId,ownerId,flight?.id);
+      const notice=`💰 **機位 #${result.flight.flight_slot} 航線營收已入帳！**\n營收：**${fmt(result.flight.gross_revenue)}**｜本航班淨收益：**${fmt(result.profit)}**\n目前金庫：**${fmt(result.next)}**`;
       return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法領取營收：${error.message}`,ephemeral:true});
@@ -6704,10 +6891,10 @@ async function handleInteraction(i) {
       return i.reply({embeds:[hideoutEmbed(g,u)],components:hideoutComponents(g,u)});
     }
     if(i.commandName==='機場') {
-      return i.reply({embeds:[airlineDashboardEmbed(g,u)],components:airlineDashboardComponents(g,u),ephemeral:true});
+      return i.reply({embeds:[airlineDashboardEmbed(g,u,'ℹ️ 機場系統已整合至 `/交通事業`；此指令保留為航空運輸捷徑。')],components:airlineDashboardComponents(g,u),ephemeral:true});
     }
     if(i.commandName==='交通事業') {
-      return i.reply({embeds:[transportDashboardEmbed(g,u)],components:transportDashboardComponents(g,u),ephemeral:true});
+      return i.reply({embeds:[transportHubEmbed(g,u)],components:transportHubComponents(g,u),ephemeral:true});
     }
     if(i.commandName==='改裝') {
       let assetId=i.options.getString('車輛');
