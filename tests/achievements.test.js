@@ -41,6 +41,7 @@ test('13 個新成就與稱號完整註冊',()=>{
   assert.ok(adminTitleBlock,'管理員稱號設定必須使用 autocomplete，避免超過 Discord 25 個選項限制');
   assert.match(adminTitleBlock,/setAutocomplete\(true\)/);
   assert.doesNotMatch(adminTitleBlock,/addChoices\(/);
+  assert.match(source,/process\.env\.COMMAND_BUILD_ONLY==='1'/);
 });
 
 test('成就累加資料表可安全累計與取最大值',()=>{

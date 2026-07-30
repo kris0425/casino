@@ -4514,6 +4514,10 @@ const commands = [
   new SlashCommandBuilder().setName('經濟監控').setDescription('管理員查看金幣供給、銷毀、負債與集中度').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(c=>c.toJSON());
 
+if(process.env.COMMAND_BUILD_ONLY==='1') {
+  console.log(`Discord command definitions valid: ${commands.length}`);
+  process.exit(0);
+}
 const rest = new REST({version:'10'}).setToken(TOKEN);
 await rest.put(GUILD_ID ? Routes.applicationGuildCommands(CLIENT_ID,GUILD_ID) : Routes.applicationCommands(CLIENT_ID), {body:commands});
 const client = new Client({intents:[GatewayIntentBits.Guilds]});
