@@ -8,3 +8,11 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
+
+  activity-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: casino-activity-api-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://discord-casino:8787
+    depends_on:
+      - discord-casino

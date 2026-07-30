@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#120b08">
+  <title>堆積木高塔｜澳門最大賭場</title>
+  <meta name="description" content="澳門最大賭場圖片版堆積木高塔挑戰">
+  <link rel="preload" href="/jenga/tower-stable.webp" as="image" type="image/webp">
+  <link rel="stylesheet" href="/jenga.css">
+</head>
+<body>
+  <main class="game-shell">
+    <header class="casino-brand">
+      <div class="brand-mark">澳</div>
+      <div class="brand-copy"><b>澳門最大賭場</b><small>MACAU GRAND CASINO</small></div>
+      <div class="secure-pill"><i></i> ORACLE 判定</div>
+    </header>
+
+    <section class="intro">
+      <div>
+        <span class="eyebrow">WOOD TOWER / RISK &amp; REWARD</span>
+        <h1>堆積木<span>高塔挑戰</span></h1>
+        <p>看清每塊積木的倒塌率。成功抽出後，可以安全收手，也能繼續向更高倍率挑戰。</p>
+      </div>
+      <div class="ticket-id"><span>遊戲編號</span><b id="serial">LOADING</b></div>
+    </section>
+
+    <section class="dashboard" aria-label="遊戲狀態">
+      <article><span>本局下注</span><b id="bet">—</b><small>金幣</small></article>
+      <article><span>成功抽取</span><b id="pulls">0 / 6</b><small>每層提高風險</small></article>
+      <article><span>現在收手</span><b id="multiplier">—</b><small id="cash-preview">先抽出一塊</small></article>
+      <article><span>剩餘時間</span><b id="countdown">20:00</b><small>逾時視為放棄</small></article>
+    </section>
+
+    <section class="tower-card" id="tower-card">
+      <div class="stage-frame">
+        <picture>
+          <source id="tower-source" srcset="/jenga/tower-stable.webp" type="image/webp">
+          <img id="tower-image" src="/jenga/tower-stable.png" alt="豪華賭場桌上的木製積木高塔">
+        </picture>
+        <div class="stage-vignette"></div>
+        <div class="live-state"><i></i><span id="scene-label">高塔穩定</span></div>
+        <div class="server-stamp">結果由伺服器封存</div>
+      </div>
+      <div class="tower-message">
+        <span id="message-icon">🧱</span>
+        <div><b id="message-title">正在載入積木塔…</b><p id="message-text">請稍候，系統正在驗證你的專屬遊戲。</p></div>
+      </div>
+    </section>
+
+    <section class="progress-card" aria-label="高塔進度">
+      <div class="section-heading"><div><small>TOWER PROGRESS</small><h2>高塔挑戰進度</h2></div><span id="risk-bonus">風險加成 +0 倍</span></div>
+      <div class="progress-steps" id="progress-steps">
+        <i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <div class="progress-labels"><span>1.1×</span><span>1.3×</span><span>1.65×</span><span>2.2×</span><span>3×</span><span>4.4×</span></div>
+    </section>
+
+    <section class="choice-card" id="choice-card">
+      <div class="section-heading">
+        <div><small>CHOOSE ONE BLOCK</small><h2>選擇要抽出的積木</h2></div>
+        <span>高風險可增加倍率</span>
+      </div>
+      <div class="block-grid" id="block-grid" aria-live="polite"></div>
+      <button class="cash-button" id="cash-button" type="button" disabled>
+        <span>💰</span><div><b>安全收手</b><small id="cash-button-copy">成功抽出一塊後即可領取</small></div>
+      </button>
+      <p class="security-note">重新整理不會改變積木風險、重抽結果或重複派彩。</p>
+    </section>
+
+    <section class="result-card" id="result-card" hidden aria-live="assertive">
+      <div class="result-icon" id="result-icon">✦</div>
+      <small>OFFICIAL RESULT</small>
+      <h2 id="result-title">本局結算</h2>
+      <p id="result-message"></p>
+      <div class="result-stats">
+        <article><span>本次派彩</span><b id="credited">0</b><small>金幣</small></article>
+        <article><span>目前金庫</span><b id="balance">0</b><small>金幣</small></article>
+      </div>
+      <p class="title-notice" id="title-notice"></p>
+      <div class="dog-event" id="dog-event" hidden>
+        <span>🐕</span>
+        <div><b>博美犬叼走了獲利！</b><small>你有一次機會把金幣追回來。</small></div>
+        <button id="chase-button" type="button">追上去</button>
+      </div>
+      <button class="close-button" id="close-button" type="button">完成，返回 Discord</button>
+    </section>
+
+    <section class="error-card" id="error-card" hidden>
+      <span>!</span><div><h2>堆積木無法開啟</h2><p id="error-message"></p></div>
+    </section>
+  </main>
+  <script src="/jenga.js"></script>
+</body>
+</html>

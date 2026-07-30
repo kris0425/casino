@@ -22,15 +22,31 @@ vehicle modification previews.
 Python 3, Pillow and Noto CJK fonts are installed by the Docker image for card
 rendering.
 
+For migration to another Windows computer, follow
+[`PORTABLE_SETUP.md`](PORTABLE_SETUP.md). The portable archive includes a
+consistent SQLite snapshot but intentionally excludes `.env`, tokens and SSH
+keys.
+
 ## Deployment scope
 
-Normal code/media deployment updates `src/`, `scripts/` and `assets/`. Preserve
+Normal code/media deployment updates `src/`, `scripts/`, `updates/`, `CHANGELOG.md`
+and `assets/`. Preserve
 the server-side `.env` and `data/` volume. After rebuilding, verify:
 
 - `node --check src/index.js`
 - `python3 -m py_compile scripts/render_car.py`
 - bot login appears in the container log
 - one real garage card is rendered for every changed vehicle
+
+## Update changelog and broadcast
+
+Every production update must also:
+
+1. Add a Traditional Chinese entry to `CHANGELOG.md`.
+2. Add a unique JSON release file under `updates/`.
+3. Run `node scripts/publish_update.js updates/<release>.json` after deployment.
+4. Confirm the script reports `SENT` for `#🎰｜賭場公告`. The
+   `update_broadcasts` table prevents duplicate posts.
 
 ## Vehicle modification assets
 

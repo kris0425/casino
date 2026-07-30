@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>澳門最大賭場｜台式麻將</title>
+  <link rel="stylesheet" href="/mahjong.css" />
+</head>
+<body>
+  <main class="shell">
+    <header><a href="/" class="brand">🎰 澳門最大賭場</a><span class="tag">台式 16 張麻將</span><button id="change-name" class="ghost">修改暱稱</button></header>
+    <section id="lobby" class="lobby card">
+      <span class="eyebrow">TABLE GAME</span><h1>坐上牌桌，自己決定每一張牌。</h1>
+      <p>單人會與三位電腦玩家對局；多人房可輸入房號加入，滿兩人後由房主開始並自動補足電腦玩家。</p>
+      <label>你的暱稱 <input id="name" maxlength="20" placeholder="輸入暱稱" /></label>
+      <div class="lobby-actions"><button data-mode="solo" class="primary">單人開局 <b>vs 電腦</b></button><button data-mode="multi" class="secondary">建立多人房 <b>分享房號</b></button></div>
+      <div class="join"><input id="room-code" maxlength="6" placeholder="輸入 6 位房號" /><button id="join" class="ghost">加入房間</button></div>
+      <small>玩法：莊家 17 張先出，其餘玩家 16 張摸 1 打 1。打牌後可依規則吃、碰、胡；輪到你時可查看聽牌分析。採用 8 台起胡。</small>
+    </section>
+    <section id="table" class="table hidden">
+      <div class="table-head"><div><span class="eyebrow">LIVE TABLE</span><h2>房號 <strong id="room-id">------</strong></h2></div><div class="table-actions"><button id="copy" class="ghost">複製房號</button><button id="start" class="primary hidden">房主開始</button><button id="leave" class="ghost">離開</button></div></div>
+      <div id="status" class="status">正在連線牌桌…</div>
+      <div id="claim-box" class="claim-box hidden"><strong id="claim-title"></strong><div id="claim-actions"></div></div>
+      <div class="board card"><div id="players" class="players"></div><div class="center"><span>牌牆</span><b id="wall">0</b><small>張</small></div></div>
+      <section class="hand card"><div class="hand-head"><div><span class="eyebrow">YOUR HAND</span><h3>你的手牌</h3></div><div class="hand-actions"><span id="tai-hint">目前 0 台／8 台起胡</span><button id="ting" class="secondary hidden">聽牌分析</button><button id="hu" class="primary hidden">自摸胡</button><span id="turn-hint">等待輪到你</span></div></div><div id="ting-list" class="ting-list hidden"></div><div id="tiles" class="tiles"></div></section>
+      <p class="table-note">萬子為紅色、筒子為藍色、索子為綠色；字牌以黑色標示。選取手牌即可打出。</p>
+    </section>
+  </main>
+  <template id="player-template"><article class="player"><div class="player-top"><b></b><span></span></div><div class="mini-tiles"></div><div class="meld"></div><div class="flowers"></div><div class="discard"></div></article></template>
+  <script src="/mahjong.js"></script>
+</body>
+</html>

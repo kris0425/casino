@@ -5,10 +5,11 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle
 } from 'discord.js';
-import { existsSync, mkdirSync } from 'node:fs';
-import { resolve, extname } from 'node:path';
+import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs';
+import { resolve, extname, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -19,42 +20,68 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const STARTING = Number(process.env.STARTING_COINS || 1000);
 const MIN_BET = Number(process.env.MIN_BET || 10);
-const MAX_BET = Number(process.env.MAX_BET || 100000);
-const LOAN_LIMIT = Number(process.env.LOAN_LIMIT || 100000);
+const LOAN_LIMIT = 100_000_000;
+const LOAN_BASE_LIMIT = 100_000;
 const LOAN_DAILY_INTEREST_RATE = Number(process.env.LOAN_DAILY_INTEREST_RATE || 0.02);
 const TEAM_HEIST_PREP_FEE = Number(process.env.TEAM_HEIST_PREP_FEE || 3000);
+const TEAM_HEIST_INFORMANT_REWARD = Number(process.env.TEAM_HEIST_INFORMANT_REWARD || 5000);
 const SOLO_HEIST_REWARD = Number(process.env.SOLO_HEIST_REWARD || 40000);
 const TEAM_HEIST_MEMBER_REWARD = Number(process.env.TEAM_HEIST_MEMBER_REWARD || 110000);
 const TEAM_HEIST_TEAMMATE_BONUS = Number(process.env.TEAM_HEIST_TEAMMATE_BONUS || 5000);
+const TEAM_HEIST_POLICE_BASE_REWARD = Number(process.env.TEAM_HEIST_POLICE_BASE_REWARD || 30000);
+const TEAM_HEIST_POLICE_POOL_RATE = Number(process.env.TEAM_HEIST_POLICE_POOL_RATE || 0.30);
+const ACTIVITY_PUBLIC_URL = String(process.env.ACTIVITY_PUBLIC_URL || '').replace(/\/$/,'');
+const ACTIVITY_API_PORT = Number(process.env.ACTIVITY_API_PORT || 8787);
+const ACTIVITY_SIGNING_SECRET = process.env.ACTIVITY_SIGNING_SECRET || '';
+const ACTIVITY_BACKEND_SECRET = process.env.ACTIVITY_BACKEND_SECRET || '';
+const PLAYER_TRANSFER_FEE_RATE = 0.02;
+const PLAYER_TRANSFER_MIZI_CHANCE = 0.05;
+const PLAYER_TRANSFER_EXTRA_ZERO_CHANCE = 0.05;
 const ECONOMY_SINK_LABELS={
   asset_purchase:'房地產／永久資產',
   asset_rental:'套房／限時租賃',
   shop:'食物與商城',
   medical:'醫療費用',
   heist_weapon:'搶劫槍枝',
+  heist_ammo:'搶劫彈藥',
   heist_prep:'搶劫準備費',
+  hideout_upgrade:'藏身處升級',
   pet_shop:'寵物與寵物用品',
-  vehicle_mod:'載具改裝'
+  vehicle_mod:'載具改裝',
+  airline_registration:'航空公司註冊費',
+  airline_operation:'航空公司航線營運成本',
+  transfer_fee:'玩家轉帳手續費'
 };
-const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist']);
-const BASE_STAMINA = 500;
+const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer']);
+const BASE_STAMINA = 800;
 const assetPath=name=>resolve(process.cwd(),'assets',name);
 const petCatalog={
-  golden_retriever:{name:'黃金獵犬｜阿金',emoji:'🐕',price:18000,image:'pets/golden_retriever.jpg',bonusType:'work',bonusValue:0.05,bonusText:'工作收入最高 +5%',description:'熱情可靠的工作夥伴，心情越好，工作收入加成越高。'},
-  siamese_cat:{name:'暹羅貓｜小藍',emoji:'🐈',price:22000,image:'pets/siamese_cat.jpg',bonusType:'casino',bonusValue:0.03,bonusText:'賭場獲勝派彩最高 +3%',description:'神祕又機靈的幸運夥伴，會替贏牌帶來一點好運。'},
-  british_shorthair:{name:'英國短毛貓｜銀寶',emoji:'🐱',price:26000,image:'pets/british_shorthair.jpg',bonusType:'discount',bonusValue:0.05,bonusText:'體力商城折扣最高 5%',description:'沉穩精打細算的陪伴夥伴，能在體力商城取得小幅折扣。'},
-  black_labrador:{name:'黑色拉布拉多｜小黑',emoji:'🐕‍🦺',price:30000,image:'pets/black_labrador.jpg',bonusType:'stamina',bonusValue:10,bonusText:'每日體力上限最高 +10',description:'活力充沛的冒險夥伴，陪伴時可提高每日體力上限。'},
-  siberian_husky:{name:'西伯利亞哈士奇｜暴風',emoji:'🐺',price:16000,image:'pets/siberian_husky.jpg',bonusType:'work',bonusValue:0.04,bonusText:'工作收入最高 +4%',description:'精力旺盛又喜歡搗蛋的工作同伴，會陪你完成每天的賺錢活動。'},
-  tabby_cat:{name:'虎斑貓｜阿虎',emoji:'🐈',price:17000,image:'pets/tabby_cat.jpg',bonusType:'casino',bonusValue:0.02,bonusText:'賭場獲勝派彩最高 +2%',description:'觀察力敏銳的沉著夥伴，陪伴時會帶來一點牌桌好運。'},
-  pomeranian:{name:'博美犬｜小猛',emoji:'🐕',price:19000,image:'pets/pomeranian.jpg',bonusType:'discount',bonusValue:0.04,bonusText:'體力商城折扣最高 4%',description:'外表可愛、精打細算的購物夥伴，與警犬猛博美不是同一隻。'},
-  vanilla_catgirl:{name:'稀有貓娘｜香草',emoji:'🐾',price:24000,image:'pets/vanilla_catgirl.jpg',bonusType:'stamina',bonusValue:8,bonusText:'每日體力上限最高 +8',description:'稀有的貓娘陪伴同伴，同行時能讓冒險生活更有精神。'},
-  scarlet_macaw:{name:'金剛鸚鵡｜烈焰',emoji:'🦜',price:28000,image:'pets/scarlet_macaw.png',bonusType:'casino',bonusValue:0.03,bonusText:'賭場獲勝派彩最高 +3%',description:'華麗聰明的金剛鸚鵡，同行時會用響亮的叫聲替主人帶來牌桌好運。'},
-  cockatiel:{name:'玄鳳鸚鵡｜啾啾',emoji:'🦜',price:15000,image:'pets/cockatiel.jpg',bonusType:'casino',bonusValue:0.02,bonusText:'賭場獲勝派彩最高 +2%',description:'活潑愛說話的玄鳳鸚鵡，陪伴時會在牌桌旁替主人加油。'},
-  orange_tabby:{name:'橘貓｜橘寶',emoji:'🐈',price:14000,image:'pets/orange_tabby.jpg',bonusType:'stamina',bonusValue:6,bonusText:'每日體力上限最高 +6',description:'貪吃又親人的橘貓，安心的陪伴能讓主人每天多保留一些體力。'}
+  golden_retriever:{name:'黃金獵犬｜阿金',emoji:'🐕',price:18000,image:'pets/golden_retriever.jpg',petType:'dog',bonusType:'work',bonusValue:0.05,bonusText:'工作收入最高 +5%',description:'熱情可靠的工作夥伴，心情越好，工作收入加成越高。'},
+  siamese_cat:{name:'暹羅貓｜小藍',emoji:'🐈',price:22000,image:'pets/siamese_cat.jpg',petType:'cat',bonusType:'casino',bonusValue:0.03,bonusText:'賭場獲勝派彩最高 +3%',description:'神祕又機靈的幸運夥伴，會替贏牌帶來一點好運。'},
+  british_shorthair:{name:'英國短毛貓｜銀寶',emoji:'🐱',price:26000,image:'pets/british_shorthair.jpg',petType:'cat',bonusType:'discount',bonusValue:0.05,bonusText:'體力商城折扣最高 5%',description:'沉穩精打細算的陪伴夥伴，能在體力商城取得小幅折扣。'},
+  black_labrador:{name:'黑色拉布拉多｜小黑',emoji:'🐕‍🦺',price:30000,image:'pets/black_labrador.jpg',petType:'dog',bonusType:'stamina',bonusValue:10,bonusText:'每日體力上限最高 +10',description:'活力充沛的冒險夥伴，陪伴時可提高每日體力上限。'},
+  siberian_husky:{name:'西伯利亞哈士奇｜暴風',emoji:'🐺',price:16000,image:'pets/siberian_husky.jpg',petType:'dog',bonusType:'work',bonusValue:0.04,bonusText:'工作收入最高 +4%',description:'精力旺盛又喜歡搗蛋的工作同伴，會陪你完成每天的賺錢活動。'},
+  tabby_cat:{name:'虎斑貓｜阿虎',emoji:'🐈',price:17000,image:'pets/tabby_cat.jpg',petType:'cat',bonusType:'casino',bonusValue:0.02,bonusText:'賭場獲勝派彩最高 +2%',description:'觀察力敏銳的沉著夥伴，陪伴時會帶來一點牌桌好運。'},
+  pomeranian:{name:'博美犬｜小猛',emoji:'🐕',price:19000,image:'pets/pomeranian.jpg',petType:'dog',bonusType:'discount',bonusValue:0.04,bonusText:'體力商城折扣最高 4%',description:'外表可愛、精打細算的購物夥伴，與警犬猛博美不是同一隻。'},
+  minecraft_wolf:{name:'麥塊狼｜方塊',emoji:'🐺',price:32000,image:'pets/minecraft_wolf.gif',petType:'dog',rarity:'稀有',bonusType:'heist',bonusValue:3,bonusText:'搶劫成功率最高 +3%',description:'從方塊世界來到賭場的忠實狼夥伴，同行時會協助偵查撤退路線，提高搶劫成功率。'},
+  vanilla_catgirl:{name:'稀有貓娘｜香草',emoji:'🐾',price:24000,image:'pets/vanilla_catgirl.jpg',petType:'cat',bonusType:'stamina',bonusValue:8,bonusText:'每日體力上限最高 +8',description:'稀有的貓娘陪伴同伴，同行時能讓冒險生活更有精神。'},
+  scarlet_macaw:{name:'金剛鸚鵡｜烈焰',emoji:'🦜',price:28000,image:'pets/scarlet_macaw.png',petType:'bird',bonusType:'casino',bonusValue:0.03,bonusText:'賭場獲勝派彩最高 +3%',description:'華麗聰明的金剛鸚鵡，同行時會用響亮的叫聲替主人帶來牌桌好運。'},
+  cockatiel:{name:'玄鳳鸚鵡｜啾啾',emoji:'🦜',price:15000,image:'pets/cockatiel.jpg',petType:'bird',bonusType:'casino',bonusValue:0.02,bonusText:'賭場獲勝派彩最高 +2%',description:'活潑愛說話的玄鳳鸚鵡，陪伴時會在牌桌旁替主人加油。'},
+  african_grey_parrot:{name:'非洲灰鸚鵡｜教授',emoji:'🦜',price:27000,petType:'bird',bonusType:'work',bonusValue:0.05,bonusText:'工作收入最高 +5%',description:'聰明沉著、擅長模仿人聲的灰鸚鵡，會在工作時提醒主人抓住賺錢機會。'},
+  budgerigar:{name:'虎皮鸚鵡｜豆豆',emoji:'🐦',price:12000,petType:'bird',bonusType:'discount',bonusValue:0.03,bonusText:'體力商城折扣最高 3%',description:'小巧活潑的虎皮鸚鵡，陪主人逛商城時總能找到划算的補給品。'},
+  snowy_owl:{name:'雪鴞｜白夜',emoji:'🦉',price:30000,petType:'bird',bonusType:'stamina',bonusValue:10,bonusText:'每日體力上限最高 +10',description:'安靜可靠的雪鴞，會在夜晚守護主人，讓每天的冒險更有精神。'},
+  fat_myna:{name:'肥八哥｜八寶',emoji:'🐦‍⬛',price:88000,image:'pets/fat_myna.jpg',petType:'bird',rarity:'傳說',hungerMultiplier:1.5,bonuses:{casino:0.05,heist:5},bonusText:'賭場獲勝派彩最高 +5%｜搶劫成功率最高 +5%',description:'圓滾滾的傳說級八哥，食量是一般鳥類的 1.5 倍。只要維持好心情，牠就會替主人帶來強大幸運與搶劫加成。'},
+  orange_tabby:{name:'橘貓｜橘寶',emoji:'🐈',price:14000,image:'pets/orange_tabby.jpg',petType:'cat',bonusType:'stamina',bonusValue:6,bonusText:'每日體力上限最高 +6',description:'貪吃又親人的橘貓，安心的陪伴能讓主人每天多保留一些體力。'}
 };
 const petItemCatalog={
   canned_food:{name:'鮮肉罐頭',emoji:'🥫',price:250,mood:25,description:'恢復陪伴寵物 25 點心情。'},
   bird_feed:{name:'鳥飼料',emoji:'🌾',price:300,mood:25,description:'營養均衡的鳥類飼料，恢復陪伴寵物 25 點心情。'},
+  bird_food_bundle:{name:'鳥類食物禮包',emoji:'🛍️',price:700,mood:40,birdOnly:true,description:'鳥類專用的綜合飼料禮包，恢復同行鳥類 40 點心情。'},
+  bug_bundle:{name:'蟲蟲禮包',emoji:'🐛',price:1000,mood:55,birdOnly:true,description:'富含蛋白質的鳥類蟲蟲大餐，恢復同行鳥類 55 點心情。'},
+  nut_bundle:{name:'堅果禮包',emoji:'🥜',price:1400,mood:70,birdOnly:true,description:'精選堅果組成的豪華鳥類禮包，恢復同行鳥類 70 點心情。'},
+  canned_bundle:{name:'犬貓罐頭禮包',emoji:'🥫',price:800,mood:45,allowedPetTypes:['dog','cat'],targetLabel:'犬貓專用',description:'犬貓專用的綜合鮮肉罐頭禮包，恢復同行犬貓 45 點心情。'},
+  freeze_dried_bundle:{name:'凍乾禮包',emoji:'🍖',price:1300,mood:65,allowedPetTypes:['dog','cat'],targetLabel:'犬貓專用',description:'使用優質肉類製作的犬貓凍乾禮包，恢復同行犬貓 65 點心情。'},
+  myna_premium_nest:{name:'八哥尊榮巢居',emoji:'🪹',price:28888,image:'pets/myna_premium_nest.jpg',permanent:true,birdOnly:true,moodDecayReduction:5,description:'以黑金高級材質打造的永久鳥類巢居。擁有後自動生效，所有鳥類寵物每日心情消耗減少 5 點，每位玩家限購一座。'},
   squeaky_ball:{name:'響聲球',emoji:'🎾',price:450,mood:20,description:'陪寵物玩耍，恢復 20 點心情。'},
   grooming_kit:{name:'洗護組',emoji:'🧴',price:650,mood:30,description:'替寵物整理毛髮，恢復 30 點心情。'},
   luxury_bed:{name:'豪華睡床券',emoji:'🛏️',price:1200,mood:50,description:'讓寵物好好休息，恢復 50 點心情。'}
@@ -66,6 +93,12 @@ const dealerImages={
 };
 const hospitalCheckGif=assetPath('mizi_check.gif');
 const duelModeImage=assetPath('duel_mode.png');
+const luckyWheelSpinGifs={
+  blank:assetPath('lucky_wheel/lucky_wheel_blank.gif'),
+  car:assetPath('lucky_wheel/lucky_wheel_car.gif'),
+  gold:assetPath('lucky_wheel/lucky_wheel_gold.gif'),
+  diamond:assetPath('lucky_wheel/lucky_wheel_diamond.gif')
+};
 const jailRiotImage={path:assetPath('jail/prison_riot.jpg'),name:'prison_riot.jpg'};
 const jailRiotImageUrl=`attachment://${jailRiotImage.name}`;
 function jailRiotPayload(embed) {
@@ -98,12 +131,26 @@ const heistSceneImages={
   vault_hao_xinyi_deed:{path:assetPath('heist/vault_hao_xinyi_deed.png'),name:'heist_vault_hao_xinyi_deed.png'},
   police_dog_1:{path:assetPath('heist/police_dog_1.jpg'),name:'heist_police_dog_1.jpg'},
   police_dog_2:{path:assetPath('heist/police_dog_2.jpg'),name:'heist_police_dog_2.jpg'},
-  deception_uniform:{path:assetPath('heist/deception_uniform.jpg'),name:'heist_deception_uniform.jpg'}
+  deception_uniform:{path:assetPath('heist/deception_uniform.jpg'),name:'heist_deception_uniform.jpg'},
+  museum_1:{path:assetPath('heist/museum_1.jpg'),name:'heist_museum_1.jpg'},
+  museum_2:{path:assetPath('heist/museum_2.jpg'),name:'heist_museum_2.jpg'},
+  museum_3:{path:assetPath('heist/museum_3.jpg'),name:'heist_museum_3.jpg'},
+  museum_4:{path:assetPath('heist/museum_4.jpg'),name:'heist_museum_4.jpg'},
+  museum_5:{path:assetPath('heist/museum_5.jpg'),name:'heist_museum_5.jpg'},
+  museum_6:{path:assetPath('heist/museum_6.jpg'),name:'heist_museum_6.jpg'},
+  museum_7:{path:assetPath('heist/museum_7.jpg'),name:'heist_museum_7.jpg'},
+  museum_clever:{path:assetPath('heist/museum_clever.jpg'),name:'heist_museum_clever.jpg'},
+  museum_loot_art:{path:assetPath('heist/museum_loot_art.jpg'),name:'heist_museum_loot_art.jpg'},
+  museum_loot_antiques:{path:assetPath('heist/museum_loot_antiques.jpg'),name:'heist_museum_loot_antiques.jpg'},
+  museum_loot_gold:{path:assetPath('heist/museum_loot_gold.jpg'),name:'heist_museum_loot_gold.jpg'}
 };
 const heistSceneUrl=scene=>`attachment://${heistSceneImages[scene].name}`;
 const randomPoliceDogScene=()=>Math.random()<0.5?'police_dog_1':'police_dog_2';
+const museumSceneIds=['museum_1','museum_2','museum_3','museum_4','museum_5','museum_6','museum_7'];
+const randomMuseumScene=()=>museumSceneIds[Math.floor(Math.random()*museumSceneIds.length)];
 function heistScenePayload(embed,scene) {
   const image=heistSceneImages[scene];
+  if(!image) return {embeds:[embed],attachments:[],files:[]};
   embed.setImage(heistSceneUrl(scene));
   return {
     embeds:[embed],
@@ -127,21 +174,29 @@ function dealerReaction(playerWon) {
   ];
   return reactions[Math.floor(Math.random()*reactions.length)];
 }
-function settleGamePayout(g,u,bet,payout,game) {
+function settleGamePayout(g,u,bet,payout,game,{balanceChanger=changeBalance,allIn=false}={}) {
+  const allInProgress=allIn?recordCasinoAllIn(g,u,game):null;
   let titleMultiplier=1,titleInitialMultiplier=1,titleActive=false,titleSkillTriggered=false,titleId='';
   if(payout>bet) {
-    titleId=luckyReturnsTitleId(g,u);
-    titleActive=Boolean(titleId);
-    titleInitialMultiplier=returnsCasinoMultiplier(g,u);
-    titleMultiplier=titleInitialMultiplier;
-    if(titleActive&&Math.random()<0.03) {
-      titleSkillTriggered=true;
-      titleMultiplier=returnsCasinoMultiplier(g,u);
+    if(allIn&&equippedTitleId(g,u)==='all_in_hero') {
+      titleId='all_in_hero';
+      titleActive=true;
+      titleInitialMultiplier=3;
+      titleMultiplier=3;
+    } else {
+      titleId=luckyReturnsTitleId(g,u);
+      titleActive=Boolean(titleId);
+      titleInitialMultiplier=returnsCasinoMultiplier(g,u);
+      titleMultiplier=titleInitialMultiplier;
+      if(titleActive&&Math.random()<0.03) {
+        titleSkillTriggered=true;
+        titleMultiplier=returnsCasinoMultiplier(g,u);
+      }
     }
     const regularMultiplier=game==='麻將'?1:weeklyCasinoMultiplier()*assetCasinoBonus(g,u)*(1+petBonus(g,u,'casino'));
     payout=Math.floor(payout*regularMultiplier*titleMultiplier);
   }
-  if(!payout) return {credited:0,dog:false,titleMultiplier,titleInitialMultiplier,titleActive,titleSkillTriggered,titleId};
+  if(!payout) return {credited:0,dog:false,titleMultiplier,titleInitialMultiplier,titleActive,titleSkillTriggered,titleId,allInProgress};
   const dog=payout>bet && Math.random()<0.10;
   const amount=dog?bet:payout;
   // The wager was removed before the game started. Record the returned stake
@@ -152,13 +207,13 @@ function settleGamePayout(g,u,bet,payout,game) {
   let credited=0;
   if(principal>0) {
     const before=balance(g,u);
-    credited+=changeBalance(g,u,principal,'wager_return',u,`${game}：返還下注本金`)-before;
+    credited+=balanceChanger(g,u,principal,'wager_return',u,`${game}：返還下注本金`)-before;
   }
   if(profit>0) {
     const before=balance(g,u);
-    credited+=changeBalance(g,u,profit,'payout',u,dog?`${game}：博美犬叼走本局獲利`:game)-before;
+    credited+=balanceChanger(g,u,profit,'payout',u,dog?`${game}：博美犬叼走本局獲利`:game)-before;
   }
-  return {credited,dog,stolen:dog?payout-bet:0,principal,profitCredited:Math.max(0,credited-principal),titleMultiplier,titleInitialMultiplier,titleActive,titleSkillTriggered,titleId};
+  return {credited,dog,stolen:dog?payout-bet:0,principal,profitCredited:Math.max(0,credited-principal),titleMultiplier,titleInitialMultiplier,titleActive,titleSkillTriggered,titleId,allInProgress};
 }
 const dogChases=new Map();
 const scratchTickets=new Map();
@@ -172,10 +227,14 @@ const jailRiots=new Map();
 const mahjongRooms=new Map();
 const assetTradeOffers=new Map();
 const assetPurchaseOffers=new Map();
+const vehicleRecycleOffers=new Map();
 const assetShopSessions=new Map();
 const raceSessions=new Map();
 const pvpRaceSessions=new Map();
+const liarDiceSessions=new Map();
+const jengaGames=new Map();
 const vehicleModSessions=new Map();
+const activeHideoutRaids=new Map();
 function dogChaseRow(userId,stolen) {
   const token=Math.random().toString(36).slice(2,10);
   dogChases.set(token,{userId,stolen,used:false});
@@ -225,7 +284,7 @@ db.exec(`
     PRIMARY KEY (guild_id, user_id)
   );
   CREATE TABLE IF NOT EXISTS player_stats (
-    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, stamina INTEGER NOT NULL DEFAULT 200,
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, stamina INTEGER NOT NULL DEFAULT 800,
     stamina_day TEXT NOT NULL, PRIMARY KEY (guild_id, user_id)
   );
   CREATE TABLE IF NOT EXISTS inventory (
@@ -261,6 +320,11 @@ db.exec(`
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, bonus_day TEXT NOT NULL, bonus INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (guild_id, user_id)
   );
+  CREATE TABLE IF NOT EXISTS daily_stamina_restore (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, claim_day TEXT NOT NULL,
+    claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id)
+  );
   CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, leader_id TEXT NOT NULL,
     name TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -288,15 +352,37 @@ db.exec(`
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id, user_id)
   );
+  CREATE TABLE IF NOT EXISTS player_tutorials (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, tutorial_id TEXT NOT NULL,
+    seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id, tutorial_id)
+  );
   CREATE TABLE IF NOT EXISTS player_achievements (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, achievement_id TEXT NOT NULL,
     unlocked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id, user_id, achievement_id)
   );
+  CREATE TABLE IF NOT EXISTS casino_all_in_stats (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    all_in_count INTEGER NOT NULL DEFAULT 0,
+    unlocked_at TEXT,
+    dm_notified_at INTEGER,
+    PRIMARY KEY (guild_id, user_id)
+  );
   CREATE TABLE IF NOT EXISTS player_assets (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, asset_id TEXT NOT NULL, quantity INTEGER NOT NULL DEFAULT 0,
     acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id, user_id, asset_id)
+  );
+  CREATE TABLE IF NOT EXISTS player_hideouts (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, property_id TEXT NOT NULL,
+    vault_level INTEGER NOT NULL DEFAULT 0,
+    armory_level INTEGER NOT NULL DEFAULT 0,
+    garage_level INTEGER NOT NULL DEFAULT 0,
+    security_level INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id)
   );
   CREATE TABLE IF NOT EXISTS asset_rentals (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, asset_id TEXT NOT NULL, expires_at INTEGER NOT NULL,
@@ -359,11 +445,93 @@ db.exec(`
     reason TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE TRIGGER IF NOT EXISTS ledger_collect_casino_vault
+  CREATE TABLE IF NOT EXISTS player_transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    sender_id TEXT NOT NULL,
+    recipient_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    fee INTEGER NOT NULL,
+    recipient_received INTEGER NOT NULL DEFAULT 0,
+    sender_recovered INTEGER NOT NULL DEFAULT 0,
+    extra_from_vault INTEGER NOT NULL DEFAULT 0,
+    event TEXT NOT NULL DEFAULT 'normal',
+    status TEXT NOT NULL DEFAULT 'completed',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_player_transfers_sender ON player_transfers(guild_id,sender_id,created_at);
+  CREATE INDEX IF NOT EXISTS idx_player_transfers_status ON player_transfers(guild_id,status);
+  CREATE TABLE IF NOT EXISTS web_mahjong_rooms (
+    room_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'lobby',
+    state_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS web_mahjong_players (
+    room_id TEXT NOT NULL, player_id TEXT NOT NULL, name TEXT NOT NULL, seat INTEGER NOT NULL,
+    joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (room_id, player_id)
+  );
+  CREATE TABLE IF NOT EXISTS web_scratch_tickets (
+    ticket_id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, bet INTEGER NOT NULL,
+    icons_json TEXT NOT NULL, payout INTEGER NOT NULL,
+    all_in INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending', result_json TEXT,
+    dog_stolen INTEGER NOT NULL DEFAULT 0,
+    dog_chase_status TEXT NOT NULL DEFAULT 'none',
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    settled_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS web_jenga_games (
+    game_id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, bet INTEGER NOT NULL,
+    all_in INTEGER NOT NULL DEFAULT 0,
+    pulls INTEGER NOT NULL DEFAULT 0,
+    risk_bonus REAL NOT NULL DEFAULT 0,
+    blocks_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    result_json TEXT,
+    dog_stolen INTEGER NOT NULL DEFAULT 0,
+    dog_chase_status TEXT NOT NULL DEFAULT 'none',
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at INTEGER NOT NULL,
+    settled_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS airline_companies (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    airport_id TEXT,
+    aircraft_id TEXT,
+    route_id TEXT,
+    registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id)
+  );
+  CREATE TABLE IF NOT EXISTS airline_flights (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    airport_id TEXT NOT NULL,
+    aircraft_id TEXT NOT NULL,
+    route_id TEXT NOT NULL,
+    gross_revenue INTEGER NOT NULL,
+    operating_cost INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    completes_at INTEGER NOT NULL,
+    dm_notified_at INTEGER,
+    channel_notified_at INTEGER,
+    PRIMARY KEY (guild_id,user_id)
+  );
+  DROP TRIGGER IF EXISTS ledger_collect_casino_vault;
+  CREATE TRIGGER ledger_collect_casino_vault
   AFTER INSERT ON ledger
   WHEN NEW.delta < 0 AND NEW.kind NOT IN (
     'asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return',
-    'admin_adjust','bank_deposit','bank_withdraw','loan_repayment','casino_vault_heist'
+    'admin_adjust','bank_deposit','bank_withdraw','loan_repayment','casino_vault_heist',
+    'player_transfer','transfer_mizi_theft'
   )
   BEGIN
     INSERT INTO casino_vault(guild_id,balance) VALUES(NEW.guild_id,ABS(NEW.delta))
@@ -386,21 +554,60 @@ if(!db.prepare('PRAGMA table_info(bank_accounts)').all().some(column=>column.nam
 if(!db.prepare('PRAGMA table_info(player_pets)').all().some(column=>column.name==='nickname')) {
   db.exec('ALTER TABLE player_pets ADD COLUMN nickname TEXT');
 }
+if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='dm_notified_at')) {
+  db.exec('ALTER TABLE airline_flights ADD COLUMN dm_notified_at INTEGER');
+}
+if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='channel_notified_at')) {
+  db.exec('ALTER TABLE airline_flights ADD COLUMN channel_notified_at INTEGER');
+}
+if(!db.prepare('PRAGMA table_info(web_scratch_tickets)').all().some(column=>column.name==='all_in')) {
+  db.exec('ALTER TABLE web_scratch_tickets ADD COLUMN all_in INTEGER NOT NULL DEFAULT 0');
+}
+
+function migrateLegacyAmmo(sourceIds,targetId) {
+  const placeholders=sourceIds.map(()=>'?').join(',');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const rows=db.prepare(`SELECT guild_id,user_id,SUM(quantity) AS quantity FROM player_assets WHERE asset_id IN (${placeholders}) GROUP BY guild_id,user_id`).all(...sourceIds);
+    const merge=db.prepare('INSERT INTO player_assets(guild_id,user_id,asset_id,quantity) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET quantity=quantity+excluded.quantity');
+    for(const row of rows) merge.run(row.guild_id,row.user_id,targetId,row.quantity);
+    db.prepare(`UPDATE asset_market_listings SET asset_id=? WHERE status='active' AND asset_id IN (${placeholders})`).run(targetId,...sourceIds);
+    db.prepare(`DELETE FROM player_assets WHERE asset_id IN (${placeholders})`).run(...sourceIds);
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+migrateLegacyAmmo(['ammo_9x19','ammo_45_acp','ammo_57x28','ammo_50ae','ammo_smg'],'ammo_pistol');
+migrateLegacyAmmo(['ammo_556_nato','ammo_545x39','ammo_762x39','ammo_762x51_nato','ammo_58x42'],'ammo_rifle');
 
 function ensureWallet(guildId, userId) {
   db.prepare('INSERT OR IGNORE INTO wallets(guild_id,user_id,balance) VALUES(?,?,?)').run(guildId, userId, STARTING);
   return db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(guildId, userId).balance;
 }
 function balance(g, u) { return ensureWallet(g, u); }
+const assetQuantity=(g,u,assetId)=>db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,u,assetId)?.quantity||0;
+const addAssetQuantity=(g,u,assetId,quantity)=>db.prepare('INSERT INTO player_assets(guild_id,user_id,asset_id,quantity) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET quantity=quantity+excluded.quantity').run(g,u,assetId,quantity);
+const setAssetQuantity=(g,u,assetId,quantity)=>db.prepare('UPDATE player_assets SET quantity=? WHERE guild_id=? AND user_id=? AND asset_id=?').run(quantity,g,u,assetId);
+function removeAsset(g,u,assetId,{mods=false}={}) {
+  db.prepare('DELETE FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').run(g,u,assetId);
+  db.prepare('DELETE FROM asset_bonuses WHERE guild_id=? AND user_id=? AND asset_id=?').run(g,u,assetId);
+  if(mods) db.prepare('DELETE FROM vehicle_mods WHERE guild_id=? AND user_id=? AND asset_id=?').run(g,u,assetId);
+}
+function changeBalanceUnlocked(g, u, delta, kind, actor = null, reason = '') {
+  const current = ensureWallet(g, u);
+  const next = current + delta;
+  if (next < 0) throw new Error('金幣不足');
+  db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next, g, u);
+  db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+    .run(g, u, delta, next, kind, actor, reason);
+  return next;
+}
 function changeBalance(g, u, delta, kind, actor = null, reason = '') {
   db.exec('BEGIN IMMEDIATE');
   try {
-    const current = ensureWallet(g, u);
-    const next = current + delta;
-    if (next < 0) throw new Error('金幣不足');
-    db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next, g, u);
-    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
-      .run(g, u, delta, next, kind, actor, reason);
+    const next=changeBalanceUnlocked(g,u,delta,kind,actor,reason);
     db.exec('COMMIT');
     return next;
   } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -409,18 +616,104 @@ function casinoVaultBalance(g) {
   db.prepare('INSERT OR IGNORE INTO casino_vault(guild_id,balance) VALUES(?,0)').run(g);
   return db.prepare('SELECT balance FROM casino_vault WHERE guild_id=?').get(g).balance;
 }
+function changeCasinoVaultUnlocked(g,delta,kind,userId=null,reason='') {
+  db.prepare('INSERT OR IGNORE INTO casino_vault(guild_id,balance) VALUES(?,0)').run(g);
+  const current=db.prepare('SELECT balance FROM casino_vault WHERE guild_id=?').get(g).balance;
+  const next=current+delta;
+  if(next<0) throw new Error('賭場寶庫餘額不足');
+  db.prepare('UPDATE casino_vault SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=?').run(next,g);
+  db.prepare('INSERT INTO casino_vault_ledger(guild_id,delta,balance_after,kind,user_id,reason) VALUES(?,?,?,?,?,?)').run(g,delta,next,kind,userId,reason);
+  return next;
+}
 function changeCasinoVault(g,delta,kind,userId=null,reason='') {
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.prepare('INSERT OR IGNORE INTO casino_vault(guild_id,balance) VALUES(?,0)').run(g);
-    const current=db.prepare('SELECT balance FROM casino_vault WHERE guild_id=?').get(g).balance;
-    const next=current+delta;
-    if(next<0) throw new Error('賭場寶庫餘額不足');
-    db.prepare('UPDATE casino_vault SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=?').run(next,g);
-    db.prepare('INSERT INTO casino_vault_ledger(guild_id,delta,balance_after,kind,user_id,reason) VALUES(?,?,?,?,?,?)').run(g,delta,next,kind,userId,reason);
+    const next=changeCasinoVaultUnlocked(g,delta,kind,userId,reason);
     db.exec('COMMIT');
     return next;
   } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+const playerTransferFee=amount=>Math.max(1,Math.ceil(amount*PLAYER_TRANSFER_FEE_RATE));
+function createPlayerTransfer(g,senderId,recipientId,amount) {
+  if(!Number.isSafeInteger(amount)||amount<1) throw new Error('轉帳金額必須是正整數，且不可超出 JavaScript 安全整數範圍');
+  if(senderId===recipientId) throw new Error('不能轉帳給自己');
+  const fee=playerTransferFee(amount),totalCharged=amount+fee;
+  if(!Number.isSafeInteger(totalCharged)) throw new Error('轉帳金額超出安全範圍');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const senderBefore=balance(g,senderId);
+    if(senderBefore<totalCharged) throw new Error(`金幣不足：轉帳與 2% 手續費合計需要 ${totalCharged.toLocaleString('zh-TW')}`);
+    balance(g,recipientId);
+    const extraFromVault=amount*9;
+    const roll=Math.random();
+    let event='normal';
+    if(roll<PLAYER_TRANSFER_MIZI_CHANCE) event='mizi_theft';
+    else if(
+      roll<PLAYER_TRANSFER_MIZI_CHANCE+PLAYER_TRANSFER_EXTRA_ZERO_CHANCE
+      &&Number.isSafeInteger(extraFromVault)
+      &&casinoVaultBalance(g)>=extraFromVault
+    ) event='extra_zero';
+
+    changeBalanceUnlocked(g,senderId,-amount,event==='mizi_theft'?'transfer_mizi_theft':'player_transfer',senderId,event==='mizi_theft'?'玩家轉帳遭迷子盜領':'玩家轉帳本金');
+    changeBalanceUnlocked(g,senderId,-fee,'transfer_fee',senderId,`玩家轉帳 2% 手續費（原始金額 ${amount}）`);
+
+    let recipientReceived=0,vaultContribution=0,status='completed';
+    if(event==='normal') {
+      recipientReceived=amount;
+      changeBalanceUnlocked(g,recipientId,recipientReceived,'player_transfer',senderId,'收到玩家轉帳');
+    } else if(event==='extra_zero') {
+      vaultContribution=extraFromVault;
+      recipientReceived=amount+vaultContribution;
+      changeCasinoVaultUnlocked(g,-vaultContribution,'transfer_extra_zero',senderId,`轉帳多按一個 0：寶庫補貼 ${vaultContribution}`);
+      changeBalanceUnlocked(g,recipientId,recipientReceived,'player_transfer',senderId,'收到多按一個 0 的玩家轉帳');
+    } else {
+      status='mizi_pending';
+    }
+
+    const result=db.prepare(`INSERT INTO player_transfers(
+      guild_id,sender_id,recipient_id,amount,fee,recipient_received,extra_from_vault,event,status
+    ) VALUES(?,?,?,?,?,?,?,?,?)`).run(g,senderId,recipientId,amount,fee,recipientReceived,vaultContribution,event,status);
+    const transferId=Number(result.lastInsertRowid);
+    const senderBalance=balance(g,senderId),recipientBalance=balance(g,recipientId),vaultBalance=casinoVaultBalance(g);
+    db.exec('COMMIT');
+    return {transferId,event,status,amount,fee,totalCharged,recipientReceived,extraFromVault:vaultContribution,senderBalance,recipientBalance,vaultBalance};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function resolveMiziTransfer(g,transferId,senderId,action) {
+  if(!['chase','abandon'].includes(action)) throw new Error('無效的迷子事件操作');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const transfer=db.prepare('SELECT * FROM player_transfers WHERE id=? AND guild_id=?').get(transferId,g);
+    if(!transfer) throw new Error('找不到這筆轉帳事件');
+    if(transfer.sender_id!==senderId) throw new Error('只有原轉帳玩家可以處理這筆事件');
+    if(transfer.event!=='mizi_theft') throw new Error('這筆轉帳不是迷子事件');
+    if(transfer.status!=='mizi_pending') throw new Error('這筆迷子事件已經處理完成');
+    let senderRecovered=0,status='abandoned';
+    if(action==='chase') {
+      senderRecovered=transfer.amount;
+      status='recovered';
+      changeBalanceUnlocked(g,senderId,senderRecovered,'transfer_mizi_recovery',senderId,'追擊迷子並取回遭盜領的轉帳本金');
+    }
+    const claimed=db.prepare(`UPDATE player_transfers
+      SET status=?,sender_recovered=?,resolved_at=CURRENT_TIMESTAMP
+      WHERE id=? AND guild_id=? AND status='mizi_pending'`).run(status,senderRecovered,transferId,g);
+    if(claimed.changes!==1) throw new Error('這筆迷子事件已經被處理');
+    const senderBalance=balance(g,senderId);
+    db.exec('COMMIT');
+    return {...transfer,status,senderRecovered,senderBalance};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function miziTransferRow(transferId,senderId,disabled=false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`transfer_mizi_chase:${transferId}:${senderId}`).setLabel('追擊並取回款項').setEmoji('🏃').setStyle(ButtonStyle.Success).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`transfer_mizi_abandon:${transferId}:${senderId}`).setLabel('放棄追擊').setEmoji('🏳️').setStyle(ButtonStyle.Secondary).setDisabled(disabled)
+  );
 }
 function economyFlow(g,sinceModifier) {
   const rows=db.prepare("SELECT kind,delta FROM ledger WHERE guild_id=? AND created_at>=datetime('now',?)").all(g,sinceModifier);
@@ -466,15 +759,32 @@ function debt(g,u) {
     return result.debt;
   } catch(e) { db.exec('ROLLBACK'); throw e; }
 }
+function loanCreditProfile(g,u,currentDebt=0) {
+  const wallet=balance(g,u),netWallet=Math.max(0,wallet-currentDebt);
+  const owned=assetsOf(g,u);
+  const assetValue=owned.reduce((sum,row)=>sum+(assetCatalog[row.asset_id]?.price||0)*row.quantity,0);
+  const earned=db.prepare("SELECT COALESCE(SUM(delta),0) AS total FROM ledger WHERE guild_id=? AND user_id=? AND delta>0 AND kind NOT IN ('loan','admin_adjust','asset_trade','market_sale','wager_return')")
+    .get(g,u).total||0;
+  const repaid=Math.abs(db.prepare("SELECT COALESCE(SUM(delta),0) AS total FROM ledger WHERE guild_id=? AND user_id=? AND delta<0 AND kind='repayment'")
+    .get(g,u).total||0);
+  const walletCredit=Math.min(15_000_000,Math.floor(netWallet*0.25));
+  const assetCredit=Math.min(60_000_000,Math.floor(assetValue*0.35));
+  const activityCredit=Math.min(20_000_000,Math.floor(earned*0.05));
+  const repaymentCredit=Math.min(5_000_000,Math.floor(repaid*0.1));
+  const limit=Math.min(LOAN_LIMIT,Math.max(LOAN_BASE_LIMIT,LOAN_BASE_LIMIT+walletCredit+assetCredit+activityCredit+repaymentCredit));
+  const rating=limit>=LOAN_LIMIT?'皇家尊榮':limit>=50_000_000?'鑽石':limit>=20_000_000?'白金':limit>=5_000_000?'黃金':limit>=1_000_000?'優良':'一般';
+  return {limit,rating,walletCredit,assetCredit,activityCredit,repaymentCredit,assetValue,earned,repaid};
+}
 function bankTransfer(g,u,amount,type) {
   db.exec('BEGIN IMMEDIATE');
   try {
     accrueLoanInterestUnlocked(g,u);
     const wallet=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,u).balance;
     const currentDebt=db.prepare('SELECT debt FROM bank_accounts WHERE guild_id=? AND user_id=?').get(g,u).debt;
+    const credit=loanCreditProfile(g,u,currentDebt);
     let nextBalance, nextDebt, delta;
     if(type==='borrow') {
-      if(currentDebt+amount>LOAN_LIMIT) throw new Error(`借款後會超過額度 ${fmt(LOAN_LIMIT)}`);
+      if(currentDebt+amount>credit.limit) throw new Error(`借款後會超過你的個人核貸額度 ${fmt(credit.limit)}`);
       nextBalance=wallet+amount; nextDebt=currentDebt+amount; delta=amount;
     } else {
       if(amount>currentDebt) throw new Error(`還款不能超過目前負債 ${fmt(currentDebt)}`);
@@ -484,8 +794,9 @@ function bankTransfer(g,u,amount,type) {
     db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(nextBalance,g,u);
     db.prepare('UPDATE bank_accounts SET debt=?,interest_day=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(nextDebt,taipeiDay(),g,u);
     db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,u,delta,nextBalance,type==='borrow'?'loan':'repayment',u,type==='borrow'?'銀行借款':'銀行還款');
+    const updatedCredit=loanCreditProfile(g,u,nextDebt);
     db.exec('COMMIT');
-    return {balance:nextBalance,debt:nextDebt};
+    return {balance:nextBalance,debt:nextDebt,limit:updatedCredit.limit,rating:updatedCredit.rating};
   } catch(e) { db.exec('ROLLBACK'); throw e; }
 }
 const shopItems={
@@ -521,19 +832,117 @@ const assetCatalog={
   daily_rental_suite:{name:'🔑 24 小時日租套房',category:'房地產',price:1200,description:'舒適、投資人與電競玩家三款套房租金 1,200 金幣；另有 800 金幣的窮鬼日租房可選。使用期限皆為 24 小時，到期後自動失效。',images:['properties/daily_rental_suite.jpg','properties/investor_rental_suite.jpg','properties/gaming_rental_suite.jpg','properties/poor_daily_rental_suite.jpg'],rarity:'限時租用',buff:'stamina',temporaryHours:24,rentalGroup:'daily_suite'},
   poor_daily_rental_suite:{name:'🪙 窮鬼日租房',category:'房地產',price:800,description:'乾淨基本、經濟實惠的簡單住宿；使用期限 24 小時，租用增益為標準日租套房的一半。',image:'properties/poor_daily_rental_suite.jpg',rarity:'平價限時租用',buff:'stamina',buffMultiplier:0.5,temporaryHours:24,rentalGroup:'daily_suite',forSale:false},
   haunted_daily_suite:{name:'👻 猛鬼套房',category:'房地產',price:0,description:'完全免費入住 24 小時，但房內的東西會隨機賦予一項極強增益或嚴重減益；效果會固定到退房，無法重抽。',image:'properties/haunted_suite.jpg',rarity:'詛咒限時租用',temporaryHours:24,rentalGroup:'daily_suite',randomRentalBuffs:['haunted_fortune','haunted_energy','haunted_work','haunted_jackpot','haunted_exhaustion','haunted_poverty','haunted_curse'],forSale:false},
+  cute_dog_den:{name:'🐶 萌犬的窩',category:'房地產',price:128000,description:'以柔軟床墊、暖色燈光與皇冠裝飾打造的萌犬專屬小宮殿，讓主人與犬類夥伴都能獲得更充分的休息。',image:'pets/cute_dog_den.jpg',rarity:'史詩',buff:'stamina',buffMultiplier:1.5},
   apartment:{name:'🏢 市中心公寓',category:'房地產',price:50000,description:'適合新手投資人的第一間房。',image:'properties/downtown_apartment.jpg'},
   villa:{name:'🏡 海景別墅',category:'房地產',price:250000,description:'能眺望賭場燈火的豪華別墅。',image:'properties/ocean_view_villa.jpg'},
   casino_suite:{name:'🏨 賭場豪華頂樓公寓',category:'房地產',price:600000,description:'坐擁賭城夜景、豪華臥室、景觀浴室與私人客廳的頂樓尊榮住所。',images:['properties/casino_penthouse_bathroom.jpg','properties/casino_penthouse_bedroom.jpg','properties/casino_penthouse_livingroom.jpg']},
   luxury_palace:{name:'👑 豪華宮殿',category:'房地產',price:8888888,description:'金碧輝煌的頂級私人宮殿，擁有宏偉外觀、奢華寢宮、宴會廳、衣帽間與宮廷庭園，是身分與財富的終極象徵。',image:'properties/luxury_palace.jpg',rarity:'神話'},
+  macau_bay_international_airport:{name:'🛫 澳門海灣國際機場',category:'房地產',price:8888888,description:'面向港澳台與鄰近城市的區域航空樞紐。購買後可註冊航空公司，使用自己的客機經營區域及東亞航線。',image:'properties/airports/macau_bay_international_airport.png',rarity:'傳說',unique:true,airportTier:1,airlineMultiplier:1},
+  pearl_delta_international_airport:{name:'🌉 珠江都會國際機場',category:'房地產',price:18888888,description:'具備大型維修棚與長程航廈的都會國際機場。可經營區域、東亞與跨洲航線，營收加成 20%。',image:'properties/airports/pearl_delta_international_airport.png',rarity:'神話',unique:true,airportTier:2,airlineMultiplier:1.2},
+  imperial_global_aviation_city:{name:'👑 帝國環球航空城',category:'房地產',price:38888888,description:'私人頭等航廈、貨運中心與雙跑道一應俱全的頂級航空城。開放全部航線，營收加成 45%。',image:'properties/airports/imperial_global_aviation_city.png',rarity:'限定',unique:true,airportTier:3,airlineMultiplier:1.45},
+  fuji_sakura_international_airport:{name:'🌸 富士櫻花國際空港',category:'房地產',price:12888888,description:'以富士山、櫻花航廈與高速鐵路聞名的日本精密營運機場。可經營區域、東亞及跨洲航線，營收加成 15%。',image:'properties/airports/fuji_sakura_international_airport.png',rarity:'神話',unique:true,airportTier:2,airlineMultiplier:1.15},
+  liberty_star_international_airport:{name:'🗽 自由之星國際機場',category:'房地產',price:22888888,description:'連接都會、州際公路與洲際航網的美國超大型航空樞紐。可經營區域、東亞及跨洲航線，營收加成 32%。',image:'properties/airports/liberty_star_international_airport.png',rarity:'神話',unique:true,airportTier:2,airlineMultiplier:1.32},
+  coral_coast_international_airport:{name:'🪸 珊瑚海岸國際機場',category:'房地產',price:16888888,description:'坐落澳洲珊瑚海岸，採用太陽能波浪航廈的濱海機場。可經營區域、東亞及跨洲航線，營收加成 22%。',image:'properties/airports/coral_coast_international_airport.png',rarity:'傳說',unique:true,airportTier:2,airlineMultiplier:1.22},
+  emerald_tropics_international_airport:{name:'🌴 翡翠熱帶國際機場',category:'房地產',price:13888888,description:'融合雨林花園、季風水景與熱帶航廈的東南亞門戶。可經營區域、東亞及跨洲航線，營收加成 18%。',image:'properties/airports/emerald_tropics_international_airport.png',rarity:'傳說',unique:true,airportTier:2,airlineMultiplier:1.18},
+  skyreach_summit_international_airport:{name:'🏔️ 天穹雪峰國際機場',category:'房地產',price:28888888,description:'建於雪山高原、擁有加熱跑道與山體航廈的極限航空基地。開放全部航線，營收加成 38%。',image:'properties/airports/skyreach_summit_international_airport.png',rarity:'限定',unique:true,airportTier:3,airlineMultiplier:1.38},
+  sunrise_harbor_international_airport:{name:'🌅 晨曦海港國際機場',category:'房地產',price:2888888,description:'面向新手航空公司的親民濱海機場，設有單跑道與精簡航廈。可經營區域及東亞航線，航線營收為標準值的 90%。',image:'properties/airports/sunrise_harbor_international_airport.png',rarity:'史詩',unique:true,airportTier:1,airlineMultiplier:0.9},
+  aurora_fjord_international_airport:{name:'🌌 極光峽灣國際機場',category:'房地產',price:20888888,description:'坐落北歐峽灣、以極光航廈與冰雪營運聞名的國際樞紐。可經營區域、東亞及跨洲航線，營收加成 28%。',image:'properties/airports/aurora_fjord_international_airport.png',rarity:'神話',unique:true,airportTier:2,airlineMultiplier:1.28},
+  golden_dunes_international_airport:{name:'☀️ 黃金沙海國際機場',category:'房地產',price:32888888,description:'結合沙丘航廈、太陽能機坪與洲際貨運中心的沙漠航空樞紐。開放全部航線，營收加成 42%。',image:'properties/airports/golden_dunes_international_airport.png',rarity:'限定',unique:true,airportTier:3,airlineMultiplier:1.42},
+  neon_lotus_metropolitan_airport:{name:'🪷 霓虹蓮都國際機場',category:'房地產',price:6888888,description:'矗立海灣霓虹都會的蓮花型未來航廈，適合剛起步的航空公司。可經營入門與短途航線，營收加成 5%。',image:'properties/airports/neon_lotus_metropolitan_airport.jpg',rarity:'傳說',unique:true,airportTier:1,airlineMultiplier:1.05},
+  alpine_crystal_international_airport:{name:'🏔️ 阿爾卑斯水晶國際機場',category:'房地產',price:15888888,description:'座落雪峰、冰河湖與山谷鐵路之間的水晶航廈。可經營短途及跨洲航線，營收加成 20%。',image:'properties/airports/alpine_crystal_international_airport.jpg',rarity:'傳說',unique:true,airportTier:2,airlineMultiplier:1.2},
+  amazon_canopy_international_airport:{name:'🌿 亞馬遜樹冠國際機場',category:'房地產',price:17888888,description:'以綠屋頂、太陽能機坪與架高航廈守護雨林的永續航空門戶。可經營短途及跨洲航線，營收加成 24%。',image:'properties/airports/amazon_canopy_international_airport.jpg',rarity:'神話',unique:true,airportTier:2,airlineMultiplier:1.24},
+  aegean_sapphire_international_airport:{name:'💎 愛琴海藍寶石國際機場',category:'房地產',price:22888888,description:'坐擁藍寶石海灣、白崖與度假島鏈的地中海航空樞紐。可經營短途及跨洲航線，營收加成 30%。',image:'properties/airports/aegean_sapphire_international_airport.jpg',rarity:'神話',unique:true,airportTier:2,airlineMultiplier:1.3},
+  obsidian_aurora_intercontinental_airport:{name:'🌋 黑曜極光洲際機場',category:'房地產',price:35888888,description:'建於北境火山半島，擁有黑曜航廈、三跑道與寬體機坪的頂級樞紐。開放全部航線，營收加成 44%。',image:'properties/airports/obsidian_aurora_intercontinental_airport.jpg',rarity:'限定',unique:true,airportTier:3,airlineMultiplier:1.44},
   yacht:{name:'🛥️ 私人遊艇',category:'郵輪',price:350000,description:'小型私人海上娛樂空間。'},
   cruise:{name:'🛳️ 豪華郵輪｜Ocean Majesty',category:'郵輪',price:1200000,description:'燈火璀璨的海上宮殿，設有泳池、宴會廳、劇院與直升機坪，整晚派對能為賭場之夜帶來好運。',image:'ships/luxury_cruise.jpg',rarity:'傳說',buff:'casino'},
   going_merry:{name:'☠️ 梅莉號 Going Merry',category:'郵輪',price:3500000,description:'承載冒險、友情與無數回憶的傳奇海賊船；羊首船艏會在最危急的時刻帶領船員突破封鎖。',image:'ships/going_merry.jpg',rarity:'限定',buff:'getaway',buffMultiplier:3},
   luxury_submarine:{name:'🌊 豪華潛水艇｜SeaBreeze',category:'郵輪',price:4800000,description:'配備全景觀景艙、私人套房、深海餐廳與尖端聲納系統的水下行宮，提供遠離喧囂的頂級休息環境。',image:'ships/luxury_submarine.jpg',rarity:'神話',buff:'stamina',buffMultiplier:2.5},
   ghost_pirate_ship:{name:'🏴‍☠️ 海盜幽靈船',category:'郵輪',price:2500000,description:'自迷霧中現身的詛咒海盜船，幽綠鬼火照亮破舊船帆；購買後會隨機獲得一項永久資產增益。',image:'ships/ghost_pirate_ship.jpg',rarity:'傳說'},
   pom_stroller:{name:'🐕 猛博美豪華推車',category:'收藏品',price:48000,description:'替猛博美準備的全天候豪華推車，柔軟座艙與遮雨棚能讓主人獲得更充分的休息。',image:'vehicles/pom_stroller.jpg',rarity:'稀有',buff:'stamina'},
+  weapon_pistol:{name:'🔫 制式手槍',category:'武器',price:15000,description:'可靠的入門防衛武器，搶劫火力：劫匪 +1／警方 +1。每次行動消耗制式手槍彈藥箱 ×1。',rarity:'一般',buff:'combat',unique:true,combatItem:true},
+  weapon_glock17:{name:'🔫 Glock 17',category:'武器',price:28000,description:'17+1 發、可靠且容易操控的 9×19mm 半自動手槍，搶劫火力：劫匪 +2／警方 +2。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/handguns/glock17.png',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
+  weapon_sig_p226:{name:'🔫 SIG Sauer P226',category:'武器',price:36000,description:'15+1 發的精準 9×19mm 半自動手槍，適合警方與專業行動，搶劫火力：劫匪 +2／警方 +3。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/handguns/sig_p226.png',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
+  weapon_hk_usp:{name:'🔫 H&K USP',category:'武器',price:42000,description:'12+1 發的 .45 ACP 半自動手槍，兼具可靠度與制止力，搶劫火力：劫匪 +3／警方 +3。每次行動消耗 .45 ACP 彈藥箱 ×1。',image:'weapons/handguns/hk_usp.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_colt_1911:{name:'🔫 Colt 1911',category:'武器',price:38000,description:'7+1 發的經典 .45 ACP 半自動手槍，單發威力強勁，搶劫火力：劫匪 +3／警方 +2。每次行動消耗 .45 ACP 彈藥箱 ×1。',image:'weapons/handguns/colt_1911.png',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
+  weapon_fn_five_seven:{name:'🔫 FN Five-seveN',category:'武器',price:52000,description:'20+1 發的 5.7×28mm 半自動手槍，彈容量高且穿透表現優秀，搶劫火力：劫匪 +3／警方 +3。每次行動消耗 5.7×28mm 彈藥箱 ×1。',image:'weapons/handguns/fn_five_seven.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_desert_eagle_50ae:{name:'🦅 Desert Eagle .50 AE',category:'武器',price:75000,description:'7+1 發的 .50 AE 大口徑半自動手槍，擁有手槍中頂尖的爆發威力，搶劫火力：劫匪 +4／警方 +3。每次行動消耗 .50 AE 彈藥箱 ×1。',image:'weapons/handguns/desert_eagle_50ae.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_beretta_92fs:{name:'🔫 Beretta 92FS',category:'武器',price:35000,description:'15+1 發的 9×19mm 半自動手槍，平衡、耐用且適合長時間勤務，搶劫火力：劫匪 +2／警方 +3。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/handguns/beretta_92fs.png',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
+  weapon_cz75:{name:'🔫 CZ 75',category:'武器',price:33000,description:'16+1 發的 9×19mm 全鋼製半自動手槍，射擊穩定且精度優秀，搶劫火力：劫匪 +2／警方 +2。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/handguns/cz75.png',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
+  weapon_walther_p99:{name:'🔫 Walther P99',category:'武器',price:34000,description:'15+1 發的 9×19mm 現代半自動手槍，輕巧靈活並適合快速反應，搶劫火力：劫匪 +2／警方 +3。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/handguns/walther_p99.png',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
+  weapon_m9a3:{name:'🔫 M9A3',category:'武器',price:48000,description:'17+1 發的 9×19mm 戰術半自動手槍，改良握把與導軌提供良好操控，搶劫火力：劫匪 +3／警方 +3。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/handguns/m9a3.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_desert_eagle_50ae:{name:'🏆 黃金 Desert Eagle .50 AE',category:'武器',price:188888,description:'黃金雕花的 .50 AE 大口徑收藏手槍，擁有驚人的近距離爆發力，搶劫火力：劫匪 +5／警方 +4。每次行動消耗 .50 AE 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_desert_eagle_50ae.png',rarity:'傳說黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_glock17:{name:'🏆 黃金 Glock 17',category:'武器',price:88888,description:'可靠耐用的 Glock 17 黃金限定版，是黃金手槍系列的入門收藏，搶劫火力：劫匪 +3／警方 +3。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_glock17.png',rarity:'史詩黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_sig_p226:{name:'🏆 黃金 SIG Sauer P226',category:'武器',price:108888,description:'精準可靠的 P226 黃金限定版，特別適合專業行動與警方配裝，搶劫火力：劫匪 +3／警方 +4。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_sig_p226.png',rarity:'史詩黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_hk_usp:{name:'🏆 黃金 H&K USP',category:'武器',price:128888,description:'以黃金塗裝強化收藏價值的 .45 ACP USP，兼具威力與可靠度，搶劫火力：劫匪 +4／警方 +4。每次行動消耗 .45 ACP 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_hk_usp.png',rarity:'傳說黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_fn_five_seven:{name:'🏆 黃金 FN Five-seveN',category:'武器',price:148888,description:'20+1 發的黃金 Five-seveN，彈容量與穿透表現同樣亮眼，搶劫火力：劫匪 +4／警方 +4。每次行動消耗 5.7×28mm 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_fn_five_seven.png',rarity:'傳說黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_colt_1911:{name:'🏆 黃金 Colt 1911',category:'武器',price:118888,description:'經典 Colt 1911 的黃金雕花版本，單發制止力強且極具收藏價值，搶劫火力：劫匪 +4／警方 +3。每次行動消耗 .45 ACP 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_colt_1911.png',rarity:'史詩黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_beretta_92fs:{name:'🏆 黃金 Beretta 92FS',category:'武器',price:98888,description:'華麗雕花的黃金 Beretta 92FS，保持均衡操控與勤務可靠度，搶劫火力：劫匪 +3／警方 +4。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_beretta_92fs.png',rarity:'史詩黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_cz75:{name:'🏆 黃金 CZ 75',category:'武器',price:93888,description:'全鋼槍身配上黃金塗裝的 CZ 75，穩定精準且適合收藏，搶劫火力：劫匪 +3／警方 +3。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_cz75.png',rarity:'史詩黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_walther_p99:{name:'🏆 黃金 Walther P99',category:'武器',price:103888,description:'現代化 P99 的黃金限定版，反應迅速並適合近距離行動，搶劫火力：劫匪 +3／警方 +4。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_walther_p99.png',rarity:'史詩黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_p08_luger:{name:'🏆 黃金 P08 Luger',category:'武器',price:168888,description:'稀有 P08 Luger 的黃金雕刻收藏版，獨特外型與歷史價值使其極為珍貴，搶劫火力：劫匪 +4／警方 +4。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/golden_handguns/golden_p08_luger.png',rarity:'傳說黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_smg:{name:'⚡ 衝鋒槍',category:'武器',price:45000,description:'近距離壓制力優秀的自動武器，搶劫火力：劫匪 +3／警方 +2。每次行動消耗衝鋒槍彈藥箱 ×1。',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
+  weapon_shotgun:{name:'💥 霰彈槍',category:'武器',price:55000,description:'適合狹窄空間與防線突破，搶劫火力：劫匪 +2／警方 +3。每次行動消耗霰彈槍彈藥箱 ×1。',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
+  weapon_rifle:{name:'🎯 突擊步槍',category:'武器',price:90000,description:'攻守均衡的高火力裝備，搶劫火力：劫匪 +4／警方 +4。每次行動消耗突擊步槍彈藥箱 ×1。',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_m4a1:{name:'🔫 M4A1 自動步槍',category:'武器',price:105000,description:'穩定、均衡且易於控制的標準自動步槍，搶劫火力：劫匪 +4／警方 +4。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/m4a1.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_hk416:{name:'🔫 HK416 自動步槍',category:'武器',price:120000,description:'可靠度與精準壓制力優秀的高階步槍，搶劫火力：劫匪 +4／警方 +5。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/hk416.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_scar_l:{name:'🔫 SCAR-L 自動步槍',category:'武器',price:130000,description:'輕量模組化設計適合快速突入，搶劫火力：劫匪 +5／警方 +4。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/scar_l.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_ak47:{name:'🔫 AK-47 自動步槍',category:'武器',price:100000,description:'以強大火力與耐用性聞名的經典步槍，搶劫火力：劫匪 +5／警方 +3。每次行動消耗 7.62×39mm 彈藥箱 ×1。',image:'weapons/ak47.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_ak74m:{name:'🔫 AK-74M 自動步槍',category:'武器',price:110000,description:'後座力較易掌握的現代化步槍，搶劫火力：劫匪 +4／警方 +4。每次行動消耗 5.45×39mm 彈藥箱 ×1。',image:'weapons/ak74m.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_ak12:{name:'🔫 AK-12 自動步槍',category:'武器',price:150000,description:'兼具現代化操控與高火力的頂級步槍，搶劫火力：劫匪 +5／警方 +5。每次行動消耗 5.45×39mm 彈藥箱 ×1。',image:'weapons/ak12.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_fn_fal:{name:'🔫 FN FAL 自動步槍',category:'武器',price:135000,description:'使用大口徑彈藥、擁有強勁突破能力，搶劫火力：劫匪 +5／警方 +4。每次行動消耗 7.62×51mm NATO 彈藥箱 ×1。',image:'weapons/fn_fal.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_g3a3:{name:'🔫 G3A3 自動步槍',category:'武器',price:130000,description:'適合中遠距離封鎖與防線壓制，搶劫火力：劫匪 +4／警方 +5。每次行動消耗 7.62×51mm NATO 彈藥箱 ×1。',image:'weapons/g3a3.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_qbz95:{name:'🔫 QBZ-95 自動步槍',category:'武器',price:125000,description:'短巧無托結構適合狹窄環境作戰，搶劫火力：劫匪 +5／警方 +4。每次行動消耗 5.8×42mm 彈藥箱 ×1。',image:'weapons/qbz95.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_aug_a3:{name:'🔫 AUG A3 自動步槍',category:'武器',price:145000,description:'配備光學瞄具的高精準無托步槍，搶劫火力：劫匪 +4／警方 +5。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/aug_a3.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_m4a1:{name:'🏆 黃金 M4A1',category:'武器',price:888888,description:'以黃金塗裝打造的限定 M4A1，兼具收藏價值與穩定火力，搶劫火力：劫匪 +6／警方 +6。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/golden/golden_m4a1.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_ak47:{name:'🏆 黃金 AK-47',category:'武器',price:988888,description:'經典 AK-47 的黃金限定版本，以強大突破力壓制防線，搶劫火力：劫匪 +7／警方 +5。每次行動消耗 7.62×39mm 彈藥箱 ×1。',image:'weapons/golden/golden_ak47.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_hk416:{name:'🏆 黃金 HK416',category:'武器',price:1088888,description:'高可靠度 HK416 的黃金收藏版本，適合精準而持續的火力壓制，搶劫火力：劫匪 +6／警方 +7。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/golden/golden_hk416.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_scar_l:{name:'🏆 黃金 SCAR-L',category:'武器',price:1188888,description:'模組化 SCAR-L 的黃金限定版本，能在突入與撤離時提供頂級火力，搶劫火力：劫匪 +7／警方 +6。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/golden/golden_scar_l.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_famas:{name:'🏆 黃金 FAMAS',category:'武器',price:1288888,description:'高射速無托步槍的黃金限定版本，適合短時間爆發壓制，搶劫火力：劫匪 +7／警方 +6。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/golden/golden_famas.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_g36c:{name:'🏆 黃金 G36C',category:'武器',price:1388888,description:'短管 G36C 的黃金特仕版本，在狹窄環境依然具備靈活操控與精準火力，搶劫火力：劫匪 +6／警方 +7。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/golden/golden_g36c.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_qbz95:{name:'🏆 黃金 QBZ-95',category:'武器',price:1488888,description:'QBZ-95 的黃金限定收藏版本，短巧槍身適合室內突破，搶劫火力：劫匪 +7／警方 +6。每次行動消耗 5.8×42mm 彈藥箱 ×1。',image:'weapons/golden/golden_qbz95.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_ak12:{name:'🏆 黃金 AK-12',category:'武器',price:1588888,description:'現代化 AK-12 的黃金頂級版本，將操控、可靠度與火力推向極致，搶劫火力：劫匪 +7／警方 +7。每次行動消耗 5.45×39mm 彈藥箱 ×1。',image:'weapons/golden/golden_ak12.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_aug_a3:{name:'🏆 黃金 AUG A3',category:'武器',price:1688888,description:'配備光學瞄具的黃金 AUG A3，擅長中距離精準封鎖，搶劫火力：劫匪 +6／警方 +7。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/golden/golden_aug_a3.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_k2:{name:'🏆 黃金 K2',category:'武器',price:1888888,description:'稀有 K2 的黃金限定版本，具備均衡且強悍的作戰性能，搶劫火力：劫匪 +7／警方 +7。每次行動消耗 5.56×45mm NATO 彈藥箱 ×1。',image:'weapons/golden/golden_k2.jpg',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_sniper:{name:'🔭 狙擊步槍',category:'武器',price:120000,description:'警方封鎖與遠距離掩護的頂級裝備，搶劫火力：劫匪 +2／警方 +5。每次行動消耗狙擊步槍彈藥箱 ×1。',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_m24_sws:{name:'🔭 M24 SWS',category:'武器',price:140000,description:'穩定可靠的軍用栓動狙擊槍，適合長距離精準掩護，搶劫火力：劫匪 +3／警方 +6。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/m24_sws.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_awp:{name:'🎯 AWP',category:'武器',price:180000,description:'威力與精準度兼具的經典狙擊槍，適合在關鍵時刻突破防線，搶劫火力：劫匪 +4／警方 +6。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/awp.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_barrett_m82a1:{name:'💥 Barrett M82A1',category:'武器',price:260000,description:'大口徑半自動反器材狙擊槍，擁有本系列最強正面壓制力，搶劫火力：劫匪 +6／警方 +6。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/barrett_m82a1.png',rarity:'神話',buff:'combat',unique:true,combatItem:true},
+  weapon_dragunov_svd:{name:'🔭 Dragunov SVD',category:'武器',price:165000,description:'兼顧射速與精準度的半自動指定射手步槍，搶劫火力：劫匪 +4／警方 +5。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/dragunov_svd.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_cheytac_m200:{name:'🎯 CheyTac M200',category:'武器',price:240000,description:'專為超遠距離精密射擊設計的高階狙擊槍，搶劫火力：劫匪 +5／警方 +7。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/cheytac_m200.png',rarity:'神話',buff:'combat',unique:true,combatItem:true},
+  weapon_kar98k:{name:'🪖 Kar98k',category:'武器',price:95000,description:'歷史悠久、結構可靠的經典栓動步槍，搶劫火力：劫匪 +3／警方 +4。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/kar98k.png',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
+  weapon_l96a1:{name:'🔭 L96A1',category:'武器',price:175000,description:'惡劣環境下仍能維持精準度的軍警用栓動狙擊槍，搶劫火力：劫匪 +4／警方 +6。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/l96a1.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_trg_22:{name:'🎯 TRG-22',category:'武器',price:155000,description:'輕量化且精準的戰術狙擊槍，適合快速部署與撤離，搶劫火力：劫匪 +4／警方 +5。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/trg_22.png',rarity:'史詩',buff:'combat',unique:true,combatItem:true},
+  weapon_vsk_94:{name:'🌑 VSK-94',category:'武器',price:190000,description:'配備抑制器的低調狙擊系統，特別適合秘密突入，搶劫火力：劫匪 +5／警方 +5。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/vsk_94.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_psg1:{name:'🔭 PSG1',category:'武器',price:210000,description:'高精度半自動狙擊槍，能快速完成遠距離連續壓制，搶劫火力：劫匪 +5／警方 +6。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/snipers/psg1.png',rarity:'傳說',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_m24_sws:{name:'🏆 黃金 M24 SWS',category:'武器',price:988888,description:'黃金雕飾的 M24 SWS 收藏版，兼具精準掩護與頂級收藏價值，搶劫火力：劫匪 +5／警方 +8。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/m24_sws.png',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_awp:{name:'🏆 黃金 AWP',category:'武器',price:1188888,description:'高威力 AWP 的黃金限定版本，關鍵時刻能提供致命壓制，搶劫火力：劫匪 +6／警方 +8。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/awp.png',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_barrett_m82a1:{name:'🏆 黃金 Barrett M82A1',category:'武器',price:2888888,description:'黃金重裝反器材狙擊槍，本系列火力最高的終極收藏，搶劫火力：劫匪 +9／警方 +9。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/barrett_m82a1.png',rarity:'限定黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_dragunov_svd:{name:'🏆 黃金 Dragunov SVD',category:'武器',price:1388888,description:'金色半自動 SVD，在精準度與持續壓制之間取得平衡，搶劫火力：劫匪 +7／警方 +7。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/dragunov_svd.png',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_cheytac_m200:{name:'🏆 黃金 CheyTac M200',category:'武器',price:2588888,description:'超遠距離黃金精密狙擊系統，提供頂級警方封鎖能力，搶劫火力：劫匪 +8／警方 +9。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/cheytac_m200.png',rarity:'限定黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_kar98k:{name:'🏆 黃金 Kar98k',category:'武器',price:888888,description:'經典 Kar98k 的黃金典藏版，是黃金狙擊系列的入門收藏，搶劫火力：劫匪 +5／警方 +6。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/kar98k.png',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_l96a1:{name:'🏆 黃金 L96A1',category:'武器',price:1588888,description:'穩定可靠的 L96A1 黃金版，適合高風險環境的遠距離封鎖，搶劫火力：劫匪 +6／警方 +8。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/l96a1.png',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_trg_22:{name:'🏆 黃金 TRG-22',category:'武器',price:1488888,description:'輕量化 TRG-22 的黃金戰術版，擅長快速部署與撤離，搶劫火力：劫匪 +7／警方 +7。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/trg_22.png',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_vsk_94:{name:'🏆 黃金 VSK-94',category:'武器',price:1788888,description:'配備抑制器的黃金 VSK-94，兼具隱密性與高階火力，搶劫火力：劫匪 +8／警方 +7。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/vsk_94.png',rarity:'神話黃金',buff:'combat',unique:true,combatItem:true},
+  weapon_golden_psg1:{name:'🏆 黃金 PSG1',category:'武器',price:2188888,description:'高精度半自動 PSG1 黃金版，可在遠距離持續封鎖目標，搶劫火力：劫匪 +8／警方 +8。每次行動消耗狙擊槍通用子彈 ×1。',image:'weapons/golden_snipers/psg1.png',rarity:'限定黃金',buff:'combat',unique:true,combatItem:true},
+  ammo_pistol:{name:'📦 手槍通用子彈｜50 發',category:'彈藥',price:1800,description:'所有一般及黃金手槍、衝鋒槍皆可使用。每次搶劫行動消耗一箱，可重複購買並累積庫存。',rarity:'消耗品',buff:'combat',combatItem:true},
+  ammo_9x19:{name:'📦 舊版 9×19mm 彈藥箱',category:'舊版彈藥',price:1800,description:'已自動兌換為手槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_45_acp:{name:'📦 舊版 .45 ACP 彈藥箱',category:'舊版彈藥',price:2200,description:'已自動兌換為手槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_57x28:{name:'📦 舊版 5.7×28mm 彈藥箱',category:'舊版彈藥',price:3200,description:'已自動兌換為手槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_50ae:{name:'📦 舊版 .50 AE 彈藥箱',category:'舊版彈藥',price:4000,description:'已自動兌換為手槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_smg:{name:'📦 舊版衝鋒槍彈藥箱',category:'舊版彈藥',price:2500,description:'已自動兌換為手槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_shotgun:{name:'📦 霰彈槍通用子彈｜12 發',category:'彈藥',price:3000,description:'所有霰彈槍皆可使用。每次搶劫行動消耗一箱，可重複購買並累積庫存。',rarity:'消耗品',buff:'combat',combatItem:true},
+  ammo_rifle:{name:'📦 步槍通用子彈｜30 發',category:'彈藥',price:4000,description:'所有一般及黃金突擊步槍皆可使用。每次搶劫行動消耗一箱，可重複購買並累積庫存。',rarity:'消耗品',buff:'combat',combatItem:true},
+  ammo_556_nato:{name:'📦 舊版 5.56 NATO 彈藥箱',category:'舊版彈藥',price:4200,description:'已自動兌換為步槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_545x39:{name:'📦 舊版 5.45×39mm 彈藥箱',category:'舊版彈藥',price:4000,description:'已自動兌換為步槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_762x39:{name:'📦 舊版 7.62×39mm 彈藥箱',category:'舊版彈藥',price:4500,description:'已自動兌換為步槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_762x51_nato:{name:'📦 舊版 7.62 NATO 彈藥箱',category:'舊版彈藥',price:5200,description:'已自動兌換為步槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_58x42:{name:'📦 舊版 5.8×42mm 彈藥箱',category:'舊版彈藥',price:4300,description:'已自動兌換為步槍通用子彈。',rarity:'停用',buff:'combat',combatItem:true,forSale:false},
+  ammo_sniper:{name:'📦 狙擊槍通用子彈｜10 發',category:'彈藥',price:5000,description:'所有狙擊槍皆可使用。每次搶劫行動消耗一箱，可重複購買並累積庫存。',rarity:'消耗品',buff:'combat',combatItem:true},
   sedan:{name:'🚗 豪華轎車',category:'汽車',price:30000,description:'低調舒適的 Lexus LS500 豪華座駕。',image:'vehicles/luxury_sedan.png'},
   suzuki_every:{name:'📦 Suzuki Every 工作廂型車',category:'汽車',price:72000,description:'車身小巧、載貨空間充足的實用廂型車，能提高合法工作的每日收入。',image:'vehicles/suzuki_every.jpg',rarity:'稀有',buff:'work'},
   rocket_bunny_rx7:{name:'🔥 Mazda RX-7 FD 轉子戰魂',category:'汽車',price:420000,description:'經典轉子跑車，可自由搭配原廠、RE Amemiya、Rocket Bunny 與 VeilSide Fortune 外觀套件，特別擅長高速撤離。',image:'vehicles/rocket_bunny_rx7.jpg',rarity:'傳說',buff:'getaway'},
+  toyota_gr86_blue_limit:{name:'🌅 Toyota GR86 蒼藍落日典藏',category:'汽車',price:3888888,description:'僅販售一週的蒼藍 GR86 像素典藏版。夕陽賽道、黑色車頂與高階空力外觀共同構成不可復刻的限時收藏，售完下架後仍可永久持有、展示及交易。',image:'supercars/toyota_gr86_blue_limit_pixel.png',rarity:'一週限時神話典藏',buff:'getaway',buffMultiplier:3.5,maxOwned:1,saleEndsAt:Date.parse('2026-08-03T23:59:59+08:00')},
+  toyota_supra_mk4:{name:'🐉 Toyota Supra MK4 渦輪傳說',category:'汽車',price:680000,description:'2JZ 渦輪直六所孕育的街頭傳奇。汽車盲盒中的傳說隱藏車款，珍珠白原廠車身已完成車庫改裝基底。',image:'supercars/toyota_supra_mk4.png',rarity:'傳說隱藏',buff:'getaway',forSale:false,blindBox:true,hiddenInPack:true},
   nissan_gtr_r35_nismo:{name:'🏁 Nissan GT-R R35 Nismo 黑武士',category:'汽車',price:980000,description:'Nismo 強化動力、四輪驅動與賽道空力套件集於一身，是甩開追兵的頂級公路戰神。',image:'vehicles/nissan_gtr_r35_nismo.jpg',rarity:'神話',buff:'getaway'},
   toyota_hilux_gr:{name:'🛻 Toyota Hilux GR 越野工作王',category:'汽車',price:260000,description:'堅固可靠的四輪驅動貨卡，無論載運工具或長途工作都能提升每日工作收益。',image:'vehicles/toyota_hilux_gr.jpg',rarity:'史詩',buff:'work'},
   honda_nsx_red:{name:'🔴 Honda NSX 赤紅傳奇',category:'汽車',price:780000,description:'中置引擎與精準操控交織出的日系超跑傳奇，華麗登場能為賭場之夜帶來額外好運。',image:'vehicles/honda_nsx_red.jpg',rarity:'傳說',buff:'casino'},
@@ -564,6 +973,8 @@ const assetCatalog={
   ford_shelby_gt500:{name:'🐍 Ford Shelby GT500 藍蛇',category:'汽車',price:420000,description:'機械增壓 V8 與 Shelby 賽道血統結合的強悍公路猛獸。',image:'blindbox/ford/ford_shelby_gt500.jpg',rarity:'傳說',buff:'getaway',forSale:false,blindBox:true,blindBoxPack:'ford'},
   ford_gt_2017:{name:'🏁 Ford GT 新世代藍焰',category:'汽車',price:800000,description:'低風阻車身與賽車科技打造的新世代超跑，是福特車包的頂級收藏。',image:'blindbox/ford/ford_gt_2017.jpg',rarity:'神話',buff:'getaway',forSale:false,blindBox:true,blindBoxPack:'ford'},
   ford_gt_heritage:{name:'6️⃣ Ford GT 經典傳承版',category:'汽車',price:650000,description:'向利曼傳奇致敬的經典塗裝超跑，收藏價值與牌桌幸運兼具。',image:'blindbox/ford/ford_gt_heritage.jpg',rarity:'傳說',buff:'casino',forSale:false,blindBox:true,blindBoxPack:'ford'},
+  ford_fiesta_rally:{name:'❄️ Ford Fiesta RS 冰雪拉力',category:'汽車',price:280000,description:'為冰雪拉力賽打造的四輪驅動性能鋼砲，在低抓地力與狹窄山路仍能保持驚人的撤離速度。',image:'blindbox/ford/ford_fiesta_rally.jpg',rarity:'史詩',buff:'getaway',forSale:false,blindBox:true,blindBoxPack:'ford'},
+  ford_mustang_1964_hidden:{name:'🎴 Ford Mustang 初代｜1964½',category:'汽車',price:900000,description:'開啟美式肌肉車傳奇的初代野馬，只有極少數收藏家能從福特車包中發現這輛隱藏經典。',image:'blindbox/ford/ford_mustang_1964_hidden.jpg',rarity:'傳說隱藏',buff:'casino',forSale:false,blindBox:true,blindBoxPack:'ford',hiddenInPack:true},
   supercar:{name:'🪽 奧斯頓火神 Vulcan',category:'汽車',price:1900000,description:'賽道級限量猛獸，以強大下壓力和爆發加速統治夜間道路。',image:'supercars/aston_vulcan.jpg',rarity:'限定',buff:'getaway'},
   m3_gtr:{name:'🏁 M3 GTR 夜行戰神',category:'汽車',price:420000,description:'經典街道競速機器，兼具耐用性與甩開追兵的強悍速度。',image:'supercars/m3_gtr.jpg',rarity:'傳說',buff:'getaway'},
   purple_street_scooter:{name:'🛵 紫電街頭勁戰',category:'機車',price:35000,description:'台灣街頭風格的紫色改裝速克達。',image:'motorcycles/purple_street_scooter.png',rarity:'稀有'},
@@ -590,9 +1001,123 @@ const assetCatalog={
   orbital_silver:{name:'🛰️ 星環銀翼',category:'汽車',price:2800000,description:'能在軌道競速場奔馳的未來超跑，提供頂級休息與維生系統。',image:'supercars/orbital_silver.jpg',rarity:'限定',buff:'stamina'},
   orbital_silver_omega:{name:'🌠 星環銀翼 Ω',category:'汽車',price:3800000,description:'星環銀翼的終極限量強化版，專為最高額牌局與收藏家打造。',image:'supercars/orbital_silver.jpg',rarity:'限定',buff:'casino'},
   mystery_huayra:{name:'🎁 經典神秘風神',category:'汽車',price:5500000,description:'幸運輪盤曾經推出的珍稀收藏級超跑，永久增益為商城車輛的 2 倍。',image:'supercars/mystery_huayra.jpg',rarity:'輪盤典藏',buff:'getaway',forSale:false,wheelPrize:true},
+  ah6m_little_bird:{name:'🚁 AH-6M Little Bird 小鳥直升機',category:'飛行器',price:650000,description:'輕巧靈活的像素風特勤直升機，適合城市短程巡航與快速撤離。',image:'aircraft/ah6m_little_bird.png',rarity:'史詩',buff:'getaway',buffMultiplier:1.5},
+  t129_atak:{name:'🚁 T129 ATAK 攻擊直升機',category:'飛行器',price:1450000,description:'兼具速度與機動性的像素風雙座直升機，能提升高風險行動的撤離效率。',image:'aircraft/t129_atak.png',rarity:'傳說',buff:'getaway',buffMultiplier:1.7},
+  eurocopter_tiger:{name:'🐯 Eurocopter Tiger 虎式直升機',category:'飛行器',price:1750000,description:'輪廓銳利、反應敏捷的像素風虎式直升機，是停機坪中的高階收藏。',image:'aircraft/eurocopter_tiger.png',rarity:'傳說',buff:'getaway',buffMultiplier:1.8},
+  z10_attack_helicopter:{name:'🐉 Z-10 霹靂火直升機',category:'飛行器',price:1850000,description:'深色機身與重裝外觀兼具的像素風直升機，能協助玩家突破封鎖。',image:'aircraft/z10_attack_helicopter.png',rarity:'傳說',buff:'getaway',buffMultiplier:1.8},
+  ah64d_saraf:{name:'🦂 AH-64D Saraf 沙漠戰蠍',category:'飛行器',price:2000000,description:'沙漠塗裝的像素風重型直升機，提供可靠的空中撤離支援。',image:'aircraft/ah64d_saraf.png',rarity:'神話',buff:'getaway',buffMultiplier:2},
+  mi24_35_hind:{name:'🐊 Mi-24/35 Hind 雌鹿直升機',category:'飛行器',price:2100000,description:'厚重機身與強烈存在感兼備的像素風經典直升機，適合長距離撤離。',image:'aircraft/mi24_35_hind.png',rarity:'神話',buff:'getaway',buffMultiplier:2},
+  mi28n_havoc:{name:'🌪️ Mi-28N Havoc 浩劫直升機',category:'飛行器',price:2200000,description:'暗色塗裝的像素風重型直升機，在惡劣環境中仍能穩定執行撤離。',image:'aircraft/mi28n_havoc.png',rarity:'神話',buff:'getaway',buffMultiplier:2.2},
+  ka52_alligator:{name:'🐊 Ka-52 Alligator 短吻鱷',category:'飛行器',price:2400000,description:'同軸雙旋翼造型醒目的像素風直升機，擁有頂級空中機動能力。',image:'aircraft/ka52_alligator.png',rarity:'神話',buff:'getaway',buffMultiplier:2.3},
+  ah64e_apache:{name:'🦅 AH-64E Apache 守護者',category:'飛行器',price:2600000,description:'美軍塗裝的像素風頂級直升機，是兼具收藏價值與撤離能力的停機坪旗艦。',image:'aircraft/ah64e_apache.png',rarity:'限定',buff:'getaway',buffMultiplier:2.5},
+  skylark_private_helicopter:{name:'🪽 雲雀私人直升機',category:'飛行器',price:520000,description:'藍白塗裝的輕型像素風直升機，適合入門收藏、短程巡航與靈活撤離。',image:'aircraft/skylark_private_helicopter.png',rarity:'史詩',buff:'getaway',buffMultiplier:1.2},
+  obsidian_city_helicopter:{name:'🌑 黑曜都市直升機',category:'飛行器',price:900000,description:'全黑低調塗裝搭配都會停機坪風格，能在封鎖區中迅速接走玩家。',image:'aircraft/obsidian_city_helicopter.png',rarity:'傳說',buff:'getaway',buffMultiplier:1.5},
+  silverline_business_helicopter:{name:'💼 銀線商務直升機',category:'飛行器',price:1100000,description:'銀白商務塗裝與寬敞座艙兼具，能拓展高階人脈並提高合法工作收益。',image:'aircraft/silverline_business_helicopter.png',rarity:'傳說',buff:'work',buffMultiplier:1.5},
+  blue_bay_executive_helicopter:{name:'🌊 藍灣行政直升機',category:'飛行器',price:1250000,description:'深藍行政塗裝與舒適客艙帶來從容旅程，提升玩家每日體力上限。',image:'aircraft/blue_bay_executive_helicopter.png',rarity:'傳說',buff:'stamina',buffMultiplier:1.5},
+  crimson_rescue_helicopter:{name:'🚨 赤焰救援直升機',category:'飛行器',price:1400000,description:'醒目的紅白救援塗裝適合緊急撤離，在高風險行動中提供可靠支援。',image:'aircraft/crimson_rescue_helicopter.png',rarity:'傳說',buff:'getaway',buffMultiplier:1.8},
+  black_gold_vip_helicopter:{name:'👑 黑金帝王直升機',category:'飛行器',price:2200000,description:'黑金專屬塗裝與尊榮徽記彰顯頂級身分，能為賭場派彩帶來額外好運。',image:'aircraft/black_gold_vip_helicopter.png',rarity:'神話',buff:'casino',buffMultiplier:2},
+  desert_utility_helicopter:{name:'🏜️ 沙漠拓荒直升機',category:'飛行器',price:850000,description:'耐用的沙色多用途像素風直升機，能支援偏遠地區運輸並提高工作收益。',image:'aircraft/desert_utility_helicopter.png',rarity:'史詩',buff:'work',buffMultiplier:1.3},
+  arctic_heavy_transport_helicopter:{name:'❄️ 極地重型運輸直升機',category:'飛行器',price:1800000,description:'大型銀白運輸機艙能承受長途與惡劣環境，提供更充足的休息與體力。',image:'aircraft/arctic_heavy_transport_helicopter.png',rarity:'神話',buff:'stamina',buffMultiplier:2},
+  crimson_coast_helicopter:{name:'🌅 緋紅海岸直升機',category:'飛行器',price:1650000,description:'海岸紅色塗裝搭配流線機身，擅長跨越城市與海岸封鎖快速撤離。',image:'aircraft/crimson_coast_helicopter.png',rarity:'傳說',buff:'getaway',buffMultiplier:2},
+  blue_white_light_helicopter:{name:'🚁 藍白巡航輕型直升機',category:'飛行器',price:480000,description:'靈活可靠的入門私人直升機，適合短程巡航、停機坪收藏與快速撤離。',image:'aircraft/blue_white_light_helicopter.jpg',rarity:'史詩',buff:'getaway'},
+  white_falcon_tactical_helicopter:{name:'🦅 白隼戰術直升機',category:'飛行器',price:2400000,description:'配備軍規航電與全天候飛行能力的高階戰術直升機，能從城市封鎖與海岸追捕中迅速撤離。',image:'aircraft/white_falcon_tactical_helicopter.png',rarity:'神話',buff:'getaway'},
+  night_raven_special_ops_helicopter:{name:'🐦‍⬛ 暗鴉特勤直升機',category:'飛行器',price:2800000,description:'黑色低空突入機身搭載完整特勤小隊，擅長穿梭高樓、突破封鎖並執行高風險撤離。',image:'aircraft/night_raven_special_ops_helicopter.png',rarity:'神話',buff:'getaway'},
   helicopter:{name:'🚁 A1 都會私人直升機',category:'飛行器',price:1200000,description:'適合城市屋頂起降的高級私人直升機，能快速撤離銀行封鎖區。',image:'aircraft/private_helicopter.jpg',rarity:'傳說',buff:'getaway'},
-  jet:{name:'🚁 黑鷹戰術直升機',category:'飛行器',price:3600000,description:'具備重型運輸與惡劣天候能力的軍規直升機，是最高階的空中撤離資產。',image:'aircraft/military_helicopter.jpg',rarity:'限定',buff:'getaway'}
+  jet:{name:'🚁 黑鷹戰術直升機',category:'飛行器',price:3600000,description:'具備重型運輸與惡劣天候能力的軍規直升機，是最高階的空中撤離資產。',image:'aircraft/military_helicopter.jpg',rarity:'限定',buff:'getaway'},
+  boeing_747_400:{name:'✈️ Boeing 747-400 空中女王',category:'飛行器',price:4800000,description:'經典四引擎大型客機，龐大運量能拓展跨國航線並大幅提高合法工作收益。',image:'aircraft/passenger/boeing_747_400.png',rarity:'傳說',buff:'work',buffMultiplier:2},
+  airbus_a380_800:{name:'🏙️ Airbus A380-800 空中城堡',category:'飛行器',price:6800000,description:'雙層超大型旗艦客機，頂級套房與寬敞客艙讓持有者每天保持充沛體力。',image:'aircraft/passenger/airbus_a380_800.png',rarity:'限定',buff:'stamina',buffMultiplier:2.5},
+  boeing_777_300er:{name:'🌏 Boeing 777-300ER 寰宇航線',category:'飛行器',price:5500000,description:'兼具超長航程與高載客量的遠程客機，能穩定拓展全球商務收益。',image:'aircraft/passenger/boeing_777_300er.png',rarity:'神話',buff:'work',buffMultiplier:2.3},
+  airbus_a350_1000:{name:'🪽 Airbus A350-1000 碳纖翼王',category:'飛行器',price:5200000,description:'新世代碳纖維廣體客機，以高效率航線降低各項高級商城採購成本。',image:'aircraft/passenger/airbus_a350_1000.png',rarity:'神話',buff:'discount',buffMultiplier:2},
+  boeing_787_9_dreamliner:{name:'🌙 Boeing 787-9 夢幻客機',category:'飛行器',price:4600000,description:'低艙壓與高濕度客艙帶來舒適長途旅程，可有效提升玩家每日體力上限。',image:'aircraft/passenger/boeing_787_9_dreamliner.png',rarity:'傳說',buff:'stamina',buffMultiplier:2},
+  airbus_a321neo:{name:'📈 Airbus A321neo 新航商務',category:'飛行器',price:2600000,description:'航程與營運效率兼備的窄體客機，適合經營高頻商務航線並提高工作收益。',image:'aircraft/passenger/airbus_a321neo.png',rarity:'史詩',buff:'work',buffMultiplier:1.6},
+  boeing_737_max_8:{name:'☁️ Boeing 737 MAX 8 雲端快線',category:'飛行器',price:2400000,description:'高效率中程客機，密集航班網路能為玩家帶來穩定的合法收入。',image:'aircraft/passenger/boeing_737_max_8.png',rarity:'史詩',buff:'work',buffMultiplier:1.5,forSale:false},
+  airbus_a320neo:{name:'🌊 Airbus A320neo 藍翼航班',category:'飛行器',price:2200000,description:'靈活省油的主力窄體客機，透過規模採購讓資產商城價格更加優惠。',image:'aircraft/passenger/airbus_a320neo.png',rarity:'史詩',buff:'discount',buffMultiplier:1.5},
+  embraer_e190_e2:{name:'⭐ Embraer E190-E2 星際支線',category:'飛行器',price:1600000,description:'舒適安靜的新世代支線客機，適合建立區域航網並增加工作收益。',image:'aircraft/passenger/embraer_e190_e2.png',rarity:'稀有',buff:'work',buffMultiplier:1.3},
+  bombardier_crj900:{name:'🌆 Bombardier CRJ900 城際快線',category:'飛行器',price:1300000,description:'可靠的區域噴射客機，以快速周轉航班協助玩家累積穩定工作收入。',image:'aircraft/passenger/bombardier_crj900.png',rarity:'稀有',buff:'work',buffMultiplier:1.2},
+  boeing_787_9_midnight:{name:'🌑 Boeing 787-9 夢幻夜航',category:'飛行器',price:5600000,description:'全黑低調塗裝的遠程夢幻客機，兼具跨洲航程與頂級商務收益。',image:'aircraft/passenger/three_airliners/boeing_787_9_midnight_side.png',images:['aircraft/passenger/three_airliners/boeing_787_9_midnight_side.png','aircraft/passenger/three_airliners/boeing_787_9_midnight_top.png','aircraft/passenger/three_airliners/boeing_787_9_midnight_front.png'],randomImage:true,rarity:'神話',buff:'work',buffMultiplier:2.4},
+  airbus_a350_1000_midnight:{name:'🖤 Airbus A350-1000 黑曜遠征',category:'飛行器',price:6200000,description:'黑曜塗裝的新世代廣體旗艦，以高效率跨國航線帶來頂級工作收益。',image:'aircraft/passenger/three_airliners/airbus_a350_1000_midnight_side.png',images:['aircraft/passenger/three_airliners/airbus_a350_1000_midnight_side.png','aircraft/passenger/three_airliners/airbus_a350_1000_midnight_top.png','aircraft/passenger/three_airliners/airbus_a350_1000_midnight_front.png'],randomImage:true,rarity:'限定',buff:'work',buffMultiplier:2.6},
+  embraer_e195_e2_midnight:{name:'🌌 Embraer E195-E2 暗夜星線',category:'飛行器',price:2200000,description:'全黑支線客機靈活串聯城市航點，穩定擴張區域商務版圖。',image:'aircraft/passenger/three_airliners/embraer_e195_e2_midnight_side.png',images:['aircraft/passenger/three_airliners/embraer_e195_e2_midnight_side.png','aircraft/passenger/three_airliners/embraer_e195_e2_midnight_top.png','aircraft/passenger/three_airliners/embraer_e195_e2_midnight_front.png'],randomImage:true,rarity:'傳說',buff:'work',buffMultiplier:1.7},
+  boeing_787_9_snow:{name:'🤍 Boeing 787-9 雪翼夢航',category:'飛行器',price:5200000,description:'全白雪翼塗裝搭配舒適長程客艙，能顯著提高每日體力上限。',image:'aircraft/passenger/three_airliners/boeing_787_9_snow_side.png',images:['aircraft/passenger/three_airliners/boeing_787_9_snow_side.png','aircraft/passenger/three_airliners/boeing_787_9_snow_top.png','aircraft/passenger/three_airliners/boeing_787_9_snow_front.png'],randomImage:true,rarity:'神話',buff:'stamina',buffMultiplier:2.3},
+  airbus_a350_1000_snow:{name:'🪽 Airbus A350-1000 白羽旗艦',category:'飛行器',price:5900000,description:'純白塗裝的碳纖維廣體旗艦，以尊榮採購網絡降低商城消費成本。',image:'aircraft/passenger/three_airliners/airbus_a350_1000_snow_side.png',images:['aircraft/passenger/three_airliners/airbus_a350_1000_snow_side.png','aircraft/passenger/three_airliners/airbus_a350_1000_snow_top.png','aircraft/passenger/three_airliners/airbus_a350_1000_snow_front.png'],randomImage:true,rarity:'限定',buff:'discount',buffMultiplier:2.4},
+  embraer_e195_e2_snow:{name:'☁️ Embraer E195-E2 白雲快線',category:'飛行器',price:1950000,description:'純白新世代支線客機，以快速周轉航班提供可靠的工作收益。',image:'aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png',images:['aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_top.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_front.png'],randomImage:true,rarity:'史詩',buff:'work',buffMultiplier:1.5}
 };
+const shotgunSeries=[
+  {key:'classic_pump',name:'經典泵動霰彈槍',price:65000,robber:3,police:3,image:'01-classic-pump.png'},
+  {key:'tactical',name:'戰術突擊霰彈槍',price:80000,robber:4,police:4,image:'02-tactical.png'},
+  {key:'sporting_double',name:'運動雙管霰彈槍',price:90000,robber:4,police:3,image:'03-sporting-double.png'},
+  {key:'frontier_lever',name:'邊境槓桿霰彈槍',price:105000,robber:4,police:4,image:'04-frontier-lever.png'},
+  {key:'cobalt_energy',name:'鈷藍能量霰彈槍',price:125000,robber:5,police:4,image:'05-cobalt-energy.png'},
+  {key:'amethyst_arcane',name:'紫晶秘法霰彈槍',price:145000,robber:5,police:5,image:'06-amethyst-arcane.png'},
+  {key:'industrial_drum',name:'工業彈鼓霰彈槍',price:165000,robber:6,police:5,image:'07-industrial-drum.png'},
+  {key:'frost',name:'冰霜破陣霰彈槍',price:190000,robber:5,police:6,image:'08-frost.png'},
+  {key:'volcanic',name:'火山熔核霰彈槍',price:220000,robber:6,police:6,image:'09-volcanic.png'},
+  {key:'celestial',name:'天界聖光霰彈槍',price:260000,robber:7,police:7,image:'10-celestial.png'}
+];
+shotgunSeries.forEach((shotgun,index)=>{
+  const regularId=`weapon_shotgun_${shotgun.key}`;
+  const goldenId=`weapon_golden_shotgun_${shotgun.key}`;
+  const regularRarity=index<3?'稀有':index<7?'史詩':index<9?'傳說':'神話';
+  const goldenRarity=index<3?'傳說黃金':index<7?'神話黃金':'限定黃金';
+  assetCatalog[regularId]={
+    name:`💥 ${shotgun.name}`,
+    category:'武器',
+    price:shotgun.price,
+    description:`近距離突破專用霰彈槍，搶劫火力：劫匪 +${shotgun.robber}／警方 +${shotgun.police}。每次行動消耗霰彈槍通用子彈 ×1。`,
+    image:`weapons/shotguns/${shotgun.image}`,
+    rarity:regularRarity,
+    buff:'combat',
+    unique:true,
+    combatItem:true
+  };
+  assetCatalog[goldenId]={
+    name:`🏆 黃金${shotgun.name}`,
+    category:'武器',
+    price:888888+(index*100000),
+    description:`黃金典藏版近距離武器，兼具收藏價值與強大火力；搶劫火力：劫匪 +${Math.min(9,shotgun.robber+2)}／警方 +${Math.min(9,shotgun.police+2)}。每次行動消耗霰彈槍通用子彈 ×1。`,
+    image:`weapons/golden_shotguns/golden-shotgun-${String(index+1).padStart(2,'0')}.png`,
+    rarity:goldenRarity,
+    buff:'combat',
+    unique:true,
+    combatItem:true
+  };
+});
+const luxuryPixelSupercarNames=[
+  '黎明赤曜','藍焰幻影','黑曜夜翼','白銀流星','極光紫電','翡翠暴風',
+  '黃金獵鷹','海神藍鯊','赤紅毒蠍','冰川銀狐','暗夜雷神','琥珀狂潮',
+  '霓虹魅影','星河箭矢','沙漠風暴','熔岩獵獸','極地白狼','午夜幽靈',
+  '電光藍龍','紫晶飛刃','鈦銀聖騎','赤焰鳳凰','黑金帝王','蒼穹戰隼',
+  '量子疾風','天際曙光','星環獵手','月蝕幻獸','時空霸主','終焉天啟'
+];
+const luxuryPixelSupercarIds=luxuryPixelSupercarNames.map((_,index)=>`luxury_pixel_supercar_${String(index+1).padStart(2,'0')}`);
+const luxuryPixelSupercarBuffs=['getaway','casino','stamina','discount','work'];
+luxuryPixelSupercarIds.forEach((assetId,index)=>{
+  const number=String(index+1).padStart(2,'0');
+  const rarity=index<12?'史詩':index<24?'傳說':index<29?'神話':'限定神話';
+  assetCatalog[assetId]={
+    name:`🏎️ ${luxuryPixelSupercarNames[index]}｜典藏 #${number}`,
+    category:'汽車',
+    price:1200000+(index*175000),
+    description:`頂級豪華超跑盲盒限定的像素風珍稀超跑，編號 #${number}；無法直接購買，只能由盲盒抽取並永久收藏。`,
+    image:`blindbox/luxury_supercars/rare-pixel-supercar-${number}.png`,
+    rarity,
+    buff:luxuryPixelSupercarBuffs[index%luxuryPixelSupercarBuffs.length],
+    buffMultiplier:1.5+(Math.floor(index/6)*0.25),
+    forSale:false,
+    blindBox:true,
+    blindBoxPack:'supercar'
+  };
+});
+function assetIsForSale(asset,now=Date.now()) {
+  if(!asset||asset.forSale===false) return false;
+  if(asset.saleStartsAt&&now<asset.saleStartsAt) return false;
+  if(asset.saleEndsAt&&now>asset.saleEndsAt) return false;
+  return true;
+}
+function assetSaleWindowText(asset) {
+  if(!asset?.saleEndsAt) return '';
+  const timestamp=Math.floor(asset.saleEndsAt/1000);
+  return `\n⏳ 限時販售至：<t:${timestamp}:F>（<t:${timestamp}:R>）`;
+}
 const rentalSuiteVariants={
   standard:{name:'舒適日租套房',description:'採光明亮、生活機能齊全的簡約套房。',image:'properties/daily_rental_suite.jpg',assetId:'daily_rental_suite'},
   investor:{name:'投資人療癒套房',description:'配有看盤專區，適合整理財務與重新出發。',image:'properties/investor_rental_suite.jpg',assetId:'daily_rental_suite'},
@@ -601,29 +1126,71 @@ const rentalSuiteVariants={
   haunted:{name:'猛鬼套房｜免費',description:'免費入住；隨機獲得一項大量增益或減益，效果固定 24 小時且無法重抽。',image:'properties/haunted_suite.jpg',assetId:'haunted_daily_suite'}
 };
 const blindBoxRegularIds=['blind_mazda3','blind_yaris','blind_galant','blind_accord','blind_silvia_s13','blind_rx7_fd','blind_rx7_fc','blind_mirage','blind_corolla_city','blind_s2000','blind_240z'];
-const blindBoxHiddenRates={blind_totoro_catbus:0.5,blind_corolla:1.5};
+const blindBoxHiddenRates={toyota_supra_mk4:0.5,blind_totoro_catbus:0.5,blind_corolla:1};
 const blindBoxHiddenIds=Object.keys(blindBoxHiddenRates);
 const blindBoxAllIds=[...blindBoxRegularIds,...blindBoxHiddenIds];
-const fordBlindBoxRates={ford_focus:20,ford_explorer:15,ford_f150_raptor:15,ford_focus_rs:14,ford_mustang_gt:13,ford_shelby_gt500:10,ford_gt_2017:7,ford_gt_heritage:6};
+const fordBlindBoxRates={ford_focus:18,ford_explorer:14,ford_f150_raptor:14,ford_focus_rs:13,ford_mustang_gt:12,ford_shelby_gt500:10,ford_gt_2017:7,ford_gt_heritage:6,ford_fiesta_rally:5,ford_mustang_1964_hidden:1};
 const fordBlindBoxIds=Object.keys(fordBlindBoxRates);
-const blindBoxPacks={
-  standard:{name:'綜合車包',price:10000,stamina:3,ids:blindBoxAllIds,preview:null},
-  ford:{name:'福特車包',price:10000,stamina:3,ids:fordBlindBoxIds,preview:'blindbox/ford/ford_pack_preview.jpg'}
+const fordBlindBoxPublicIds=fordBlindBoxIds.filter(assetId=>!assetCatalog[assetId]?.hiddenInPack);
+const fordBlindBoxHiddenIds=fordBlindBoxIds.filter(assetId=>assetCatalog[assetId]?.hiddenInPack);
+const cityBlindBoxRates={blind_mirage:25,blind_yaris:23,blind_corolla_city:22,blind_mazda3:18,blind_accord:10,blind_galant:2};
+const streetBlindBoxRates={blind_silvia_s13:25,blind_galant:20,blind_rx7_fc:18,blind_s2000:15,blind_240z:12,blind_rx7_fd:8,blind_corolla:2};
+const jdmBlindBoxRates={blind_corolla_city:18,blind_yaris:16,blind_accord:15,blind_mazda3:15,blind_galant:12,blind_silvia_s13:10,blind_rx7_fc:6,blind_s2000:4,blind_rx7_fd:2,blind_corolla:1,toyota_supra_mk4:1};
+const luxuryBlindBoxRates={sedan:35,luxury_bmw_m7:25,midnight_m8:18,luxury_century:12,luxury_maybach:7,luxury_rolls_royce:3};
+const supercarBlindBoxRates={
+  dakar_911:5,
+  neon_918:4.5,
+  silver_r34:4,
+  alpine_legend:3.5,
+  azure_hypercar:2.5,
+  crimson_bull:2,
+  night_reaper:1.5,
+  orbital_silver:1,
+  orbital_silver_omega:1,
+  ...Object.fromEntries(luxuryPixelSupercarIds.map(assetId=>[assetId,2.5]))
 };
-const blindBoxChanceLabel=(assetId,packId='standard')=>packId==='ford'?`每盒 ${fordBlindBoxRates[assetId]||0}%`:blindBoxHiddenRates[assetId]!==undefined?`每盒 ${blindBoxHiddenRates[assetId]}%`:'普通獎池隨機抽取';
+const blindBoxPacks={
+  standard:{name:'綜合汽車盲盒',shortName:'綜合車包',price:10000,stamina:3,ids:blindBoxAllIds,hiddenIds:blindBoxHiddenIds,preview:'blindbox/standard_pack_preview.png',openingAnimation:'blindbox/standard_pack_opening.gif',openingDuration:3000,color:0x7E57C2,description:'入門綜合獎池，可抽到日常代步、經典跑車與三輛隱藏車。'},
+  ford:{name:'福特汽車盲盒',shortName:'福特車包',price:10000,stamina:3,ids:fordBlindBoxIds,rates:fordBlindBoxRates,hiddenIds:fordBlindBoxHiddenIds,preview:'blindbox/ford/ford_pack_preview.jpg',color:0x1565C0,description:'福特品牌限定獎池，包含性能鋼砲、肌肉車、皮卡與傳說隱藏初代野馬。'},
+  city:{name:'都會通勤汽車盲盒',shortName:'都會通勤包',price:6000,stamina:2,ids:Object.keys(cityBlindBoxRates),rates:cityBlindBoxRates,hiddenIds:[],preview:'blindbox/mirage.jpg',color:0x26A69A,description:'低價實用型獎池，以工作、折扣與體力增益的城市代步車為主。'},
+  street:{name:'街頭競速汽車盲盒',shortName:'街頭競速包',price:15000,stamina:4,ids:Object.keys(streetBlindBoxRates),rates:streetBlindBoxRates,hiddenIds:['blind_corolla'],preview:'blindbox/silvia_s13.jpg',color:0xE53935,description:'後驅、轉子與高轉跑車齊聚，適合追求搶劫撤離與競速收藏的玩家。'},
+  jdm:{name:'JDM 經典汽車盲盒',shortName:'JDM 經典包',price:25000,stamina:5,ids:Object.keys(jdmBlindBoxRates),rates:jdmBlindBoxRates,hiddenIds:['blind_corolla','toyota_supra_mk4'],preview:'blindbox/rx7_fd.jpg',color:0xF5B942,description:'日本經典車系精選獎池，藏有 AE86 與 Toyota Supra MK4 兩輛傳說級收藏。'},
+  luxury:{name:'豪華旗艦汽車盲盒',shortName:'豪華旗艦包',price:75000,stamina:6,ids:Object.keys(luxuryBlindBoxRates),rates:luxuryBlindBoxRates,hiddenIds:[],preview:'vehicles/luxury_rolls_royce_phantom.jpg',color:0xD4AF37,description:'豪華房車與高性能 GT 獎池，集中提供休息、工作、折扣與賭場增益。'},
+  supercar:{name:'頂級豪華超跑盲盒',shortName:'頂級豪華超跑包',price:200000,stamina:10,ids:Object.keys(supercarBlindBoxRates),rates:supercarBlindBoxRates,hiddenIds:['orbital_silver_omega'],preview:'blindbox/luxury_supercars/rare-pixel-supercar-01.png',color:0x9C27B0,description:'收錄 30 輛全新像素風豪華超跑與原有神話車款，並藏有 1% 星環銀翼 Ω。'}
+};
+const blindBoxPackHiddenIds=packId=>blindBoxPacks[packId]?.hiddenIds||[];
+const blindBoxPackPublicIds=packId=>{
+  const pack=blindBoxPacks[packId]||blindBoxPacks.standard,hiddenIds=new Set(blindBoxPackHiddenIds(packId));
+  return pack.ids.filter(assetId=>!hiddenIds.has(assetId));
+};
+const blindBoxPackChoices=Object.entries(blindBoxPacks).map(([value,pack])=>({
+  name:`${pack.shortName}｜${pack.price.toLocaleString('en-US')} 金幣`,
+  value
+}));
+const blindBoxPackHiddenRate=packId=>{
+  const pack=blindBoxPacks[packId]||blindBoxPacks.standard;
+  return blindBoxPackHiddenIds(packId).reduce((total,assetId)=>total+(pack.rates?.[assetId]??blindBoxHiddenRates[assetId]??0),0);
+};
+const blindBoxChanceLabel=(assetId,packId='standard')=>{
+  const pack=blindBoxPacks[packId]||blindBoxPacks.standard;
+  if(pack.rates) return `每盒 ${pack.rates[assetId]||0}%`;
+  return blindBoxHiddenRates[assetId]!==undefined?`每盒 ${blindBoxHiddenRates[assetId]}%`:'普通獎池隨機抽取';
+};
 function drawBlindBoxAssetId(packId='standard') {
-  if(packId==='ford') {
+  const pack=blindBoxPacks[packId]||blindBoxPacks.standard;
+  if(pack.rates) {
     const roll=Math.random()*100;
     let cumulative=0;
-    for(const assetId of fordBlindBoxIds) {
-      cumulative+=fordBlindBoxRates[assetId];
+    for(const assetId of pack.ids) {
+      cumulative+=pack.rates[assetId]||0;
       if(roll<cumulative) return assetId;
     }
-    return fordBlindBoxIds.at(-1);
+    return pack.ids.at(-1);
   }
   const roll=Math.random()*100;
-  if(roll<blindBoxHiddenRates.blind_totoro_catbus) return 'blind_totoro_catbus';
-  if(roll<blindBoxHiddenRates.blind_totoro_catbus+blindBoxHiddenRates.blind_corolla) return 'blind_corolla';
+  if(roll<blindBoxHiddenRates.toyota_supra_mk4) return 'toyota_supra_mk4';
+  if(roll<blindBoxHiddenRates.toyota_supra_mk4+blindBoxHiddenRates.blind_totoro_catbus) return 'blind_totoro_catbus';
+  if(roll<blindBoxHiddenRates.toyota_supra_mk4+blindBoxHiddenRates.blind_totoro_catbus+blindBoxHiddenRates.blind_corolla) return 'blind_corolla';
   return blindBoxRegularIds[Math.floor(Math.random()*blindBoxRegularIds.length)];
 }
 const weeklyMysteryNames=[
@@ -642,19 +1209,471 @@ const weeklyMysteryIds=weeklyMysteryNames.map((name,index)=>{
   };
   return id;
 });
-const assetCategories=['房地產','郵輪','汽車','機車','飛行器','收藏品'];
+const assetCategories=['房地產','郵輪','汽車','機車','飛行器','收藏品','武器','彈藥'];
+const AIRLINE_REGISTRATION_FEE=500000;
+const AIRLINE_COMPLETION_CHANNEL_ID='1531857208781045831';
+const airportAssetIds=[
+  'macau_bay_international_airport','pearl_delta_international_airport','imperial_global_aviation_city',
+  'fuji_sakura_international_airport','liberty_star_international_airport','coral_coast_international_airport',
+  'emerald_tropics_international_airport','skyreach_summit_international_airport',
+  'sunrise_harbor_international_airport','aurora_fjord_international_airport','golden_dunes_international_airport',
+  'neon_lotus_metropolitan_airport','alpine_crystal_international_airport','amazon_canopy_international_airport',
+  'aegean_sapphire_international_airport','obsidian_aurora_intercontinental_airport'
+];
+const passengerAirlinerIds=new Set([
+  'boeing_747_400','airbus_a380_800','boeing_777_300er','airbus_a350_1000','boeing_787_9_dreamliner',
+  'airbus_a321neo','boeing_737_max_8','airbus_a320neo','embraer_e190_e2','bombardier_crj900',
+  'boeing_787_9_midnight','airbus_a350_1000_midnight','embraer_e195_e2_midnight',
+  'boeing_787_9_snow','airbus_a350_1000_snow','embraer_e195_e2_snow'
+]);
+const airlineRoutes={
+  regional:{name:'🏝️ 港澳台區域快線',description:'高頻短程航班，適合剛成立的航空公司。',durationMs:10*60*1000,baseRevenue:85000,operatingCost:25000,stamina:10,minTier:1},
+  east_asia:{name:'🌏 東亞商務航線',description:'連結亞洲主要商務城市的中程航線。',durationMs:30*60*1000,baseRevenue:230000,operatingCost:75000,stamina:20,minTier:1},
+  intercontinental:{name:'🌐 跨洲國際航線',description:'需要大型國際機場支援的長程高收益航線。',durationMs:60*60*1000,baseRevenue:600000,operatingCost:210000,stamina:35,minTier:2},
+  first_class_world:{name:'👑 環球頭等艙航線',description:'只由帝國環球航空城開放的頂級環球航線。',durationMs:120*60*1000,baseRevenue:1500000,operatingCost:600000,stamina:50,minTier:3},
+  neon_bay_shuttle:{name:'🌃 灣區霓虹快線',description:'穿梭海灣商圈與鄰近都會的高頻入門短途航線。',durationMs:15*60*1000,baseRevenue:120000,operatingCost:38000,stamina:12,minTier:1},
+  alpine_lake_express:{name:'🏔️ 阿爾卑斯湖岸快線',description:'沿雪峰與冰河湖飛行的觀光商務短途航線。',durationMs:25*60*1000,baseRevenue:190000,operatingCost:60000,stamina:16,minTier:1},
+  aegean_resort_hop:{name:'🏖️ 愛琴海度假短航',description:'串聯地中海度假島嶼與海岸城市的精品短途航線。',durationMs:45*60*1000,baseRevenue:360000,operatingCost:120000,stamina:24,minTier:2},
+  polar_night_longhaul:{name:'🌌 極夜洲際長程航線',description:'跨越極圈與大洋的三小時長程航班，需要大型國際機場支援。',durationMs:3*60*60*1000,baseRevenue:2100000,operatingCost:780000,stamina:55,minTier:2},
+  grand_world_odyssey:{name:'🌍 環球天際遠征航線',description:'歷時四小時、橫跨多個大洲的最高階遠征航線。',durationMs:4*60*60*1000,baseRevenue:3400000,operatingCost:1350000,stamina:70,minTier:3}
+};
+function airlineCompany(g,u) {
+  return db.prepare('SELECT * FROM airline_companies WHERE guild_id=? AND user_id=?').get(g,u)||null;
+}
+function airlineFlight(g,u) {
+  return db.prepare('SELECT * FROM airline_flights WHERE guild_id=? AND user_id=?').get(g,u)||null;
+}
+function ownedAirports(g,u) {
+  return airportAssetIds.filter(id=>assetQuantity(g,u,id)>0);
+}
+function ownedPassengerAirliners(g,u) {
+  return assetsOf(g,u).map(row=>row.asset_id).filter(id=>passengerAirlinerIds.has(id));
+}
+function airlinerRevenueMultiplier(assetId) {
+  const price=assetCatalog[assetId]?.price||0;
+  return Math.min(1.8,1+price/10000000);
+}
+function airlineDurationLabel(durationMs) {
+  const minutes=Math.round(durationMs/60000);
+  return minutes>=60?`${minutes/60} 小時`:`${minutes} 分鐘`;
+}
+function normalizeAirlineName(value) {
+  return String(value||'').trim().replace(/\s+/g,' ').replace(/@/g,'＠');
+}
+function registerAirlineCompany(g,u,name) {
+  name=normalizeAirlineName(name);
+  if(name.length<2||name.length>30) throw new Error('航空公司名稱必須是 2～30 個字');
+  if(!ownedAirports(g,u).length) throw new Error('請先到資產商城購買一座機場');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if(airlineCompany(g,u)) throw new Error('你已經註冊過航空公司');
+    changeBalanceUnlocked(g,u,-AIRLINE_REGISTRATION_FEE,'airline_registration',u,`註冊航空公司：${name}`);
+    db.prepare('INSERT INTO airline_companies(guild_id,user_id,company_name) VALUES(?,?,?)').run(g,u,name);
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return airlineCompany(g,u);
+}
+function airlineSelectionName(id,fallback='尚未選擇') {
+  return assetCatalog[id]?.name||airlineRoutes[id]?.name||fallback;
+}
+function airlineDashboardEmbed(g,u,notice='') {
+  const airports=ownedAirports(g,u),airliners=ownedPassengerAirliners(g,u),company=airlineCompany(g,u),flight=airlineFlight(g,u);
+  if(!airports.length) {
+    return new EmbedBuilder().setColor(0x607D8B).setTitle('🛫 機場經營中心').setDescription(`${notice?`${notice}\n\n`:''}你目前沒有機場。\n\n請到 \`/資產商城 分類:房地產\` 購買以下其中一座：\n${airportAssetIds.map(id=>`• ${assetCatalog[id].name}｜**${fmt(assetCatalog[id].price)}**｜營收 ×${assetCatalog[id].airlineMultiplier}`).join('\n')}\n\n購買機場後，需再支付 **${fmt(AIRLINE_REGISTRATION_FEE)}** 手續費註冊航空公司才能開啟航線。`);
+  }
+  if(!company) {
+    return new EmbedBuilder().setColor(0x1565C0).setTitle('🛫 機場經營中心').setDescription(`${notice?`${notice}\n\n`:''}你已擁有 **${airports.length} 座機場**，下一步是註冊航空公司。\n\n註冊手續費：**${fmt(AIRLINE_REGISTRATION_FEE)}**\n註冊後可選擇自己的機場、客機與航線開始營運。\n\n目前金庫：**${fmt(balance(g,u))}**`);
+  }
+  const airport=assetCatalog[company.airport_id],aircraft=assetCatalog[company.aircraft_id],route=airlineRoutes[company.route_id];
+  const flightText=flight
+    ? Date.now()>=flight.completes_at
+      ? `✅ **航班已抵達，可以領取營收**\n${airlineSelectionName(flight.route_id)}｜預計營收 **${fmt(flight.gross_revenue)}**`
+      : `🛫 **航班執飛中**\n${airlineSelectionName(flight.route_id)}｜<t:${Math.floor(flight.completes_at/1000)}:R> 抵達\n預計營收：**${fmt(flight.gross_revenue)}**`
+    : '目前沒有執飛中的航班。';
+  const routeEstimate=airport&&aircraft&&route
+    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)))}**（另有市場需求浮動）\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜航程：**${airlineDurationLabel(route.durationMs)}**`
+    : '';
+  return new EmbedBuilder().setColor(flight&&Date.now()>=flight.completes_at?0x35C46A:0x0288D1).setTitle(`✈️ ${company.company_name}`).setDescription(`${notice?`${notice}\n\n`:''}**營運配置**\n機場：${airlineSelectionName(company.airport_id)}\n客機：${airlineSelectionName(company.aircraft_id)}\n航線：${airlineSelectionName(company.route_id)}\n\n**航班狀態**\n${flightText}${routeEstimate}\n\n持有客機：**${airliners.length} 架**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+}
+function airlineDashboardComponents(g,u) {
+  const airports=ownedAirports(g,u),company=airlineCompany(g,u);
+  if(!airports.length) return [];
+  if(!company) {
+    return [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`airline_register:${u}`).setLabel(`註冊航空公司｜${fmt(AIRLINE_REGISTRATION_FEE)}`).setEmoji('🏢').setStyle(ButtonStyle.Success))];
+  }
+  const rows=[],airliners=ownedPassengerAirliners(g,u),flight=airlineFlight(g,u);
+  rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`airline_airport:${u}`).setPlaceholder('選擇營運機場').addOptions(airports.map(id=>({
+    label:assetCatalog[id].name.slice(0,100),value:id,description:`第 ${assetCatalog[id].airportTier} 級｜航線營收 ×${assetCatalog[id].airlineMultiplier}`,default:company.airport_id===id
+  })))));
+  if(airliners.length) rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`airline_aircraft:${u}`).setPlaceholder('選擇自己的客機').addOptions(airliners.slice(0,25).map(id=>({
+    label:assetCatalog[id].name.slice(0,100),value:id,description:`營收倍率 ×${airlinerRevenueMultiplier(id).toFixed(2)}｜${assetCatalog[id].rarity||'一般'}`,default:company.aircraft_id===id
+  })))));
+  rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`airline_route:${u}`).setPlaceholder('選擇要經營的航線').addOptions(Object.entries(airlineRoutes).map(([id,route])=>({
+    label:route.name.slice(0,100),value:id,description:`機場 Lv.${route.minTier}｜${airlineDurationLabel(route.durationMs)}｜成本 ${fmt(route.operatingCost)}`,default:company.route_id===id
+  })))));
+  const ready=flight&&Date.now()>=flight.completes_at;
+  const actionButtons=[flight
+    ? new ButtonBuilder().setCustomId(ready?`airline_claim:${u}`:`airline_refresh:${u}`).setLabel(ready?'領取航線營收':'重新整理航班狀態').setEmoji(ready?'💰':'🔄').setStyle(ready?ButtonStyle.Success:ButtonStyle.Secondary)
+    : new ButtonBuilder().setCustomId(`airline_start:${u}`).setLabel('確認配置並開啟航線').setEmoji('🛫').setStyle(ButtonStyle.Primary).setDisabled(!airliners.length)];
+  if(!flight||ready) actionButtons.push(new ButtonBuilder().setCustomId(`airline_refresh:${u}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary));
+  rows.push(new ActionRowBuilder().addComponents(actionButtons));
+  return rows;
+}
+function updateAirlineSelection(g,u,column,value) {
+  const allowed={airport_id:airportAssetIds.includes(value),aircraft_id:passengerAirlinerIds.has(value),route_id:Object.hasOwn(airlineRoutes,value)};
+  if(!Object.hasOwn(allowed,column)||!allowed[column]) throw new Error('無效的航空營運選項');
+  if(column==='airport_id'&&assetQuantity(g,u,value)<1) throw new Error('你沒有這座機場');
+  if(column==='aircraft_id'&&assetQuantity(g,u,value)<1) throw new Error('你沒有這架客機');
+  if(!airlineCompany(g,u)) throw new Error('請先註冊航空公司');
+  db.prepare(`UPDATE airline_companies SET ${column}=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?`).run(value,g,u);
+}
+function startAirlineFlight(g,u) {
+  const company=airlineCompany(g,u);
+  if(!company) throw new Error('請先註冊航空公司');
+  if(airlineFlight(g,u)) throw new Error('目前已有航班執飛中');
+  const airport=assetCatalog[company.airport_id],aircraft=assetCatalog[company.aircraft_id],route=airlineRoutes[company.route_id];
+  if(!airport||!airportAssetIds.includes(company.airport_id)||assetQuantity(g,u,company.airport_id)<1) throw new Error('請先選擇自己持有的機場');
+  if(!aircraft||!passengerAirlinerIds.has(company.aircraft_id)||assetQuantity(g,u,company.aircraft_id)<1) throw new Error('請先選擇自己持有的客機');
+  if(!route) throw new Error('請先選擇航線');
+  if(airport.airportTier<route.minTier) throw new Error(`${route.name} 需要第 ${route.minTier} 級機場，目前選擇的機場無法開航`);
+  if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理航空公司');
+  const staminaUsed=staminaCost(g,u,route.stamina),currentStamina=stamina(g,u);
+  if(currentStamina<staminaUsed) throw new Error(`體力不足，需要 ${staminaUsed} 點`);
+  if(balance(g,u)<route.operatingCost) throw new Error(`營運資金不足，需要 ${fmt(route.operatingCost)}`);
+  const demandMultiplier=0.90+Math.random()*0.21;
+  const grossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*demandMultiplier);
+  const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    changeBalanceUnlocked(g,u,-route.operatingCost,'airline_operation',u,`${company.company_name}｜${route.name} 營運成本`);
+    db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(staminaUsed,g,u);
+    db.prepare('INSERT INTO airline_flights(guild_id,user_id,airport_id,aircraft_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?)')
+      .run(g,u,company.airport_id,company.aircraft_id,company.route_id,grossRevenue,route.operatingCost,startedAt,completesAt);
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return {company,airport,aircraft,route,grossRevenue,staminaUsed,startedAt,completesAt};
+}
+function claimAirlineRevenue(g,u) {
+  const company=airlineCompany(g,u),flight=airlineFlight(g,u);
+  if(!flight) throw new Error('目前沒有可結算的航班');
+  if(Date.now()<flight.completes_at) throw new Error('航班尚未抵達，請稍後再領取營收');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const next=changeBalanceUnlocked(g,u,flight.gross_revenue,'airline_revenue',u,`${company?.company_name||'航空公司'}｜${airlineSelectionName(flight.route_id)} 航線營收`);
+    db.prepare('DELETE FROM airline_flights WHERE guild_id=? AND user_id=?').run(g,u);
+    db.exec('COMMIT');
+    return {flight,next,profit:flight.gross_revenue-flight.operating_cost};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+let airlineCompletionNotificationRunning=false;
+async function notifyCompletedAirlineFlights() {
+  if(airlineCompletionNotificationRunning) return;
+  airlineCompletionNotificationRunning=true;
+  try {
+    const completedFlights=db.prepare(`
+      SELECT flight.*,company.company_name
+      FROM airline_flights flight
+      LEFT JOIN airline_companies company
+        ON company.guild_id=flight.guild_id AND company.user_id=flight.user_id
+      WHERE flight.completes_at<=?
+        AND (flight.dm_notified_at IS NULL OR flight.channel_notified_at IS NULL)
+      ORDER BY flight.completes_at
+    `).all(Date.now());
+    for(const flight of completedFlights) {
+      const companyName=flight.company_name||'航空公司';
+      const routeName=airlineSelectionName(flight.route_id);
+      const airportName=airlineSelectionName(flight.airport_id);
+      const aircraftName=airlineSelectionName(flight.aircraft_id);
+      const profit=flight.gross_revenue-flight.operating_cost;
+      const completedTimestamp=Math.floor(flight.completes_at/1000);
+      if(flight.dm_notified_at===null) {
+        try {
+          const user=await client.users.fetch(flight.user_id);
+          await user.send({
+            embeds:[new EmbedBuilder()
+              .setColor(0x35C46A)
+              .setTitle('✈️ 航線行程已完成')
+              .setDescription(`你的航班已安全抵達目的地！\n\n請回到伺服器開啟航空公司面板，領取本次航線營收。`)
+              .addFields(
+                {name:'🏢 航空公司',value:companyName,inline:false},
+                {name:'🗺️ 完成航線',value:routeName,inline:true},
+                {name:'🛫 營運機場',value:airportName,inline:true},
+                {name:'✈️ 執飛客機',value:aircraftName,inline:false},
+                {name:'💰 可領營收',value:fmt(flight.gross_revenue),inline:true},
+                {name:'📈 本航班淨收益',value:fmt(profit),inline:true},
+                {name:'🕒 完成時間',value:`<t:${completedTimestamp}:F>`,inline:false}
+              )
+              .setFooter({text:'營收需由玩家在航空公司面板中手動領取'})
+              .setTimestamp(new Date(flight.completes_at))],
+            allowedMentions:{parse:[]}
+          });
+          db.prepare('UPDATE airline_flights SET dm_notified_at=? WHERE guild_id=? AND user_id=? AND started_at=?')
+            .run(Date.now(),flight.guild_id,flight.user_id,flight.started_at);
+        } catch(error) {
+          const errorCode=Number(error?.code||error?.rawError?.code||0);
+          if(errorCode===50007) {
+            db.prepare('UPDATE airline_flights SET dm_notified_at=-1 WHERE guild_id=? AND user_id=? AND started_at=?')
+              .run(flight.guild_id,flight.user_id,flight.started_at);
+            console.warn(`航線完成私訊無法送達（玩家關閉私訊） guild=${flight.guild_id} user=${flight.user_id}`);
+          } else {
+            console.error(`航線完成私訊失敗 guild=${flight.guild_id} user=${flight.user_id}: ${error.message}`);
+          }
+        }
+      }
+      if(flight.channel_notified_at===null) {
+        try {
+          const channel=await client.channels.fetch(AIRLINE_COMPLETION_CHANNEL_ID);
+          if(!channel?.isTextBased()||typeof channel.send!=='function') throw new Error('指定的航線完成頻道不是可發送訊息的文字頻道');
+          const message=await channel.send({
+            embeds:[new EmbedBuilder()
+              .setColor(0x0288D1)
+              .setTitle('📡 航線完成推播')
+              .setDescription(`玩家 <@${flight.user_id}> 的航空行程已完成，航班已安全抵達。`)
+              .addFields(
+                {name:'🏢 航空公司',value:companyName,inline:false},
+                {name:'🗺️ 完成航線',value:routeName,inline:true},
+                {name:'👤 航線擁有者',value:`<@${flight.user_id}>`,inline:true},
+                {name:'🛫 營運機場',value:airportName,inline:false},
+                {name:'✈️ 執飛客機',value:aircraftName,inline:false},
+                {name:'💰 可領營收',value:fmt(flight.gross_revenue),inline:true},
+                {name:'📈 本航班淨收益',value:fmt(profit),inline:true},
+                {name:'🕒 完成時間',value:`<t:${completedTimestamp}:F>`,inline:false}
+              )
+              .setTimestamp(new Date(flight.completes_at))],
+            allowedMentions:{parse:[]}
+          });
+          if(channel.type===ChannelType.GuildAnnouncement) {
+            try { await message.crosspost(); }
+            catch(error) { console.error(`航線完成公告發布失敗 channel=${AIRLINE_COMPLETION_CHANNEL_ID}: ${error.message}`); }
+          }
+          db.prepare('UPDATE airline_flights SET channel_notified_at=? WHERE guild_id=? AND user_id=? AND started_at=?')
+            .run(Date.now(),flight.guild_id,flight.user_id,flight.started_at);
+        } catch(error) {
+          console.error(`航線完成頻道推播失敗 channel=${AIRLINE_COMPLETION_CHANNEL_ID} guild=${flight.guild_id} user=${flight.user_id}: ${error.message}`);
+        }
+      }
+    }
+  } catch(error) {
+    console.error(`檢查航線完成通知失敗：${error.message}`);
+  } finally {
+    airlineCompletionNotificationRunning=false;
+  }
+}
+const HIDEOUT_MAX_LEVEL=5;
+const hideoutUpgradeCatalog={
+  vault:{name:'地下金庫',emoji:'🏦',column:'vault_level',costs:[100000,300000,800000,2000000,5000000],effect:'團隊搶劫戰利品每級 +2%'},
+  armory:{name:'武器庫',emoji:'🔫',column:'armory_level',costs:[80000,250000,650000,1500000,4000000],effect:'團隊搶劫成功率每級 +0.5%'},
+  garage:{name:'秘密車庫',emoji:'🚘',column:'garage_level',costs:[100000,350000,900000,2200000,5500000],effect:'團隊搶劫成功率每級 +0.5%'},
+  security:{name:'保全系統',emoji:'🛡️',column:'security_level',costs:[120000,400000,1000000,2500000,6000000],effect:'團隊搶劫成功率每級 +0.5%，失敗刑期每級 -30 秒，成功搶劫後警察攻堅率每級 -5%'}
+};
+function ownedHideoutProperties(g,u) {
+  return assetsOf(g,u)
+    .filter(row=>assetCatalog[row.asset_id]?.category==='房地產'&&!assetCatalog[row.asset_id]?.temporaryHours)
+    .sort((a,b)=>(assetCatalog[b.asset_id]?.price||0)-(assetCatalog[a.asset_id]?.price||0));
+}
+function hideoutRecord(g,u,{requireOwned=true}={}) {
+  const row=db.prepare('SELECT * FROM player_hideouts WHERE guild_id=? AND user_id=?').get(g,u)||null;
+  if(!row||!assetCatalog[row.property_id]) return null;
+  if(requireOwned&&assetQuantity(g,u,row.property_id)<1) return null;
+  return row;
+}
+function hideoutPropertyChanceBonus(propertyId) {
+  const price=assetCatalog[propertyId]?.price||0;
+  if(price>=5000000) return 2;
+  if(price>=500000) return 1.5;
+  if(price>=200000) return 1;
+  if(price>=50000) return 0.5;
+  return 0;
+}
+function hideoutHeistChanceBonus(g,u) {
+  const row=hideoutRecord(g,u);
+  if(!row) return 0;
+  return hideoutPropertyChanceBonus(row.property_id)+(row.armory_level+row.garage_level+row.security_level)*0.5;
+}
+function hideoutLootMultiplier(g,u) {
+  const row=hideoutRecord(g,u);
+  return row?1+row.vault_level*0.02:1;
+}
+function hideoutJailReductionMs(g,u) {
+  const row=hideoutRecord(g,u);
+  return row?row.security_level*30_000:0;
+}
+function hideoutUpgradeCost(row,key) {
+  const definition=hideoutUpgradeCatalog[key],level=definition&&row?Number(row[definition.column]||0):0;
+  return definition&&level<HIDEOUT_MAX_LEVEL?definition.costs[level]:null;
+}
+function purchaseHideoutUpgrade(g,u,key) {
+  const row=hideoutRecord(g,u),definition=hideoutUpgradeCatalog[key];
+  if(!row) throw new Error('請先選擇一間目前持有的房地產作為藏身處');
+  if(!definition) throw new Error('找不到這項藏身處升級');
+  const currentLevel=Number(row[definition.column]||0),cost=hideoutUpgradeCost(row,key);
+  if(cost===null) throw new Error(`${definition.name}已達最高等級`);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const current=ensureWallet(g,u);
+    if(current<cost) throw new Error(`金幣不足，升級 ${definition.name} 需要 ${fmt(cost)}`);
+    const next=current-cost;
+    db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,g,u);
+    db.prepare(`UPDATE player_hideouts SET ${definition.column}=${definition.column}+1,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?`).run(g,u);
+    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+      .run(g,u,-cost,next,'hideout_upgrade',u,`藏身處升級｜${definition.name} Lv.${currentLevel+1}`);
+    db.exec('COMMIT');
+    return {definition,level:currentLevel+1,cost,balance:next};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+function hideoutEmbed(g,u,notice='') {
+  const row=hideoutRecord(g,u),stored=hideoutRecord(g,u,{requireOwned:false}),property=row?assetCatalog[row.property_id]:null;
+  if(!row) {
+    const reason=stored?'原本設定的房地產已不在你的資產中，請重新選擇。':'從現有房地產中選擇一間作為行動基地。';
+    return new EmbedBuilder().setColor(0x37474F).setTitle('🏚️ 藏身處系統').setDescription(`${notice?`${notice}\n\n`:''}${reason}\n\n藏身處升級可提升團隊搶劫成功率與戰利品，並縮短失敗後的刑期。升級金幣會直接銷毀。`);
+  }
+  const upgrades=Object.entries(hideoutUpgradeCatalog).map(([key,definition])=>{
+    const level=Number(row[definition.column]||0),next=hideoutUpgradeCost(row,key);
+    return `${definition.emoji} **${definition.name} Lv.${level}/${HIDEOUT_MAX_LEVEL}**\n└ ${definition.effect}${next===null?'｜已滿級':`｜下級 ${fmt(next)}`}`;
+  }).join('\n\n');
+  const chance=hideoutHeistChanceBonus(g,u),loot=(hideoutLootMultiplier(g,u)-1)*100,jail=hideoutJailReductionMs(g,u)/1000;
+  return new EmbedBuilder().setColor(0x6D4C41).setTitle('🏚️ 我的藏身處').setDescription(`${notice?`${notice}\n\n`:''}目前據點：**${property.name}**\n房產基礎加成：**+${hideoutPropertyChanceBonus(row.property_id)}%** 搶劫成功率\n\n${upgrades}\n\n**目前總效果**\n搶劫成功率：**+${chance}%**\n成功戰利品：**+${loot}%**\n失敗刑期減免：**${jail} 秒**\n\n升級費用會直接銷毀，是高階玩家的長期建設項目。`);
+}
+const hideoutShowcaseCategories={
+  weapons:{label:'武器庫收藏',emoji:'🔫',categories:['武器']},
+  vehicles:{label:'車輛收藏',emoji:'🚗',categories:['汽車','機車']},
+  aircraft:{label:'飛行器收藏',emoji:'🚁',categories:['飛行器']},
+  boats:{label:'船隻收藏',emoji:'🛥️',categories:['郵輪']}
+};
+function hideoutShowcaseAssets(g,u,categoryKey) {
+  const definition=hideoutShowcaseCategories[categoryKey];
+  if(!definition) return [];
+  return assetsOf(g,u)
+    .filter(row=>definition.categories.includes(assetCatalog[row.asset_id]?.category))
+    .sort((a,b)=>(assetCatalog[b.asset_id]?.price||0)-(assetCatalog[a.asset_id]?.price||0));
+}
+function hideoutShowcaseEmbed(g,u,categoryKey,assetId=null) {
+  const definition=hideoutShowcaseCategories[categoryKey],rows=hideoutShowcaseAssets(g,u,categoryKey);
+  if(!definition) return null;
+  if(assetId) {
+    const row=rows.find(entry=>entry.asset_id===assetId),asset=row&&assetCatalog[assetId];
+    if(asset) return new EmbedBuilder().setColor(0x455A64).setTitle(`${definition.emoji} 藏身處資產展示`).setDescription(`**${asset.name} × ${row.quantity}**\n${asset.description}\n\n分類：${asset.category}｜稀有度：${asset.rarity||'一般'}｜原價：${fmt(asset.price)}`);
+  }
+  const list=rows.length
+    ? rows.slice(0,25).map(row=>`${assetCatalog[row.asset_id].name} × **${row.quantity}**｜${fmt(assetCatalog[row.asset_id].price)}`).join('\n')
+    : `目前沒有${definition.label}可供展示。`;
+  return new EmbedBuilder().setColor(0x455A64).setTitle(`${definition.emoji} ${definition.label}`).setDescription(`${list}\n\n${rows.length>25?'僅顯示價值最高的 25 項資產。':'從下方選單可查看單項圖片與資料。'}`);
+}
+function hideoutComponents(g,u,{showcaseCategory=null,showcaseAssetId=null}={}) {
+  const properties=ownedHideoutProperties(g,u),row=hideoutRecord(g,u);
+  const components=[];
+  if(properties.length) {
+    components.push(new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder().setCustomId(`hideout_property:${u}`).setPlaceholder('選擇要設為藏身處的房地產').addOptions(
+        ...properties.slice(0,25).map(({asset_id})=>({label:assetCatalog[asset_id].name.slice(0,100),description:`原價 ${fmt(assetCatalog[asset_id].price)} 金幣`,value:asset_id,default:row?.property_id===asset_id}))
+      )
+    ));
+  }
+  if(row) {
+    components.push(new ActionRowBuilder().addComponents(
+      ...Object.entries(hideoutUpgradeCatalog).map(([key,definition])=>new ButtonBuilder()
+        .setCustomId(`hideout_upgrade:${u}:${key}`)
+        .setLabel(`${definition.name}${hideoutUpgradeCost(row,key)===null?'（滿級）':''}`)
+        .setEmoji(definition.emoji)
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(hideoutUpgradeCost(row,key)===null))
+    ));
+    components.push(new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder().setCustomId(`hideout_showcase_category:${u}`).setPlaceholder('展示藏身處內的資產').addOptions(
+        ...Object.entries(hideoutShowcaseCategories).map(([value,definition])=>({
+          label:definition.label,emoji:definition.emoji,value,default:value===showcaseCategory,
+          description:`目前 ${hideoutShowcaseAssets(g,u,value).reduce((sum,item)=>sum+item.quantity,0)} 件`
+        }))
+      )
+    ));
+    const showcaseRows=showcaseCategory?hideoutShowcaseAssets(g,u,showcaseCategory):[];
+    if(showcaseRows.length) {
+      components.push(new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder().setCustomId(`hideout_showcase_asset:${u}:${showcaseCategory}`).setPlaceholder('選擇要展示的資產').addOptions(
+          ...showcaseRows.slice(0,25).map(({asset_id,quantity})=>({
+            label:assetCatalog[asset_id].name.slice(0,100),description:`持有 ${quantity}｜原價 ${fmt(assetCatalog[asset_id].price)}`,
+            value:asset_id,default:asset_id===showcaseAssetId
+          }))
+        )
+      ));
+    }
+  }
+  return components;
+}
 const assetShopCategories={
   property:{label:'房地產',emoji:'🏠',catalog:['房地產']},
   car:{label:'汽車',emoji:'🚗',catalog:['汽車','收藏品']},
   aircraft:{label:'飛行器',emoji:'🚁',catalog:['飛行器']},
   motorcycle:{label:'機車',emoji:'🏍️',catalog:['機車']},
-  boat:{label:'船隻',emoji:'🛥️',catalog:['郵輪']}
+  boat:{label:'船隻',emoji:'🛥️',catalog:['郵輪']},
+  armory:{label:'武器與彈藥',emoji:'🔫',catalog:['武器','彈藥']}
+};
+const assaultRifleAssetIds=new Set([
+  'weapon_m4a1','weapon_hk416','weapon_scar_l','weapon_ak47','weapon_ak74m',
+  'weapon_ak12','weapon_fn_fal','weapon_g3a3','weapon_qbz95','weapon_aug_a3'
+]);
+const goldenWeaponAssetIds=new Set([
+  'weapon_golden_m4a1','weapon_golden_ak47','weapon_golden_hk416','weapon_golden_scar_l','weapon_golden_famas',
+  'weapon_golden_g36c','weapon_golden_qbz95','weapon_golden_ak12','weapon_golden_aug_a3','weapon_golden_k2'
+]);
+const handgunAssetIds=new Set([
+  'weapon_glock17','weapon_sig_p226','weapon_hk_usp','weapon_colt_1911','weapon_fn_five_seven',
+  'weapon_desert_eagle_50ae','weapon_beretta_92fs','weapon_cz75','weapon_walther_p99','weapon_m9a3'
+]);
+const goldenHandgunAssetIds=new Set([
+  'weapon_golden_desert_eagle_50ae','weapon_golden_glock17','weapon_golden_sig_p226','weapon_golden_hk_usp','weapon_golden_fn_five_seven',
+  'weapon_golden_colt_1911','weapon_golden_beretta_92fs','weapon_golden_cz75','weapon_golden_walther_p99','weapon_golden_p08_luger'
+]);
+const sniperRifleAssetIds=new Set([
+  'weapon_m24_sws','weapon_awp','weapon_barrett_m82a1','weapon_dragunov_svd','weapon_cheytac_m200',
+  'weapon_kar98k','weapon_l96a1','weapon_trg_22','weapon_vsk_94','weapon_psg1'
+]);
+const goldenSniperAssetIds=new Set([
+  'weapon_golden_m24_sws','weapon_golden_awp','weapon_golden_barrett_m82a1','weapon_golden_dragunov_svd','weapon_golden_cheytac_m200',
+  'weapon_golden_kar98k','weapon_golden_l96a1','weapon_golden_trg_22','weapon_golden_vsk_94','weapon_golden_psg1'
+]);
+const shotgunAssetIds=new Set(['weapon_shotgun',...shotgunSeries.map(shotgun=>`weapon_shotgun_${shotgun.key}`)]);
+const goldenShotgunAssetIds=new Set(shotgunSeries.map(shotgun=>`weapon_golden_shotgun_${shotgun.key}`));
+const armoryShopSections={
+  assault_rifle:{label:'突擊步槍',emoji:'🔫',description:'M4A1、HK416、AK 系列等自動步槍'},
+  handgun:{label:'手槍',emoji:'🔫',description:'Glock 17、P226、Desert Eagle 等半自動手槍'},
+  shotgun:{label:'霰彈槍',emoji:'💥',description:'泵動、雙管、槓桿與彈鼓等近距離武器'},
+  sniper_rifle:{label:'狙擊槍',emoji:'🎯',description:'M24、AWP、Barrett、CheyTac 等遠距離武器'},
+  golden_weapon:{label:'黃金武器',emoji:'🏆',description:'888,888 金幣起的神話黃金限定步槍'},
+  golden_handgun:{label:'黃金手槍',emoji:'✨',description:'88,888 金幣起的黃金收藏手槍'},
+  golden_shotgun:{label:'黃金霰彈槍',emoji:'🌠',description:'888,888 金幣起的黃金典藏霰彈槍'},
+  golden_sniper:{label:'黃金狙擊槍',emoji:'🌟',description:'888,888 金幣起的黃金限定狙擊槍'},
+  other_weapon:{label:'其他武器',emoji:'🛡️',description:'制式手槍與衝鋒槍等基礎武器'},
+  ammunition:{label:'彈藥',emoji:'📦',description:'各類武器使用的彈藥箱'}
 };
 const ASSET_SHOP_PAGE_SIZE=25;
-function assetShopEntries(categoryKey) {
+function assetShopEntries(categoryKey,sectionKey=null) {
   const category=assetShopCategories[categoryKey];
   if(!category) return [];
-  return Object.entries(assetCatalog).filter(([,asset])=>category.catalog.includes(asset.category)&&asset.forSale!==false);
+  return Object.entries(assetCatalog).filter(([assetId,asset])=>{
+    if(!category.catalog.includes(asset.category)||!assetIsForSale(asset)) return false;
+    if(categoryKey!=='armory') return true;
+    if(sectionKey==='assault_rifle') return assaultRifleAssetIds.has(assetId);
+    if(sectionKey==='handgun') return handgunAssetIds.has(assetId);
+    if(sectionKey==='shotgun') return shotgunAssetIds.has(assetId);
+    if(sectionKey==='sniper_rifle') return sniperRifleAssetIds.has(assetId);
+    if(sectionKey==='golden_weapon') return goldenWeaponAssetIds.has(assetId);
+    if(sectionKey==='golden_handgun') return goldenHandgunAssetIds.has(assetId);
+    if(sectionKey==='golden_shotgun') return goldenShotgunAssetIds.has(assetId);
+    if(sectionKey==='golden_sniper') return goldenSniperAssetIds.has(assetId);
+    if(sectionKey==='other_weapon') return asset.category==='武器'&&!assaultRifleAssetIds.has(assetId)&&!handgunAssetIds.has(assetId)&&!shotgunAssetIds.has(assetId)&&!sniperRifleAssetIds.has(assetId)&&!goldenWeaponAssetIds.has(assetId)&&!goldenHandgunAssetIds.has(assetId)&&!goldenShotgunAssetIds.has(assetId)&&!goldenSniperAssetIds.has(assetId);
+    if(sectionKey==='ammunition') return asset.category==='彈藥';
+    return false;
+  });
 }
 function assetShopCategoryLabel(categoryKey) {
   return assetShopCategories[categoryKey]?.label||'資產';
@@ -671,12 +1690,24 @@ function assetShopCategoryRow(token,selectedCategory=null) {
   );
   return new ActionRowBuilder().addComponents(menu);
 }
-function assetShopPageInfo(categoryKey,page=0) {
-  const entries=assetShopEntries(categoryKey),pageCount=Math.max(1,Math.ceil(entries.length/ASSET_SHOP_PAGE_SIZE));
+function assetShopArmorySectionRow(token,selectedSection=null) {
+  const menu=new StringSelectMenuBuilder().setCustomId(`asset_shop_armory_section:${token}`).setPlaceholder('選擇武器商城分類').addOptions(
+    Object.entries(armoryShopSections).map(([value,section])=>({
+      label:section.label,
+      value,
+      emoji:section.emoji,
+      description:section.description,
+      default:value===selectedSection
+    }))
+  );
+  return new ActionRowBuilder().addComponents(menu);
+}
+function assetShopPageInfo(categoryKey,page=0,sectionKey=null) {
+  const entries=assetShopEntries(categoryKey,sectionKey),pageCount=Math.max(1,Math.ceil(entries.length/ASSET_SHOP_PAGE_SIZE));
   return {entries,pageCount,page:Math.min(Math.max(0,page),pageCount-1)};
 }
-function assetShopProductRow(token,categoryKey,page=0,selectedAssetId=null) {
-  const info=assetShopPageInfo(categoryKey,page),start=info.page*ASSET_SHOP_PAGE_SIZE;
+function assetShopProductRow(token,categoryKey,page=0,selectedAssetId=null,sectionKey=null) {
+  const info=assetShopPageInfo(categoryKey,page,sectionKey),start=info.page*ASSET_SHOP_PAGE_SIZE;
   const options=info.entries.slice(start,start+ASSET_SHOP_PAGE_SIZE).map(([assetId,asset])=>({
     label:asset.name.slice(0,100),
     value:assetId,
@@ -685,38 +1716,99 @@ function assetShopProductRow(token,categoryKey,page=0,selectedAssetId=null) {
   }));
   const menu=new StringSelectMenuBuilder()
     .setCustomId(`asset_shop_product:${token}:${info.page}`)
-    .setPlaceholder(`選擇${assetShopCategoryLabel(categoryKey)}商品（第 ${info.page+1}/${info.pageCount} 頁）`)
+    .setPlaceholder(`選擇${sectionKey?armoryShopSections[sectionKey]?.label:assetShopCategoryLabel(categoryKey)}商品（第 ${info.page+1}/${info.pageCount} 頁）`)
     .addOptions(options);
   return new ActionRowBuilder().addComponents(menu);
 }
-function assetShopNavigationRow(token,categoryKey,page=0) {
-  const info=assetShopPageInfo(categoryKey,page);
+function assetShopNavigationRow(token,categoryKey,page=0,sectionKey=null) {
+  const info=assetShopPageInfo(categoryKey,page,sectionKey);
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`asset_shop_page:${token}:${categoryKey}:${info.page-1}`).setLabel('上一頁').setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(info.page<=0),
     new ButtonBuilder().setCustomId(`asset_shop_page_info:${token}`).setLabel(`${info.page+1} / ${info.pageCount}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
     new ButtonBuilder().setCustomId(`asset_shop_page:${token}:${categoryKey}:${info.page+1}`).setLabel('下一頁').setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(info.page>=info.pageCount-1)
   );
 }
-function assetShopComponents(token,categoryKey=null,page=0,selectedAssetId=null,purchaseToken=null) {
+function weaponAmmoQuantityRow(purchaseToken,selected=1) {
+  const options=[1,5,10,20,50].map(quantity=>({
+    label:quantity===1?'共 1 箱（隨槍免費附贈）':`共 ${quantity} 箱（加購 ${quantity-1} 箱）`,
+    value:String(quantity),
+    description:quantity===1?'不加購額外彈藥':`第 1 箱免費，另外購買 ${quantity-1} 箱`,
+    default:quantity===selected
+  }));
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`asset_purchase_ammo:${purchaseToken}`).setPlaceholder('選擇購槍時要取得幾箱彈藥').addOptions(options)
+  );
+}
+function ammoPurchaseQuantityRow(purchaseToken,selected=1) {
+  const options=[1,5,10,20,50].map(quantity=>({
+    label:`購買 ${quantity} 箱`,
+    value:String(quantity),
+    description:`一次購入 ${quantity} 箱通用子彈`,
+    default:quantity===selected
+  }));
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`asset_purchase_quantity:${purchaseToken}`).setPlaceholder('選擇要購買幾箱彈藥').addOptions(options)
+  );
+}
+function assetShopComponents(token,categoryKey=null,page=0,selectedAssetId=null,purchaseToken=null,sectionKey=null) {
   const rows=[assetShopCategoryRow(token,categoryKey)];
+  if(categoryKey==='armory') rows.push(assetShopArmorySectionRow(token,sectionKey));
   if(categoryKey) {
-    rows.push(assetShopProductRow(token,categoryKey,page,selectedAssetId));
-    if(assetShopPageInfo(categoryKey,page).pageCount>1) rows.push(assetShopNavigationRow(token,categoryKey,page));
+    if(categoryKey!=='armory'||sectionKey) rows.push(assetShopProductRow(token,categoryKey,page,selectedAssetId,sectionKey));
+    if(assetShopPageInfo(categoryKey,page,sectionKey).pageCount>1) rows.push(assetShopNavigationRow(token,categoryKey,page,sectionKey));
   }
-  if(purchaseToken) rows.push(new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`asset_purchase_confirm:${purchaseToken}`).setLabel('確認購買').setEmoji('✅').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`asset_purchase_cancel:${purchaseToken}`).setLabel('取消').setEmoji('❌').setStyle(ButtonStyle.Danger)
-  ));
+  if(purchaseToken) {
+    const offer=assetPurchaseOffers.get(purchaseToken),asset=offer?assetCatalog[offer.assetId]:null;
+    if(asset?.category==='武器') rows.push(weaponAmmoQuantityRow(purchaseToken,offer.ammoBoxes||1));
+    else if(asset?.category==='彈藥') rows.push(ammoPurchaseQuantityRow(purchaseToken,offer.quantity||1));
+    rows.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`asset_purchase_confirm:${purchaseToken}`).setLabel('確認購買').setEmoji('✅').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`asset_purchase_cancel:${purchaseToken}`).setLabel('取消').setEmoji('❌').setStyle(ButtonStyle.Danger)
+    ));
+  }
   return rows;
 }
-function assetShopOverviewEmbed(categoryKey=null,page=0) {
-  if(!categoryKey) return new EmbedBuilder().setColor(0xD4AF37).setTitle('🏛️ 購買資產').setDescription('請先從下拉選單選擇分類，再選擇商品。\n\n商品被選取後，名稱、售價、增益與圖片會立即顯示；確認前不會扣除金幣。\n\n分類：**房地產／汽車／飛行器／機車／船隻**');
-  const info=assetShopPageInfo(categoryKey,page),start=info.page*ASSET_SHOP_PAGE_SIZE;
-  const list=info.entries.slice(start,start+ASSET_SHOP_PAGE_SIZE).map(([,asset])=>`• ${asset.name}｜**${fmt(asset.price)}**`).join('\n');
-  return new EmbedBuilder().setColor(0x1565C0).setTitle(`${assetShopCategories[categoryKey].emoji} ${assetShopCategoryLabel(categoryKey)}`).setDescription(`${list||'此分類目前沒有可購買商品。'}\n\n請使用第二個下拉選單選擇商品。`);
+function assetPurchasePreviewEmbed(g,u,assetId,categoryKey,ammoBoxes=1,quantity=1) {
+  const asset=assetCatalog[assetId],owned=assetQuantity(g,u,assetId);
+  const buffId=owned?ensureAssetBuff(g,u,assetId):asset.buff||null;
+  const buffPreview=asset.combatItem
+    ? `**${assetBuffs.combat.name}**\n${asset.description}`
+    : buffId?`**${assetBuffLabel(assetId,buffId)}**\n${assetBuffDescription(assetId,buffId)}`:'購買完成後隨機抽取一項永久增益。';
+  const ammoId=asset.category==='武器'?weaponAmmoIdForAsset(assetId):null,ammo=ammoId?assetCatalog[ammoId]:null;
+  const normalizedAmmoBoxes=ammo?Math.max(1,ammoBoxes):0;
+  const extraAmmoBoxes=ammo?normalizedAmmoBoxes-1:0;
+  const ammoCost=ammo?extraAmmoBoxes*ammo.price:0;
+  const total=asset.price*quantity+ammoCost;
+  const ammoText=ammo
+    ? `\n\n🎁 彈藥搭配\n${ammo.name}：**共 ${normalizedAmmoBoxes} 箱**\n第 1 箱免費附贈｜額外加購：**${extraAmmoBoxes} 箱**\n彈藥加購金額：**${fmt(ammoCost)}**`
+    : '';
+  const hasImage=Boolean(asset.image||asset.images?.length);
+  return new EmbedBuilder().setColor(0xF5B942).setTitle(`🔑 ${asset.name}`).setDescription(`分類：**${assetShopCategoryLabel(categoryKey)}**\n稀有度：**${asset.rarity||'一般'}**\n商品單價：**${fmt(asset.price)}**\n數量：**${quantity}**\n總價：**${fmt(total)}**\n目前持有：**${owned}**\n目前金庫：**${fmt(balance(g,u))}**${assetSaleWindowText(asset)}${ammoText}\n\n${asset.description}\n\n${asset.combatItem?'🔫 裝備用途':'🎲 資產增益'}\n${buffPreview}\n\n${hasImage?'圖片已即時顯示於下方。':'🖼️ 此商品尚未配置圖片素材。'}確認後才會扣款；本次確認於 **5 分鐘**後失效。`);
+}
+function assetShopOverviewEmbed(categoryKey=null,page=0,sectionKey=null) {
+  if(!categoryKey) return new EmbedBuilder().setColor(0xD4AF37).setTitle('🏛️ 購買資產').setDescription('請先從下拉選單選擇分類，再選擇商品。\n\n商品被選取後，名稱、售價、用途與圖片會立即顯示；確認前不會扣除金幣。\n\n分類：**房地產／汽車／飛行器／機車／船隻／武器與彈藥**');
+  if(categoryKey==='armory'&&!sectionKey) return new EmbedBuilder().setColor(0x1565C0).setTitle('🔫 武器與彈藥').setDescription('請從第二個下拉選單選擇：**突擊步槍／手槍／狙擊槍／黃金武器／黃金手槍／黃金狙擊槍／其他武器／彈藥**。\n\n選擇分類後，第三個下拉選單會顯示該分類的槍械或彈藥。');
+  const info=assetShopPageInfo(categoryKey,page,sectionKey),start=info.page*ASSET_SHOP_PAGE_SIZE;
+  const list=info.entries.slice(start,start+ASSET_SHOP_PAGE_SIZE).map(([,asset])=>`• ${asset.name}｜**${fmt(asset.price)}**${asset.saleEndsAt?`｜⏳ <t:${Math.floor(asset.saleEndsAt/1000)}:R>`:''}`).join('\n');
+  const title=sectionKey?`${armoryShopSections[sectionKey].emoji} ${armoryShopSections[sectionKey].label}`:`${assetShopCategories[categoryKey].emoji} ${assetShopCategoryLabel(categoryKey)}`;
+  return new EmbedBuilder().setColor(0x1565C0).setTitle(title).setDescription(`${list||'此分類目前沒有可購買商品。'}\n\n請使用${sectionKey?'第三個':'第二個'}下拉選單選擇商品。`);
+}
+const assetImageHistory=new Map();
+function assetDisplayImage(asset,assetId='asset') {
+  const paths=asset?.images?.length?asset.images:asset?.image?[asset.image]:[];
+  if(!paths.length) return null;
+  if(!asset.randomImage||paths.length===1) return paths[0];
+  const previous=assetImageHistory.get(assetId);
+  let next=Number.isInteger(previous)
+    ? Math.floor(Math.random()*(paths.length-1))
+    : Math.floor(Math.random()*paths.length);
+  if(Number.isInteger(previous)&&next>=previous) next+=1;
+  assetImageHistory.set(assetId,next);
+  return paths[next];
 }
 function assetMediaPayload(embed,assetId,asset) {
-  const paths=asset.images?.length?asset.images:asset.image?[asset.image]:[];
+  const allPaths=asset.images?.length?asset.images:asset.image?[asset.image]:[];
+  const paths=asset.randomImage&&allPaths.length?[assetDisplayImage(asset,assetId)]:allPaths;
   if(!paths.length) return {embeds:[embed]};
   const names=paths.map((path,index)=>`${assetId}_${index+1}${extname(path)||'.jpg'}`);
   const files=paths.map((path,index)=>new AttachmentBuilder(assetPath(path),{name:names[index]}));
@@ -733,8 +1825,9 @@ function rentalSuiteSelectRow(token,selected=null) {
 }
 function carBlindBoxCatalogRow(packId='standard',selected=null) {
   const pack=blindBoxPacks[packId]||blindBoxPacks.standard;
+  const visibleIds=blindBoxPackPublicIds(packId);
   const menu=new StringSelectMenuBuilder().setCustomId(`car_blindbox_catalog:${packId}`).setPlaceholder('選擇車款查看圖片與增益').addOptions(
-    pack.ids.map(assetId=>{
+    visibleIds.map(assetId=>{
       const asset=assetCatalog[assetId];
       return {label:asset.name.replace(/^[^A-Za-z0-9\u3400-\u9FFF]+/u,'').slice(0,100),description:`${asset.rarity}｜${blindBoxChanceLabel(assetId,packId)}｜${assetBuffs[asset.buff].name}`.slice(0,100),value:assetId,default:assetId===selected};
     })
@@ -747,6 +1840,7 @@ const assetBuffs={
   work:{name:'💼 生意門路',description:'工作收入 +10%（資產效果合計最高 +75%）',work:0.10},
   casino:{name:'🍀 幸運收藏',description:'賭場獲勝派彩 +5%（資產效果合計最高 +60%）',casino:0.05},
   discount:{name:'🏷️ 尊榮會員',description:'商城額外折扣 5%（資產效果合計最高 30%）',discount:0.05},
+  combat:{name:'🔫 戰術裝備',description:'用於搶劫、警方行動與賭場保全交戰；不提供被動經濟增益。'},
   haunted_fortune:{name:'👻 鬼王護駕',description:'搶銀行成功率 +15%。',heist:15},
   haunted_energy:{name:'🩸 陰氣灌體',description:'每日體力上限 +100。',stamina:100},
   haunted_work:{name:'🕯️ 鬼差代班',description:'工作收入 +60%。',work:0.60},
@@ -863,10 +1957,17 @@ function vehicleModRatings(g,u,assetId,pending=null) {
     handling:Math.max(1,Math.min(5,Math.max(1,base-1)+Math.min(2,mods.handling)))
   };
 }
+function saveVehicleMods(g,u,assetId,selections,additionalSpend=0) {
+  db.prepare(`INSERT INTO vehicle_mods(guild_id,user_id,asset_id,paint_id,wheels_id,spoiler_id,widebody_id,engine_id,suspension_id,total_spent)
+    VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET
+    paint_id=excluded.paint_id,wheels_id=excluded.wheels_id,spoiler_id=excluded.spoiler_id,widebody_id=excluded.widebody_id,
+    engine_id=excluded.engine_id,suspension_id=excluded.suspension_id,total_spent=vehicle_mods.total_spent+excluded.total_spent,updated_at=CURRENT_TIMESTAMP`)
+    .run(g,u,assetId,selections.paint,selections.wheels,selections.spoiler,selections.widebody,selections.engine,selections.suspension,additionalSpend);
+}
 function purchaseVehicleMod(g,u,assetId,category,optionId) {
   const asset=assetCatalog[assetId],definition=vehicleModCatalog[category],option=vehicleModOption(category,optionId);
   if(!asset||!modifiableVehicleCategories.has(asset.category)) throw new Error('只有車庫中的汽車或機車可以改裝');
-  const owned=db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,u,assetId)?.quantity||0;
+  const owned=assetQuantity(g,u,assetId);
   if(!owned) throw new Error('你目前沒有這輛車');
   if(!definition||!option) throw new Error('找不到這項改裝零件');
   const current=vehicleMods(g,u,assetId),currentId=current[definition.column],currentOption=vehicleModOption(category,currentId)||{price:0};
@@ -884,16 +1985,45 @@ function purchaseVehicleMod(g,u,assetId,category,optionId) {
     if(wallet<price) throw new Error(`金幣不足，需要 ${fmt(price)}`);
     const next=wallet-price,selections=vehicleModSelections(g,u,assetId);
     selections[category]=optionId;
-    db.prepare(`INSERT INTO vehicle_mods(guild_id,user_id,asset_id,paint_id,wheels_id,spoiler_id,widebody_id,engine_id,suspension_id,total_spent)
-      VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET
-      paint_id=excluded.paint_id,wheels_id=excluded.wheels_id,spoiler_id=excluded.spoiler_id,widebody_id=excluded.widebody_id,
-      engine_id=excluded.engine_id,suspension_id=excluded.suspension_id,total_spent=vehicle_mods.total_spent+excluded.total_spent,updated_at=CURRENT_TIMESTAMP`)
-      .run(g,u,assetId,selections.paint,selections.wheels,selections.spoiler,selections.widebody,selections.engine,selections.suspension,price);
+    saveVehicleMods(g,u,assetId,selections,price);
     db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,g,u);
     db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
       .run(g,u,-price,next,'vehicle_mod',u,`改裝 ${asset.name}｜${definition.label}：${vehicleModOptionName(assetId,category,optionId)}`);
     db.exec('COMMIT');
     return {asset,category,option,price,balance:next};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+function purchaseVehicleModBundle(g,u,assetId,requested={}) {
+  const asset=assetCatalog[assetId];
+  if(!asset||!modifiableVehicleCategories.has(asset.category)) throw new Error('只有車庫中的汽車或機車可以改裝');
+  const owned=assetQuantity(g,u,assetId);
+  if(!owned) throw new Error('你目前沒有這輛車');
+  const allowedCategories=['paint','widebody','wheels'];
+  const current=vehicleMods(g,u,assetId),selections=vehicleModSelections(g,u,assetId),changes=[];
+  for(const category of allowedCategories) {
+    const optionId=requested[category];
+    if(optionId===undefined) continue;
+    const definition=vehicleModCatalog[category],option=vehicleModOption(category,optionId);
+    if(!option) throw new Error(`找不到${definition.label}選項`);
+    if(selections[category]===optionId) continue;
+    selections[category]=optionId;
+    changes.push({category,optionId,definition,option,price:option.price||0});
+  }
+  if(!changes.length) throw new Error('目前沒有需要安裝的新改裝');
+  if(!vehicleVisualConfigSupported(assetId,selections)) throw new Error('這個外觀組合尚未完成圖片素材，本次不會扣款');
+  const price=changes.reduce((sum,change)=>sum+change.price,0);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const wallet=ensureWallet(g,u);
+    if(wallet<price) throw new Error(`金幣不足，需要 ${fmt(price)}`);
+    const next=wallet-price;
+    saveVehicleMods(g,u,assetId,selections,price);
+    db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,g,u);
+    const summary=changes.map(change=>`${change.definition.label}：${vehicleModOptionName(assetId,change.category,change.optionId)}`).join('、');
+    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+      .run(g,u,-price,next,'vehicle_mod',u,`網頁改裝 ${asset.name}｜${summary}`);
+    db.exec('COMMIT');
+    return {asset,price,balance:next,selections,changes:changes.map(change=>({category:change.category,optionId:change.optionId,name:vehicleModOptionName(assetId,change.category,change.optionId)}))};
   } catch(error) { db.exec('ROLLBACK'); throw error; }
 }
 const vehicleAssetCategories=new Set(['汽車','機車','飛行器','郵輪']);
@@ -924,12 +2054,12 @@ function assetBuffDescription(assetId,buffId) {
   };
   return descriptions[buffId];
 }
-function ensureAssetBuff(g,u,assetId) {
-  const owned=db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,u,assetId)?.quantity||0;
+function ensureAssetBuff(g,u,assetId,preferredBuffId=null) {
+  const owned=assetQuantity(g,u,assetId);
   if(!owned) return null;
   let row=db.prepare('SELECT buff_id FROM asset_bonuses WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,u,assetId);
   if(!row) {
-    const buffId=assetCatalog[assetId]?.buff||standardAssetBuffIds[Math.floor(Math.random()*standardAssetBuffIds.length)];
+    const buffId=preferredBuffId||assetCatalog[assetId]?.buff||standardAssetBuffIds[Math.floor(Math.random()*standardAssetBuffIds.length)];
     db.prepare('INSERT OR IGNORE INTO asset_bonuses(guild_id,user_id,asset_id,buff_id) VALUES(?,?,?,?)').run(g,u,assetId,buffId);
     row={buff_id:buffId};
   }
@@ -952,10 +2082,9 @@ const assetShopDiscount=(g,u)=>Math.max(-0.30,Math.min(0.30,assetEffectTotal(g,u
 function assetsOf(g,u) {
   return db.prepare('SELECT asset_id,quantity FROM player_assets WHERE guild_id=? AND user_id=? AND quantity>0 ORDER BY asset_id').all(g,u);
 }
-const heistVehicleCategories=new Set(['汽車','機車','飛行器','郵輪']);
 function ownedHeistVehicles(g,u) {
   return assetsOf(g,u)
-    .filter(row=>heistVehicleCategories.has(assetCatalog[row.asset_id]?.category))
+    .filter(row=>vehicleAssetCategories.has(assetCatalog[row.asset_id]?.category))
     .sort((a,b)=>(assetCatalog[b.asset_id]?.price||0)-(assetCatalog[a.asset_id]?.price||0));
 }
 function selectedHeistVehicle(heist) {
@@ -982,11 +2111,21 @@ function activeRentalAssets(g,u) {
   db.prepare('DELETE FROM asset_rentals WHERE expires_at<=?').run(now);
   return db.prepare('SELECT asset_id,1 AS quantity,expires_at,buff_id FROM asset_rentals WHERE guild_id=? AND user_id=? AND expires_at>? ORDER BY expires_at').all(g,u,now).map(row=>({...row,temporary:true}));
 }
-function buyAsset(g,u,assetId,quantity) {
-  const asset=assetCatalog[assetId],total=asset.price*quantity;
+function buyAsset(g,u,assetId,quantity,ammoBoxes=1) {
+  const asset=assetCatalog[assetId];
+  if(!asset) throw new Error('找不到這項資產');
+  if(!assetIsForSale(asset)) throw new Error(`${asset.name} 的限時販售已結束，目前無法購買`);
+  const includedAmmoId=asset.category==='武器'?weaponAmmoIdForAsset(assetId):null;
+  const includedAmmoQuantity=includedAmmoId?Math.max(1,Number(ammoBoxes)||1):0;
+  const extraAmmoQuantity=includedAmmoId?includedAmmoQuantity-1:0;
+  const ammoCost=includedAmmoId?assetCatalog[includedAmmoId].price*extraAmmoQuantity:0;
+  const total=asset.price*quantity+ammoCost;
   ensureWallet(g,u);
   db.exec('BEGIN IMMEDIATE');
   try {
+    const owned=assetQuantity(g,u,assetId);
+    if(asset.unique&&owned>0) throw new Error(`${asset.name} 每位玩家限持有 1 件`);
+    if(asset.maxOwned&&owned+quantity>asset.maxOwned) throw new Error(`${asset.name} 每位玩家最多持有 ${asset.maxOwned} 件`);
     const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,u).balance;
     if(current<total) throw new Error(`金幣不足，需要 ${fmt(total)}`);
     const next=current-total;
@@ -1007,14 +2146,12 @@ function buyAsset(g,u,assetId,quantity) {
       db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,u,-total,next,'asset_rental',u,`租用 ${asset.name} 24 小時｜金幣直接銷毀`);
       db.exec('COMMIT'); return {next,total,buffId,temporary:true,expiresAt};
     }
-    db.prepare('INSERT INTO player_assets(guild_id,user_id,asset_id,quantity) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET quantity=quantity+excluded.quantity').run(g,u,assetId,quantity);
-    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,u,-total,next,'asset_purchase',u,`購買 ${asset.name} x${quantity}｜金幣直接銷毀`);
-    let buffId=db.prepare('SELECT buff_id FROM asset_bonuses WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,u,assetId)?.buff_id;
-    if(!buffId) {
-      buffId=asset.buff||standardAssetBuffIds[Math.floor(Math.random()*standardAssetBuffIds.length)];
-      db.prepare('INSERT INTO asset_bonuses(guild_id,user_id,asset_id,buff_id) VALUES(?,?,?,?)').run(g,u,assetId,buffId);
-    }
-    db.exec('COMMIT'); return {next,total,buffId};
+    addAssetQuantity(g,u,assetId,quantity);
+    if(includedAmmoId) addAssetQuantity(g,u,includedAmmoId,includedAmmoQuantity);
+    const ammoReason=includedAmmoId?`｜含 ${assetCatalog[includedAmmoId].name} x${includedAmmoQuantity}（首箱免費）`:'';
+    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,u,-total,next,'asset_purchase',u,`購買 ${asset.name} x${quantity}${ammoReason}｜金幣直接銷毀`);
+    const buffId=ensureAssetBuff(g,u,assetId);
+    db.exec('COMMIT'); return {next,total,buffId,includedAmmoId,includedAmmoQuantity,extraAmmoQuantity,ammoCost};
   } catch(e) { db.exec('ROLLBACK'); throw e; }
 }
 function grantAssetPrize(g,u,assetId,quantity=1,reason='活動獎勵') {
@@ -1023,9 +2160,8 @@ function grantAssetPrize(g,u,assetId,quantity=1,reason='活動獎勵') {
   ensureWallet(g,u);
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.prepare('INSERT INTO player_assets(guild_id,user_id,asset_id,quantity) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET quantity=quantity+excluded.quantity').run(g,u,assetId,quantity);
-    const ids=Object.keys(assetBuffs),buffId=asset.buff||ids[Math.floor(Math.random()*ids.length)];
-    db.prepare('INSERT OR IGNORE INTO asset_bonuses(guild_id,user_id,asset_id,buff_id) VALUES(?,?,?,?)').run(g,u,assetId,buffId);
+    addAssetQuantity(g,u,assetId,quantity);
+    const buffId=ensureAssetBuff(g,u,assetId);
     db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,u,0,balance(g,u),'asset_prize',u,`${reason}：${asset.name} x${quantity}`);
     db.exec('COMMIT');
     return {asset,buffId};
@@ -1037,25 +2173,17 @@ function adminAdjustAsset(g,targetId,assetId,quantity,action,actorId,reason) {
   ensureWallet(g,targetId);
   db.exec('BEGIN IMMEDIATE');
   try {
-    const owned=db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,targetId,assetId)?.quantity||0;
+    const owned=assetQuantity(g,targetId,assetId);
     let remaining,buffId=null;
     if(action==='grant') {
       remaining=owned+quantity;
-      db.prepare('INSERT INTO player_assets(guild_id,user_id,asset_id,quantity) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET quantity=quantity+excluded.quantity').run(g,targetId,assetId,quantity);
-      buffId=db.prepare('SELECT buff_id FROM asset_bonuses WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,targetId,assetId)?.buff_id;
-      if(!buffId) {
-        const ids=Object.keys(assetBuffs);
-        buffId=asset.buff||ids[Math.floor(Math.random()*ids.length)];
-        db.prepare('INSERT INTO asset_bonuses(guild_id,user_id,asset_id,buff_id) VALUES(?,?,?,?)').run(g,targetId,assetId,buffId);
-      }
+      addAssetQuantity(g,targetId,assetId,quantity);
+      buffId=ensureAssetBuff(g,targetId,assetId);
     } else {
       if(owned<quantity) throw new Error(`玩家持有數量不足，目前只有 ${owned}`);
       remaining=owned-quantity;
-      if(remaining>0) db.prepare('UPDATE player_assets SET quantity=? WHERE guild_id=? AND user_id=? AND asset_id=?').run(remaining,g,targetId,assetId);
-      else {
-        db.prepare('DELETE FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').run(g,targetId,assetId);
-        db.prepare('DELETE FROM asset_bonuses WHERE guild_id=? AND user_id=? AND asset_id=?').run(g,targetId,assetId);
-      }
+      if(remaining>0) setAssetQuantity(g,targetId,assetId,remaining);
+      else removeAsset(g,targetId,assetId);
     }
     const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,targetId).balance;
     db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
@@ -1064,28 +2192,49 @@ function adminAdjustAsset(g,targetId,assetId,quantity,action,actorId,reason) {
     return {asset,remaining,buffId};
   } catch(e) { db.exec('ROLLBACK'); throw e; }
 }
+const VEHICLE_RECYCLE_RATE=0.30;
+function vehicleRecycleValue(assetId,quantity=1) {
+  const asset=assetCatalog[assetId];
+  return Math.max(0,Math.floor((asset?.price||0)*VEHICLE_RECYCLE_RATE))*quantity;
+}
+function recycleVehicleAsset(g,u,assetId,quantity) {
+  const asset=assetCatalog[assetId];
+  if(!asset||!vehicleAssetCategories.has(asset.category)) throw new Error('回收廠只接受汽車、機車、飛行器與郵輪');
+  if(!Number.isInteger(quantity)||quantity<1) throw new Error('回收數量必須至少為 1');
+  ensureWallet(g,u);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const owned=assetQuantity(g,u,assetId);
+    if(owned<quantity) throw new Error(`持有數量不足，目前只有 ${owned}`);
+    const remaining=owned-quantity,reward=vehicleRecycleValue(assetId,quantity);
+    if(remaining>0) setAssetQuantity(g,u,assetId,remaining);
+    else removeAsset(g,u,assetId,{mods:true});
+    const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,u).balance,next=current+reward;
+    db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,g,u);
+    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+      .run(g,u,reward,next,'asset_recycle',u,`回收廠壓成廢鐵：${asset.name} x${quantity}｜返還原價 30%`);
+    db.exec('COMMIT');
+    return {asset,quantity,remaining,reward,next};
+  } catch(e) { db.exec('ROLLBACK'); throw e; }
+}
 function completeAssetTrade(g,sellerId,buyerId,assetId,quantity,price) {
   ensureWallet(g,sellerId); ensureWallet(g,buyerId);
   db.exec('BEGIN IMMEDIATE');
   try {
-    const owned=db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,sellerId,assetId)?.quantity||0;
+    const owned=assetQuantity(g,sellerId,assetId);
     if(owned<quantity) throw new Error('賣方持有的資產數量不足，交易已取消');
     const buyerBalance=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,buyerId).balance;
     if(buyerBalance<price) throw new Error('買方金幣不足，交易無法完成');
     const sellerBalance=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,sellerId).balance;
     db.prepare('UPDATE wallets SET balance=balance-?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(price,g,buyerId);
     db.prepare('UPDATE wallets SET balance=balance+?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(price,g,sellerId);
-    db.prepare('UPDATE player_assets SET quantity=quantity-? WHERE guild_id=? AND user_id=? AND asset_id=?').run(quantity,g,sellerId,assetId);
-    db.prepare('INSERT INTO player_assets(guild_id,user_id,asset_id,quantity) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET quantity=quantity+excluded.quantity').run(g,buyerId,assetId,quantity);
+    setAssetQuantity(g,sellerId,assetId,owned-quantity);
+    addAssetQuantity(g,buyerId,assetId,quantity);
     db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,buyerId,-price,buyerBalance-price,'asset_trade',sellerId,`向玩家購買 ${assetCatalog[assetId].name} x${quantity}`);
     db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,sellerId,price,sellerBalance+price,'asset_trade',buyerId,`出售 ${assetCatalog[assetId].name} x${quantity}`);
     const sellerRemaining=owned-quantity;
     if(sellerRemaining<=0) db.prepare('DELETE FROM asset_bonuses WHERE guild_id=? AND user_id=? AND asset_id=?').run(g,sellerId,assetId);
-    const buyerBuff=db.prepare('SELECT buff_id FROM asset_bonuses WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,buyerId,assetId)?.buff_id;
-    if(!buyerBuff) {
-      const ids=Object.keys(assetBuffs),buffId=assetCatalog[assetId]?.buff||ids[Math.floor(Math.random()*ids.length)];
-      db.prepare('INSERT INTO asset_bonuses(guild_id,user_id,asset_id,buff_id) VALUES(?,?,?,?)').run(g,buyerId,assetId,buffId);
-    }
+    ensureAssetBuff(g,buyerId,assetId);
     db.exec('COMMIT');
   } catch(e) { db.exec('ROLLBACK'); throw e; }
 }
@@ -1095,10 +2244,10 @@ function createMarketListing(g,sellerId,assetId,quantity,price) {
   const buffId=ensureAssetBuff(g,sellerId,assetId);
   db.exec('BEGIN IMMEDIATE');
   try {
-    const owned=db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,sellerId,assetId)?.quantity||0;
+    const owned=assetQuantity(g,sellerId,assetId);
     if(owned<quantity) throw new Error(`持有數量不足，目前只有 ${owned}`);
     const remaining=owned-quantity;
-    db.prepare('UPDATE player_assets SET quantity=? WHERE guild_id=? AND user_id=? AND asset_id=?').run(remaining,g,sellerId,assetId);
+    setAssetQuantity(g,sellerId,assetId,remaining);
     if(remaining<=0) db.prepare('DELETE FROM asset_bonuses WHERE guild_id=? AND user_id=? AND asset_id=?').run(g,sellerId,assetId);
     const result=db.prepare('INSERT INTO asset_market_listings(guild_id,seller_id,asset_id,quantity,price,buff_id) VALUES(?,?,?,?,?,?)').run(g,sellerId,assetId,quantity,price,buffId);
     db.exec('COMMIT');
@@ -1112,8 +2261,8 @@ function cancelMarketListing(g,sellerId,listingId) {
     if(!listing) throw new Error('這筆二手商品已下架或售出');
     if(listing.seller_id!==sellerId) throw new Error('只有賣家可以取消這筆商品');
     db.prepare("UPDATE asset_market_listings SET status='cancelled',completed_at=CURRENT_TIMESTAMP WHERE id=?").run(listingId);
-    db.prepare('INSERT INTO player_assets(guild_id,user_id,asset_id,quantity) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET quantity=quantity+excluded.quantity').run(g,sellerId,listing.asset_id,listing.quantity);
-    db.prepare('INSERT OR IGNORE INTO asset_bonuses(guild_id,user_id,asset_id,buff_id) VALUES(?,?,?,?)').run(g,sellerId,listing.asset_id,listing.buff_id||assetCatalog[listing.asset_id]?.buff||'getaway');
+    addAssetQuantity(g,sellerId,listing.asset_id,listing.quantity);
+    ensureAssetBuff(g,sellerId,listing.asset_id,listing.buff_id);
     db.exec('COMMIT');
     return listing;
   } catch(e) { db.exec('ROLLBACK'); throw e; }
@@ -1131,8 +2280,8 @@ function buyMarketListing(g,buyerId,listingId) {
     if(buyerBalance<listing.price) throw new Error(`金幣不足，需要 ${fmt(listing.price)}`);
     db.prepare('UPDATE wallets SET balance=balance-?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(listing.price,g,buyerId);
     db.prepare('UPDATE wallets SET balance=balance+?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(listing.price,g,listing.seller_id);
-    db.prepare('INSERT INTO player_assets(guild_id,user_id,asset_id,quantity) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,asset_id) DO UPDATE SET quantity=quantity+excluded.quantity').run(g,buyerId,listing.asset_id,listing.quantity);
-    db.prepare('INSERT OR IGNORE INTO asset_bonuses(guild_id,user_id,asset_id,buff_id) VALUES(?,?,?,?)').run(g,buyerId,listing.asset_id,listing.buff_id||assetCatalog[listing.asset_id]?.buff||'getaway');
+    addAssetQuantity(g,buyerId,listing.asset_id,listing.quantity);
+    ensureAssetBuff(g,buyerId,listing.asset_id,listing.buff_id);
     db.prepare("UPDATE asset_market_listings SET status='sold',buyer_id=?,completed_at=CURRENT_TIMESTAMP WHERE id=?").run(buyerId,listingId);
     db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,buyerId,-listing.price,buyerBalance-listing.price,'market_purchase',listing.seller_id,`二手市場購買 ${assetCatalog[listing.asset_id].name} x${listing.quantity}`);
     db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,listing.seller_id,listing.price,sellerBalance+listing.price,'market_sale',buyerId,`二手市場售出 ${assetCatalog[listing.asset_id].name} x${listing.quantity}`);
@@ -1147,7 +2296,14 @@ function refreshPetMood(g,u,petId) {
   if(!row) return null;
   const today=taipeiDay(),days=calendarDayDiff(row.mood_day,today);
   if(!days) return row;
-  const happiness=Math.max(0,row.happiness-days*10);
+  const pet=petCatalog[petId];
+  const housingReduction=Object.entries(petItemCatalog).reduce((total,[itemId,item])=>{
+    if(!item.permanent||!item.moodDecayReduction||!petItemCompatible(item,pet)) return total;
+    const owned=db.prepare('SELECT quantity FROM pet_inventory WHERE guild_id=? AND user_id=? AND item_id=?').get(g,u,itemId)?.quantity||0;
+    return owned>0?total+item.moodDecayReduction:total;
+  },0);
+  const dailyDecay=Math.max(0,Math.round(10*(pet?.hungerMultiplier||1))-housingReduction);
+  const happiness=Math.max(0,row.happiness-days*dailyDecay);
   db.prepare('UPDATE player_pets SET happiness=?,mood_day=? WHERE guild_id=? AND user_id=? AND pet_id=?').run(happiness,today,g,u,petId);
   return {happiness,mood_day:today};
 }
@@ -1168,15 +2324,32 @@ const petDisplayName=(petId,nickname=null)=>{
 };
 function petBonus(g,u,type) {
   const active=activePet(g,u);
-  if(!active||active.pet.bonusType!==type||active.happiness<20) return 0;
-  return active.pet.bonusValue*(active.happiness/100);
+  if(!active||active.happiness<20) return 0;
+  const value=active.pet.bonuses?.[type]??(active.pet.bonusType===type?active.pet.bonusValue:0);
+  return value*(active.happiness/100);
+}
+function teamPetHeistBonus(heist) {
+  return Math.min(10,heist.members.reduce((sum,memberId)=>sum+petBonus(heist.guildId,memberId,'heist'),0));
 }
 function petMoodBar(value) {
   const bars=Math.max(0,Math.min(10,Math.round(value/10)));
   return `${'🟩'.repeat(bars)}${'⬛'.repeat(10-bars)} **${value}/100**`;
 }
 function petMediaPayload(embed,petId) {
-  const pet=petCatalog[petId],path=assetPath(pet.image),name=`pet_${petId}${extname(path)}`;
+  const pet=petCatalog[petId];
+  if(!pet?.image) return {embeds:[embed]};
+  const path=assetPath(pet.image);
+  if(!existsSync(path)) return {embeds:[embed]};
+  const name=`pet_${petId}${extname(path)}`;
+  embed.setImage(`attachment://${name}`);
+  return {embeds:[embed],files:[new AttachmentBuilder(path,{name})]};
+}
+function petItemMediaPayload(embed,itemId) {
+  const item=petItemCatalog[itemId];
+  if(!item?.image) return {embeds:[embed]};
+  const path=assetPath(item.image);
+  if(!existsSync(path)) return {embeds:[embed]};
+  const name=`pet_item_${itemId}${extname(path)}`;
   embed.setImage(`attachment://${name}`);
   return {embeds:[embed],files:[new AttachmentBuilder(path,{name})]};
 }
@@ -1184,12 +2357,14 @@ function buyPetShopProduct(g,u,kind,id,quantity=1) {
   const product=kind==='pet'?petCatalog[id]:petItemCatalog[id];
   if(!product) throw new Error('找不到這項寵物店商品');
   quantity=kind==='pet'?1:Number(quantity);
+  if(kind==='item'&&product.permanent) quantity=1;
   if(!Number.isInteger(quantity)||quantity<1||quantity>99) throw new Error('購買數量必須是 1～99 的整數');
   const total=product.price*quantity;
   db.exec('BEGIN IMMEDIATE');
   try {
     const current=ensureWallet(g,u);
     if(kind==='pet'&&db.prepare('SELECT 1 FROM player_pets WHERE guild_id=? AND user_id=? AND pet_id=?').get(g,u,id)) throw new Error('你已經擁有這隻寵物');
+    if(kind==='item'&&product.permanent&&(db.prepare('SELECT quantity FROM pet_inventory WHERE guild_id=? AND user_id=? AND item_id=?').get(g,u,id)?.quantity||0)>0) throw new Error('你已經擁有這項永久寵物資產');
     if(current<total) throw new Error(`金幣不足，需要 ${fmt(total)}`);
     const next=current-total;
     db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,g,u);
@@ -1204,10 +2379,19 @@ function buyPetShopProduct(g,u,kind,id,quantity=1) {
     return {balance:next,product,quantity,total};
   } catch(e) { db.exec('ROLLBACK'); throw e; }
 }
+const petItemTargetLabel=item=>item.targetLabel||(item.birdOnly?'鳥類專用':'');
+const petItemEffectLabel=item=>item.permanent?`永久資產｜每日心情消耗 -${item.moodDecayReduction}`:`心情 +${item.mood}`;
+function petItemCompatible(item,pet) {
+  if(item.birdOnly) return pet.petType==='bird';
+  if(item.allowedPetTypes) return item.allowedPetTypes.includes(pet.petType);
+  return true;
+}
 function usePetItem(g,u,itemId) {
   const item=petItemCatalog[itemId],active=activePet(g,u);
   if(!item) throw new Error('找不到這項寵物用品');
+  if(item.permanent) throw new Error(`${item.name} 是永久資產，擁有後會自動生效，不需要手動使用`);
   if(!active) throw new Error('請先購買寵物並設定陪伴夥伴');
+  if(!petItemCompatible(item,active.pet)) throw new Error(`${item.name} 是${petItemTargetLabel(item)}，請先切換適用的同行寵物`);
   const quantity=db.prepare('SELECT quantity FROM pet_inventory WHERE guild_id=? AND user_id=? AND item_id=?').get(g,u,itemId)?.quantity||0;
   if(quantity<1) throw new Error(`你沒有 ${item.name}，請先到寵物店購買`);
   const happiness=Math.min(100,active.happiness+item.mood);
@@ -1267,7 +2451,8 @@ const profileTitles={
   fierce_dog:'🐕 猛犬',
   fierce_bird:'🦅 猛禽',
   cat_returns:'🐈 貓的報恩',
-  dog_returns:'🐕 犬的報恩'
+  dog_returns:'🐕 犬的報恩',
+  all_in_hero:'🔥 歐印勇者'
 };
 const returnTitleSkillNames={cat_returns:'借看一下',dog_returns:'再聞一下'};
 function equippedTitleId(g,u) {
@@ -1288,13 +2473,78 @@ function returnsCasinoMultiplier(g,u) {
 }
 function titleLuckNotice(settlement) {
   if(!settlement.titleActive) return '';
+  if(settlement.titleId==='all_in_hero') return '\n\n🔥 **傳奇稱號「歐印勇者」發動：歐印勝利派彩 ×3！**';
   const title=profileTitles[settlement.titleId],skill=returnTitleSkillNames[settlement.titleId];
   if(settlement.titleSkillTriggered) return `\n\n${title.split(' ')[0]} **特殊技能「${skill}」發動！**\n第一次抽到 ×${settlement.titleInitialMultiplier}，重抽後本局派彩 **×${settlement.titleMultiplier}**`;
   return `\n\n**${title}：本局派彩 ×${settlement.titleMultiplier}**`;
 }
 function playerTitle(g,u) {
   const id=equippedTitleId(g,u),name=profileTitles[id]||'尚未設定特殊稱號';
+  if(id==='all_in_hero') return `${name}\n稀有度：傳奇｜賭場遊戲歐印獲勝時派彩 ×3`;
   return returnTitleSkillNames[id]?`${name}\n每次賭場獲勝隨機獲得 ×0.1～×10 派彩；3% 發動「${returnTitleSkillNames[id]}」重抽一次`:name;
+}
+const ALL_IN_HERO_TARGET=50;
+const allInTitleNotificationsInFlight=new Set();
+function casinoAllInCount(g,u) {
+  return db.prepare('SELECT all_in_count FROM casino_all_in_stats WHERE guild_id=? AND user_id=?').get(g,u)?.all_in_count||0;
+}
+function recordCasinoAllIn(g,u,game) {
+  db.prepare(`INSERT INTO casino_all_in_stats(guild_id,user_id,all_in_count)
+    VALUES(?,?,1)
+    ON CONFLICT(guild_id,user_id) DO UPDATE SET all_in_count=all_in_count+1`).run(g,u);
+  const unlock=db.prepare(`UPDATE casino_all_in_stats
+    SET unlocked_at=CURRENT_TIMESTAMP
+    WHERE guild_id=? AND user_id=? AND all_in_count>=? AND unlocked_at IS NULL`).run(g,u,ALL_IN_HERO_TARGET);
+  const count=casinoAllInCount(g,u),newlyUnlocked=unlock.changes===1;
+  if(newlyUnlocked) {
+    db.prepare('INSERT OR IGNORE INTO player_achievements(guild_id,user_id,achievement_id) VALUES(?,?,?)').run(g,u,'all_in_hero');
+    queueMicrotask(()=>notifyAllInHeroUnlock(g,u).catch(error=>console.error(`歐印勇者解鎖私訊失敗 guild=${g} user=${u}: ${error.message}`)));
+  }
+  return {count,newlyUnlocked,game};
+}
+async function notifyAllInHeroUnlock(g,u) {
+  const key=`${g}:${u}`;
+  if(allInTitleNotificationsInFlight.has(key)) return;
+  const row=db.prepare(`SELECT all_in_count,unlocked_at,dm_notified_at
+    FROM casino_all_in_stats WHERE guild_id=? AND user_id=?`).get(g,u);
+  if(!row?.unlocked_at||row.dm_notified_at!==null) return;
+  allInTitleNotificationsInFlight.add(key);
+  try {
+    const user=await client.users.fetch(u);
+    await user.send({
+      embeds:[new EmbedBuilder()
+        .setColor(0xFF6D00)
+        .setTitle('🏆 傳奇稱號解鎖｜歐印勇者')
+        .setDescription('你已在賭場遊戲完成 **50 次歐印**，正式獲得傳奇稱號 **🔥 歐印勇者**！')
+        .addFields(
+          {name:'🎰 解鎖進度',value:`${Math.min(row.all_in_count,ALL_IN_HERO_TARGET)}/${ALL_IN_HERO_TARGET}`,inline:true},
+          {name:'🔥 稱號效果',value:'配戴期間，賭場遊戲使用歐印並獲勝時，派彩提升為 **3 倍**。',inline:false},
+          {name:'🏷️ 配戴方式',value:'回到伺服器使用 `/稱號`，選擇 **🔥 歐印勇者｜傳奇**。',inline:false}
+        )
+        .setFooter({text:'只有歐印勝利會觸發三倍派彩；一般下注不受影響'})
+        .setTimestamp()]
+    });
+    db.prepare('UPDATE casino_all_in_stats SET dm_notified_at=? WHERE guild_id=? AND user_id=? AND dm_notified_at IS NULL').run(Date.now(),g,u);
+  } catch(error) {
+    const errorCode=Number(error?.code||error?.rawError?.code||0);
+    if(errorCode===50007) {
+      db.prepare('UPDATE casino_all_in_stats SET dm_notified_at=-1 WHERE guild_id=? AND user_id=? AND dm_notified_at IS NULL').run(g,u);
+      console.warn(`歐印勇者解鎖私訊無法送達（玩家關閉私訊） guild=${g} user=${u}`);
+    } else {
+      throw error;
+    }
+  } finally {
+    allInTitleNotificationsInFlight.delete(key);
+  }
+}
+async function notifyPendingAllInHeroUnlocks() {
+  const rows=db.prepare(`SELECT guild_id,user_id FROM casino_all_in_stats
+    WHERE unlocked_at IS NOT NULL AND dm_notified_at IS NULL
+    ORDER BY unlocked_at LIMIT 25`).all();
+  for(const row of rows) {
+    try { await notifyAllInHeroUnlock(row.guild_id,row.user_id); }
+    catch(error) { console.error(`待補發歐印勇者私訊失敗 guild=${row.guild_id} user=${row.user_id}: ${error.message}`); }
+  }
 }
 const achievementDefinitions=[
   {id:'first_bet',name:'🐣 初試啼聲',description:'完成第 1 次下注',metric:'bets',target:1,titleReward:'cute_bird'},
@@ -1304,13 +2554,14 @@ const achievementDefinitions=[
   {id:'veteran_gambler',name:'🎲 久經賭場',description:'累積完成 50 次下注',metric:'bets',target:50},
   {id:'vault_master',name:'💰 金庫達人',description:'金庫餘額達到 100,000',metric:'coins',target:100000},
   {id:'collector',name:'🏎️ 收藏家',description:'持有 10 件資產',metric:'assetCount',target:10},
-  {id:'casino_legend',name:'👑 百勝傳奇',description:'累積 100 次獲勝紀錄',metric:'wins',target:100}
+  {id:'casino_legend',name:'👑 百勝傳奇',description:'累積 100 次獲勝紀錄',metric:'wins',target:100},
+  {id:'all_in_hero',name:'🔥 歐印勇者',description:'在單人賭場遊戲完成 50 次歐印',metric:'allIns',target:ALL_IN_HERO_TARGET,titleReward:'all_in_hero'}
 ];
 function achievementStats(g,u) {
   const ledger=db.prepare("SELECT COUNT(*) actions, SUM(CASE WHEN kind IN ('bet','duel_bet') THEN 1 ELSE 0 END) bets, SUM(CASE WHEN kind='payout' AND delta>0 THEN 1 ELSE 0 END) wins, SUM(CASE WHEN kind='job' AND delta>0 THEN 1 ELSE 0 END) jobs FROM ledger WHERE guild_id=? AND user_id=?").get(g,u);
   const owned=assetsOf(g,u);
   return {
-    actions:ledger.actions||0,bets:ledger.bets||0,wins:ledger.wins||0,jobs:ledger.jobs||0,
+    actions:ledger.actions||0,bets:ledger.bets||0,wins:ledger.wins||0,jobs:ledger.jobs||0,allIns:casinoAllInCount(g,u),
     coins:balance(g,u),assetCount:owned.reduce((sum,row)=>sum+row.quantity,0),
     assetValue:owned.reduce((sum,row)=>sum+(assetCatalog[row.asset_id]?.price||0)*row.quantity,0)
   };
@@ -1361,7 +2612,8 @@ const heistBanks={
   harbor_union:{name:'⚓ 港灣聯合銀行',baseChance:9,reward:30000},
   metro:{name:'🏙️ 都會中央銀行',baseChance:7,reward:65000},
   crown:{name:'💠 皇冠國際銀行',baseChance:4,reward:150000},
-  casino_vault:{name:'🎰 賭場中央寶庫（週日限定）',baseChance:4,reward:0,sundayOnly:true}
+  casino_vault:{name:'🎰 賭場中央寶庫（週日限定）',baseChance:4,reward:0,sundayOnly:true},
+  central_museum:{name:'🏛️ 中央美術館',baseChance:5,reward:120000,museumTarget:true}
 };
 function heistBasePool(g,bankId) {
   const bank=heistBanks[bankId];
@@ -1385,22 +2637,179 @@ const heistVaultContents={
   diamonds:{name:'💎 鑽石金庫',description:'金庫內堆滿高價鑽石與珠寶箱，搬運困難但黑市價值極高。',rewardMultiplier:1.35,scene:'vault_diamonds'},
   cash:{name:'💵 現鈔金庫',description:'大量現鈔已完成打包，撤離速度最快，收益也最穩定。',rewardMultiplier:1.00,scene:'vault_cash'},
   gold:{name:'🪙 黃金金庫',description:'保險櫃內存放大量金條，重量會拖慢撤離，但總價值可觀。',rewardMultiplier:1.20,scene:'vault_gold'},
+  museum_art:{name:'🖼️ 美術品展藏庫',description:'展藏庫收藏名畫、雕塑與限量藝術品；隊伍必須在不損傷作品的情況下迅速打包撤離。',rewardMultiplier:1.15,museumOnly:true,scene:'museum_loot_art'},
+  museum_antiques:{name:'🏺 骨董典藏庫',description:'典藏庫內存放骨董、古代文物與稀有工藝品，真偽鑑定與搬運難度都更高。',rewardMultiplier:1.30,museumOnly:true,scene:'museum_loot_antiques'},
+  museum_underground_vault:{name:'🔐 美術館地下金庫',description:'地下最深處封存著鎮館秘寶、未公開藏品與高價寄存物；保全最嚴密，成功後的黑市收益也最高。',rewardMultiplier:1.55,museumOnly:true,scene:'museum_loot_gold'},
   hao_xinyi_deed:{name:'📜 HAO 信義區地契',description:'情報人員在賭場中央寶庫深處發現 HAO 位於信義區的稀有地契。只有成功撤離並完成結算，才能將地契變現為 8,888,888 金幣，由本次搶匪均分。',rewardMultiplier:1.00,fixedReward:8888888,casinoVaultOnly:true,scene:'vault_hao_xinyi_deed'}
 };
 const HAO_XINYI_DEED_CHANCE=0.02;
-const randomHeistVaultId=bankId=>{
+const randomHeistVaultId=(bankId,mapId)=>{
+  if(bankId==='central_museum') {
+    const museumLoot=['museum_art','museum_antiques','museum_underground_vault'];
+    return museumLoot[Math.floor(Math.random()*museumLoot.length)];
+  }
   if(bankId==='casino_vault'&&Math.random()<HAO_XINYI_DEED_CHANCE) return 'hao_xinyi_deed';
-  const ids=Object.keys(heistVaultContents).filter(id=>!heistVaultContents[id].casinoVaultOnly);
+  const ids=Object.keys(heistVaultContents).filter(id=>!heistVaultContents[id].casinoVaultOnly&&!heistVaultContents[id].museumOnly);
   return ids[Math.floor(Math.random()*ids.length)];
 };
 const heistVaultRewardLabel=vault=>vault.fixedReward?`固定結算 ${vault.fixedReward.toLocaleString()} 金幣`:`收益 ×${vault.rewardMultiplier}`;
 const heistWeapons={
-  pistol:{name:'🔫 制式手槍',robber:1,police:1,price:500,description:'火力 +1｜行動費 500'},
-  smg:{name:'⚡ 衝鋒槍',robber:3,police:2,price:1500,description:'劫匪 +3／警方 +2｜1,500'},
-  shotgun:{name:'💥 霰彈槍',robber:2,police:3,price:1800,description:'劫匪 +2／警方 +3｜1,800'},
-  rifle:{name:'🎯 突擊步槍',robber:4,police:4,price:3000,description:'雙方火力 +4｜3,000'},
-  sniper:{name:'🔭 狙擊步槍',robber:2,police:5,price:3500,description:'劫匪 +2／警方 +5｜3,500'}
+  pistol:{name:'🔫 制式手槍',robber:1,police:1,assetId:'weapon_pistol',ammoId:'ammo_pistol',description:'火力 +1｜手槍通用子彈'},
+  glock17:{name:'🔫 Glock 17',robber:2,police:2,assetId:'weapon_glock17',ammoId:'ammo_pistol',description:'雙方火力 +2｜手槍通用子彈'},
+  sig_p226:{name:'🔫 SIG Sauer P226',robber:2,police:3,assetId:'weapon_sig_p226',ammoId:'ammo_pistol',description:'劫匪 +2／警方 +3｜手槍通用子彈'},
+  hk_usp:{name:'🔫 H&K USP',robber:3,police:3,assetId:'weapon_hk_usp',ammoId:'ammo_pistol',description:'雙方火力 +3｜手槍通用子彈'},
+  colt_1911:{name:'🔫 Colt 1911',robber:3,police:2,assetId:'weapon_colt_1911',ammoId:'ammo_pistol',description:'劫匪 +3／警方 +2｜手槍通用子彈'},
+  fn_five_seven:{name:'🔫 FN Five-seveN',robber:3,police:3,assetId:'weapon_fn_five_seven',ammoId:'ammo_pistol',description:'雙方火力 +3｜手槍通用子彈'},
+  desert_eagle_50ae:{name:'🦅 Desert Eagle .50 AE',robber:4,police:3,assetId:'weapon_desert_eagle_50ae',ammoId:'ammo_pistol',description:'劫匪 +4／警方 +3｜手槍通用子彈'},
+  beretta_92fs:{name:'🔫 Beretta 92FS',robber:2,police:3,assetId:'weapon_beretta_92fs',ammoId:'ammo_pistol',description:'劫匪 +2／警方 +3｜手槍通用子彈'},
+  cz75:{name:'🔫 CZ 75',robber:2,police:2,assetId:'weapon_cz75',ammoId:'ammo_pistol',description:'雙方火力 +2｜手槍通用子彈'},
+  walther_p99:{name:'🔫 Walther P99',robber:2,police:3,assetId:'weapon_walther_p99',ammoId:'ammo_pistol',description:'劫匪 +2／警方 +3｜手槍通用子彈'},
+  m9a3:{name:'🔫 M9A3',robber:3,police:3,assetId:'weapon_m9a3',ammoId:'ammo_pistol',description:'雙方火力 +3｜手槍通用子彈'},
+  golden_desert_eagle_50ae:{name:'🏆 黃金 Desert Eagle .50 AE',robber:5,police:4,assetId:'weapon_golden_desert_eagle_50ae',ammoId:'ammo_pistol',description:'劫匪 +5／警方 +4｜手槍通用子彈'},
+  golden_glock17:{name:'🏆 黃金 Glock 17',robber:3,police:3,assetId:'weapon_golden_glock17',ammoId:'ammo_pistol',description:'雙方火力 +3｜手槍通用子彈'},
+  golden_sig_p226:{name:'🏆 黃金 SIG Sauer P226',robber:3,police:4,assetId:'weapon_golden_sig_p226',ammoId:'ammo_pistol',description:'劫匪 +3／警方 +4｜手槍通用子彈'},
+  golden_hk_usp:{name:'🏆 黃金 H&K USP',robber:4,police:4,assetId:'weapon_golden_hk_usp',ammoId:'ammo_pistol',description:'雙方火力 +4｜手槍通用子彈'},
+  golden_fn_five_seven:{name:'🏆 黃金 FN Five-seveN',robber:4,police:4,assetId:'weapon_golden_fn_five_seven',ammoId:'ammo_pistol',description:'雙方火力 +4｜手槍通用子彈'},
+  golden_colt_1911:{name:'🏆 黃金 Colt 1911',robber:4,police:3,assetId:'weapon_golden_colt_1911',ammoId:'ammo_pistol',description:'劫匪 +4／警方 +3｜手槍通用子彈'},
+  golden_beretta_92fs:{name:'🏆 黃金 Beretta 92FS',robber:3,police:4,assetId:'weapon_golden_beretta_92fs',ammoId:'ammo_pistol',description:'劫匪 +3／警方 +4｜手槍通用子彈'},
+  golden_cz75:{name:'🏆 黃金 CZ 75',robber:3,police:3,assetId:'weapon_golden_cz75',ammoId:'ammo_pistol',description:'雙方火力 +3｜手槍通用子彈'},
+  golden_walther_p99:{name:'🏆 黃金 Walther P99',robber:3,police:4,assetId:'weapon_golden_walther_p99',ammoId:'ammo_pistol',description:'劫匪 +3／警方 +4｜手槍通用子彈'},
+  golden_p08_luger:{name:'🏆 黃金 P08 Luger',robber:4,police:4,assetId:'weapon_golden_p08_luger',ammoId:'ammo_pistol',description:'雙方火力 +4｜手槍通用子彈'},
+  smg:{name:'⚡ 衝鋒槍',robber:3,police:2,assetId:'weapon_smg',ammoId:'ammo_pistol',description:'劫匪 +3／警方 +2｜手槍通用子彈'},
+  shotgun:{name:'💥 霰彈槍',robber:2,police:3,assetId:'weapon_shotgun',ammoId:'ammo_shotgun',description:'劫匪 +2／警方 +3｜需專用彈藥'},
+  rifle:{name:'🎯 突擊步槍',robber:4,police:4,assetId:'weapon_rifle',ammoId:'ammo_rifle',description:'雙方火力 +4｜需專用彈藥'},
+  m4a1:{name:'🔫 M4A1',robber:4,police:4,assetId:'weapon_m4a1',ammoId:'ammo_rifle',description:'雙方火力 +4｜步槍通用子彈'},
+  hk416:{name:'🔫 HK416',robber:4,police:5,assetId:'weapon_hk416',ammoId:'ammo_rifle',description:'劫匪 +4／警方 +5｜步槍通用子彈'},
+  scar_l:{name:'🔫 SCAR-L',robber:5,police:4,assetId:'weapon_scar_l',ammoId:'ammo_rifle',description:'劫匪 +5／警方 +4｜步槍通用子彈'},
+  ak47:{name:'🔫 AK-47',robber:5,police:3,assetId:'weapon_ak47',ammoId:'ammo_rifle',description:'劫匪 +5／警方 +3｜步槍通用子彈'},
+  ak74m:{name:'🔫 AK-74M',robber:4,police:4,assetId:'weapon_ak74m',ammoId:'ammo_rifle',description:'雙方火力 +4｜步槍通用子彈'},
+  ak12:{name:'🔫 AK-12',robber:5,police:5,assetId:'weapon_ak12',ammoId:'ammo_rifle',description:'雙方火力 +5｜步槍通用子彈'},
+  fn_fal:{name:'🔫 FN FAL',robber:5,police:4,assetId:'weapon_fn_fal',ammoId:'ammo_rifle',description:'劫匪 +5／警方 +4｜步槍通用子彈'},
+  g3a3:{name:'🔫 G3A3',robber:4,police:5,assetId:'weapon_g3a3',ammoId:'ammo_rifle',description:'劫匪 +4／警方 +5｜步槍通用子彈'},
+  qbz95:{name:'🔫 QBZ-95',robber:5,police:4,assetId:'weapon_qbz95',ammoId:'ammo_rifle',description:'劫匪 +5／警方 +4｜步槍通用子彈'},
+  aug_a3:{name:'🔫 AUG A3',robber:4,police:5,assetId:'weapon_aug_a3',ammoId:'ammo_rifle',description:'劫匪 +4／警方 +5｜步槍通用子彈'},
+  golden_m4a1:{name:'🏆 黃金 M4A1',robber:6,police:6,assetId:'weapon_golden_m4a1',ammoId:'ammo_rifle',description:'雙方火力 +6｜步槍通用子彈'},
+  golden_ak47:{name:'🏆 黃金 AK-47',robber:7,police:5,assetId:'weapon_golden_ak47',ammoId:'ammo_rifle',description:'劫匪 +7／警方 +5｜步槍通用子彈'},
+  golden_hk416:{name:'🏆 黃金 HK416',robber:6,police:7,assetId:'weapon_golden_hk416',ammoId:'ammo_rifle',description:'劫匪 +6／警方 +7｜步槍通用子彈'},
+  golden_scar_l:{name:'🏆 黃金 SCAR-L',robber:7,police:6,assetId:'weapon_golden_scar_l',ammoId:'ammo_rifle',description:'劫匪 +7／警方 +6｜步槍通用子彈'},
+  golden_famas:{name:'🏆 黃金 FAMAS',robber:7,police:6,assetId:'weapon_golden_famas',ammoId:'ammo_rifle',description:'劫匪 +7／警方 +6｜步槍通用子彈'},
+  golden_g36c:{name:'🏆 黃金 G36C',robber:6,police:7,assetId:'weapon_golden_g36c',ammoId:'ammo_rifle',description:'劫匪 +6／警方 +7｜步槍通用子彈'},
+  golden_qbz95:{name:'🏆 黃金 QBZ-95',robber:7,police:6,assetId:'weapon_golden_qbz95',ammoId:'ammo_rifle',description:'劫匪 +7／警方 +6｜步槍通用子彈'},
+  golden_ak12:{name:'🏆 黃金 AK-12',robber:7,police:7,assetId:'weapon_golden_ak12',ammoId:'ammo_rifle',description:'雙方火力 +7｜步槍通用子彈'},
+  golden_aug_a3:{name:'🏆 黃金 AUG A3',robber:6,police:7,assetId:'weapon_golden_aug_a3',ammoId:'ammo_rifle',description:'劫匪 +6／警方 +7｜步槍通用子彈'},
+  golden_k2:{name:'🏆 黃金 K2',robber:7,police:7,assetId:'weapon_golden_k2',ammoId:'ammo_rifle',description:'雙方火力 +7｜步槍通用子彈'},
+  sniper:{name:'🔭 狙擊步槍',robber:2,police:5,assetId:'weapon_sniper',ammoId:'ammo_sniper',description:'劫匪 +2／警方 +5｜狙擊槍通用子彈'},
+  m24_sws:{name:'🔭 M24 SWS',robber:3,police:6,assetId:'weapon_m24_sws',ammoId:'ammo_sniper',description:'劫匪 +3／警方 +6｜狙擊槍通用子彈'},
+  awp:{name:'🎯 AWP',robber:4,police:6,assetId:'weapon_awp',ammoId:'ammo_sniper',description:'劫匪 +4／警方 +6｜狙擊槍通用子彈'},
+  barrett_m82a1:{name:'💥 Barrett M82A1',robber:6,police:6,assetId:'weapon_barrett_m82a1',ammoId:'ammo_sniper',description:'雙方火力 +6｜狙擊槍通用子彈'},
+  dragunov_svd:{name:'🔭 Dragunov SVD',robber:4,police:5,assetId:'weapon_dragunov_svd',ammoId:'ammo_sniper',description:'劫匪 +4／警方 +5｜狙擊槍通用子彈'},
+  cheytac_m200:{name:'🎯 CheyTac M200',robber:5,police:7,assetId:'weapon_cheytac_m200',ammoId:'ammo_sniper',description:'劫匪 +5／警方 +7｜狙擊槍通用子彈'},
+  kar98k:{name:'🪖 Kar98k',robber:3,police:4,assetId:'weapon_kar98k',ammoId:'ammo_sniper',description:'劫匪 +3／警方 +4｜狙擊槍通用子彈'},
+  l96a1:{name:'🔭 L96A1',robber:4,police:6,assetId:'weapon_l96a1',ammoId:'ammo_sniper',description:'劫匪 +4／警方 +6｜狙擊槍通用子彈'},
+  trg_22:{name:'🎯 TRG-22',robber:4,police:5,assetId:'weapon_trg_22',ammoId:'ammo_sniper',description:'劫匪 +4／警方 +5｜狙擊槍通用子彈'},
+  vsk_94:{name:'🌑 VSK-94',robber:5,police:5,assetId:'weapon_vsk_94',ammoId:'ammo_sniper',description:'雙方火力 +5｜狙擊槍通用子彈'},
+  psg1:{name:'🔭 PSG1',robber:5,police:6,assetId:'weapon_psg1',ammoId:'ammo_sniper',description:'劫匪 +5／警方 +6｜狙擊槍通用子彈'},
+  golden_m24_sws:{name:'🏆 黃金 M24 SWS',robber:5,police:8,assetId:'weapon_golden_m24_sws',ammoId:'ammo_sniper',description:'劫匪 +5／警方 +8｜狙擊槍通用子彈'},
+  golden_awp:{name:'🏆 黃金 AWP',robber:6,police:8,assetId:'weapon_golden_awp',ammoId:'ammo_sniper',description:'劫匪 +6／警方 +8｜狙擊槍通用子彈'},
+  golden_barrett_m82a1:{name:'🏆 黃金 Barrett M82A1',robber:9,police:9,assetId:'weapon_golden_barrett_m82a1',ammoId:'ammo_sniper',description:'雙方火力 +9｜狙擊槍通用子彈'},
+  golden_dragunov_svd:{name:'🏆 黃金 Dragunov SVD',robber:7,police:7,assetId:'weapon_golden_dragunov_svd',ammoId:'ammo_sniper',description:'雙方火力 +7｜狙擊槍通用子彈'},
+  golden_cheytac_m200:{name:'🏆 黃金 CheyTac M200',robber:8,police:9,assetId:'weapon_golden_cheytac_m200',ammoId:'ammo_sniper',description:'劫匪 +8／警方 +9｜狙擊槍通用子彈'},
+  golden_kar98k:{name:'🏆 黃金 Kar98k',robber:5,police:6,assetId:'weapon_golden_kar98k',ammoId:'ammo_sniper',description:'劫匪 +5／警方 +6｜狙擊槍通用子彈'},
+  golden_l96a1:{name:'🏆 黃金 L96A1',robber:6,police:8,assetId:'weapon_golden_l96a1',ammoId:'ammo_sniper',description:'劫匪 +6／警方 +8｜狙擊槍通用子彈'},
+  golden_trg_22:{name:'🏆 黃金 TRG-22',robber:7,police:7,assetId:'weapon_golden_trg_22',ammoId:'ammo_sniper',description:'雙方火力 +7｜狙擊槍通用子彈'},
+  golden_vsk_94:{name:'🏆 黃金 VSK-94',robber:8,police:7,assetId:'weapon_golden_vsk_94',ammoId:'ammo_sniper',description:'劫匪 +8／警方 +7｜狙擊槍通用子彈'},
+  golden_psg1:{name:'🏆 黃金 PSG1',robber:8,police:8,assetId:'weapon_golden_psg1',ammoId:'ammo_sniper',description:'雙方火力 +8｜狙擊槍通用子彈'}
 };
+shotgunSeries.forEach(shotgun=>{
+  const regularKey=`shotgun_${shotgun.key}`;
+  const goldenKey=`golden_shotgun_${shotgun.key}`;
+  const goldenRobber=Math.min(9,shotgun.robber+2);
+  const goldenPolice=Math.min(9,shotgun.police+2);
+  heistWeapons[regularKey]={
+    name:`💥 ${shotgun.name}`,
+    robber:shotgun.robber,
+    police:shotgun.police,
+    assetId:`weapon_${regularKey}`,
+    ammoId:'ammo_shotgun',
+    description:`劫匪 +${shotgun.robber}／警方 +${shotgun.police}｜霰彈槍通用子彈`
+  };
+  heistWeapons[goldenKey]={
+    name:`🏆 黃金${shotgun.name}`,
+    robber:goldenRobber,
+    police:goldenPolice,
+    assetId:`weapon_${goldenKey}`,
+    ammoId:'ammo_shotgun',
+    description:`劫匪 +${goldenRobber}／警方 +${goldenPolice}｜霰彈槍通用子彈`
+  };
+});
+function weaponAmmoIdForAsset(assetId) {
+  return Object.values(heistWeapons).find(weapon=>weapon.assetId===assetId)?.ammoId||null;
+}
+const universalAmmoLabels={
+  ammo_pistol:'手槍通用子彈',
+  ammo_rifle:'步槍通用子彈',
+  ammo_shotgun:'霰彈槍通用子彈',
+  ammo_sniper:'狙擊槍通用子彈'
+};
+for(const weapon of Object.values(heistWeapons)) {
+  const asset=assetCatalog[weapon.assetId],ammoLabel=universalAmmoLabels[weapon.ammoId];
+  if(asset&&ammoLabel) asset.description=asset.description.replace(/每次行動消耗[^。]+。/,`每次行動消耗${ammoLabel} ×1。`);
+}
+const heistWeaponSections={
+  handgun:{label:'手槍',emoji:'🔫',weaponIds:['pistol','glock17','sig_p226','hk_usp','colt_1911','fn_five_seven','desert_eagle_50ae','beretta_92fs','cz75','walther_p99','m9a3']},
+  golden_handgun:{label:'黃金手槍',emoji:'✨',weaponIds:['golden_desert_eagle_50ae','golden_glock17','golden_sig_p226','golden_hk_usp','golden_fn_five_seven','golden_colt_1911','golden_beretta_92fs','golden_cz75','golden_walther_p99','golden_p08_luger']},
+  assault_rifle:{label:'突擊步槍',emoji:'🎯',weaponIds:['rifle','m4a1','hk416','scar_l','ak47','ak74m','ak12','fn_fal','g3a3','qbz95','aug_a3']},
+  shotgun:{label:'霰彈槍',emoji:'💥',weaponIds:['shotgun',...shotgunSeries.map(shotgun=>`shotgun_${shotgun.key}`)]},
+  sniper_rifle:{label:'狙擊槍',emoji:'🔭',weaponIds:['sniper','m24_sws','awp','barrett_m82a1','dragunov_svd','cheytac_m200','kar98k','l96a1','trg_22','vsk_94','psg1']},
+  golden_weapon:{label:'黃金武器',emoji:'🏆',weaponIds:['golden_m4a1','golden_ak47','golden_hk416','golden_scar_l','golden_famas','golden_g36c','golden_qbz95','golden_ak12','golden_aug_a3','golden_k2']},
+  golden_shotgun:{label:'黃金霰彈槍',emoji:'🌠',weaponIds:shotgunSeries.map(shotgun=>`golden_shotgun_${shotgun.key}`)},
+  golden_sniper:{label:'黃金狙擊槍',emoji:'🌟',weaponIds:['golden_m24_sws','golden_awp','golden_barrett_m82a1','golden_dragunov_svd','golden_cheytac_m200','golden_kar98k','golden_l96a1','golden_trg_22','golden_vsk_94','golden_psg1']},
+  other_weapon:{label:'其他武器',emoji:'🛡️',weaponIds:['smg']}
+};
+function heistWeaponCategoryRow(token) {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`heist_weapon_category:${token}`).setPlaceholder('先選擇武器類型').addOptions(
+      Object.entries(heistWeaponSections).map(([value,section])=>({
+        label:section.label,value,emoji:section.emoji,description:`查看 ${section.weaponIds.length} 把${section.label}`
+      }))
+    )
+  );
+}
+function ownedHeistWeaponsInSection(g,u,sectionKey) {
+  const section=heistWeaponSections[sectionKey];
+  if(!section) return [];
+  return section.weaponIds.filter(value=>{
+    const weapon=heistWeapons[value];
+    return weapon&&assetQuantity(g,u,weapon.assetId)>0;
+  });
+}
+function heistWeaponSelectionRow(token,sectionKey,g,u) {
+  const section=heistWeaponSections[sectionKey];
+  const ownedWeaponIds=ownedHeistWeaponsInSection(g,u,sectionKey);
+  if(!section||!ownedWeaponIds.length) return null;
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`heist_weapon:${token}`).setPlaceholder(`選擇已持有的${section.label}`).addOptions(
+      ownedWeaponIds.map(value=>{
+        const weapon=heistWeapons[value];
+        const ammo=assetQuantity(g,u,weapon.ammoId);
+        const ammoName=assetCatalog[weapon.ammoId]?.name||'對應彈藥';
+        return {
+          label:weapon.name.slice(0,100),
+          description:`${weapon.description}｜${ammoName} ${ammo} 箱`.slice(0,100),
+          value
+        };
+      })
+    )
+  );
+}
+const casinoSecurityMaxHp=heist=>10+heist.members.length*3;
+function casinoSecurityAttack(heist) {
+  const weapons=heist.members.map(memberId=>heistWeapons[heist.weapons.get(memberId)]).filter(Boolean);
+  const firepower=weapons.reduce((sum,weapon)=>sum+weapon.robber,0);
+  const critical=Math.random()<0.15;
+  const damage=Math.max(1,firepower+1+Math.floor(Math.random()*3)+(critical?4:0));
+  return {damage,critical,firepower,weapons};
+}
 function chargeTeamHeistPreparation(g,members) {
   members.forEach(memberId=>ensureWallet(g,memberId));
   db.exec('BEGIN IMMEDIATE');
@@ -1418,33 +2827,119 @@ function chargeTeamHeistPreparation(g,members) {
     return TEAM_HEIST_PREP_FEE*members.length;
   } catch(error) { db.exec('ROLLBACK'); throw error; }
 }
-function chargeHeistWeapons(g,heist) {
-  const charges=[];
+function consumeHeistAmmunition(g,heist) {
+  const loadouts=[];
   for(const memberId of heist.members) {
     const weaponId=heist.weapons.get(memberId),weapon=heistWeapons[weaponId];
-    if(weapon) charges.push({userId:memberId,weaponId,weapon});
+    if(weapon) loadouts.push({userId:memberId,weaponId,weapon});
   }
   for(const policeId of heist.police) {
     const weaponId=heist.policeWeapons.get(policeId),weapon=heistWeapons[weaponId];
-    if(weapon) charges.push({userId:policeId,weaponId,weapon});
+    if(weapon) loadouts.push({userId:policeId,weaponId,weapon});
   }
-  charges.forEach(charge=>ensureWallet(g,charge.userId));
   db.exec('BEGIN IMMEDIATE');
   try {
-    const totals=new Map();
-    for(const charge of charges) totals.set(charge.userId,(totals.get(charge.userId)||0)+charge.weapon.price);
-    for(const [userId,total] of totals) {
-      const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,userId).balance;
-      if(current<total) throw new Error(`<@${userId}> 金幣不足，槍枝行動費需要 ${fmt(total)}`);
+    for(const loadout of loadouts) {
+      if(assetQuantity(g,loadout.userId,loadout.weapon.assetId)<1) throw new Error(`<@${loadout.userId}> 未持有 ${loadout.weapon.name}，請先到資產商城購買`);
+      if(assetQuantity(g,loadout.userId,loadout.weapon.ammoId)<1) throw new Error(`<@${loadout.userId}> 缺少 ${assetCatalog[loadout.weapon.ammoId].name}，請先補充彈藥`);
     }
-    for(const charge of charges) {
-      const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,charge.userId).balance,next=current-charge.weapon.price;
-      db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,g,charge.userId);
-      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,charge.userId,-charge.weapon.price,next,'heist_weapon',charge.userId,`${charge.weapon.name} 行動費｜金幣直接銷毀且不退還`);
+    for(const loadout of loadouts) {
+      const remaining=assetQuantity(g,loadout.userId,loadout.weapon.ammoId)-1;
+      setAssetQuantity(g,loadout.userId,loadout.weapon.ammoId,remaining);
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,loadout.userId,0,balance(g,loadout.userId),'heist_ammo',loadout.userId,`${loadout.weapon.name} 行動消耗 ${assetCatalog[loadout.weapon.ammoId].name} x1｜剩餘 ${remaining}`);
     }
     db.exec('COMMIT');
-    return charges.reduce((sum,charge)=>sum+charge.weapon.price,0);
+    return loadouts.length;
   } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+function ownedHideoutRaidWeapons(g,u) {
+  const unique=new Map();
+  for(const [weaponId,weapon] of Object.entries(heistWeapons)) {
+    if(unique.has(weapon.assetId)) continue;
+    if(assetQuantity(g,u,weapon.assetId)<1||assetQuantity(g,u,weapon.ammoId)<1) continue;
+    unique.set(weapon.assetId,{weaponId,weapon});
+  }
+  return [...unique.values()].sort((a,b)=>b.weapon.robber-a.weapon.robber).slice(0,25);
+}
+function hideoutRaidEmbed(raid,notice='') {
+  const property=assetCatalog[raid.propertyId],securityLevel=raid.securityLevel;
+  const weapon=raid.weaponId?heistWeapons[raid.weaponId]:null;
+  const description=[
+    notice,
+    `警方鎖定了 <@${raid.userId}> 的藏身處：**${property?.name||'未知據點'}**！`,
+    '玩家必須在 **5 分鐘內**返回據點，選擇自己持有且備有彈藥的武器反擊警察。',
+    '',
+    `🛡️ 保全系統：**Lv.${securityLevel}**`,
+    `🚓 攻堅風險：**${raid.triggerChance}%**`,
+    `🔫 目前武器：**${weapon?.name||'尚未選擇'}**`,
+    '',
+    '成功可守住藏身處；失敗、撤離或逾時會被逮捕，並扣除部分隨身金幣。房產與藏身處升級不會消失。'
+  ].filter(Boolean).join('\n');
+  return new EmbedBuilder().setColor(raid.returned?0xE53935:0xF5B942).setTitle('🚨 隨機事件｜警察攻堅').setDescription(description);
+}
+function hideoutRaidRows(token,raid) {
+  if(!raid.returned) return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`hideout_raid_return:${token}`).setLabel('返回藏身處').setEmoji('🏚️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`hideout_raid_abandon:${token}`).setLabel('棄守撤離').setEmoji('🏃').setStyle(ButtonStyle.Secondary)
+  )];
+  const weapons=ownedHideoutRaidWeapons(raid.guildId,raid.userId);
+  const rows=[];
+  if(weapons.length) rows.push(new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`hideout_raid_weapon:${token}`).setPlaceholder('選擇持有且備有彈藥的武器').addOptions(
+      ...weapons.map(({weaponId,weapon})=>({
+        label:weapon.name.slice(0,100),
+        description:`反擊火力 +${weapon.robber}｜消耗 ${assetCatalog[weapon.ammoId]?.name||'彈藥'} ×1`.slice(0,100),
+        value:weaponId,
+        default:raid.weaponId===weaponId
+      }))
+    )
+  ));
+  rows.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`hideout_raid_fight:${token}`).setLabel('反擊警察').setEmoji('🔫').setStyle(ButtonStyle.Danger).setDisabled(!raid.weaponId),
+    new ButtonBuilder().setCustomId(`hideout_raid_abandon:${token}`).setLabel('棄守撤離').setEmoji('🏃').setStyle(ButtonStyle.Secondary)
+  ));
+  return rows;
+}
+function applyHideoutRaidLoss(raid,reason) {
+  const securityLevel=raid.securityLevel;
+  const jailDurationMs=Math.max(2*60_000,5*60_000-securityLevel*30_000);
+  const releaseAt=Date.now()+jailDurationMs;
+  db.prepare('INSERT INTO jail(guild_id,user_id,release_at,reason) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET release_at=excluded.release_at,reason=excluded.reason')
+    .run(raid.guildId,raid.userId,releaseAt,'藏身處遭警察攻堅');
+  db.prepare('DELETE FROM jail_training WHERE guild_id=? AND user_id=?').run(raid.guildId,raid.userId);
+  db.prepare('DELETE FROM jail_escape WHERE guild_id=? AND user_id=?').run(raid.guildId,raid.userId);
+  const current=Math.max(0,balance(raid.guildId,raid.userId));
+  const fine=Math.min(100_000,Math.floor(current*0.03));
+  if(fine>0) changeBalance(raid.guildId,raid.userId,-fine,'police_raid',raid.userId,`藏身處警察攻堅失敗｜${reason}`);
+  return {fine,jailDurationMs};
+}
+function hideoutRaidLossEmbed(raid,result,reason) {
+  return new EmbedBuilder().setColor(0xD94A4A).setTitle('🚔 藏身處攻堅失敗').setDescription(
+    `<@${raid.userId}> ${reason}\n\n警方控制了現場，玩家遭逮捕 **${Math.ceil(result.jailDurationMs/1000)} 秒**，並沒收 **${fmt(result.fine)}** 金幣。\n房產、藏身處升級與展示資產均已保留。`
+  );
+}
+async function maybeLaunchHideoutRaid(channel,heist) {
+  if(!channel?.send) return false;
+  const row=hideoutRecord(heist.guildId,heist.leaderId);
+  if(!row||[...activeHideoutRaids.values()].some(raid=>raid.guildId===heist.guildId&&raid.userId===heist.leaderId)) return false;
+  const securityLevel=Number(row.security_level||0);
+  const triggerChance=Math.max(40,Math.min(65,65-securityLevel*5));
+  if(Math.random()*100>=triggerChance) return false;
+  const token=Math.random().toString(36).slice(2,10);
+  const raid={guildId:heist.guildId,userId:heist.leaderId,propertyId:row.property_id,securityLevel,triggerChance,returned:false,weaponId:null,resolved:false,messageId:null};
+  activeHideoutRaids.set(token,raid);
+  const message=await channel.send({content:`🚨 <@${raid.userId}> 你的藏身處遭到警方突襲！`,embeds:[hideoutRaidEmbed(raid)],components:hideoutRaidRows(token,raid)});
+  raid.messageId=message.id;
+  setTimeout(async()=>{
+    const current=activeHideoutRaids.get(token);
+    if(!current||current.resolved) return;
+    current.resolved=true;
+    activeHideoutRaids.delete(token);
+    const result=applyHideoutRaidLoss(current,'未在時限內返回藏身處，攻堅小隊破門逮捕玩家。');
+    try { await message.edit({content:`⏰ <@${current.userId}> 藏身處攻堅已結束。`,embeds:[hideoutRaidLossEmbed(current,result,'未在時限內返回藏身處，攻堅小隊破門逮捕玩家。')],components:[]}); }
+    catch(error) { console.error('藏身處攻堅逾時訊息更新失敗:',error.message); }
+  },5*60_000);
+  return true;
 }
 function heistVehicleRow(token,heist) {
   const vehicles=ownedHeistVehicles(heist.guildId,heist.leaderId).slice(0,24);
@@ -1464,19 +2959,44 @@ function heistVehicleRow(token,heist) {
     new StringSelectMenuBuilder().setCustomId(`heist_vehicle:${token}`).setPlaceholder('隊長可選擇自己的逃跑載具').addOptions(...options)
   );
 }
+function heistPoliceTacticRow(token,selected=null) {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`heist_police_tactic:${token}`)
+      .setPlaceholder('選擇本次警方部署戰術')
+      .addOptions(Object.entries(heistPoliceTactics).map(([value,tactic])=>({
+        label:tactic.name.replace(/^[^\p{L}\p{N}]+/u,'').slice(0,100),
+        description:tactic.description.slice(0,100),
+        value,
+        default:value===selected
+      })))
+  );
+}
+function heistPoliceVehicleRow(token,selected=null) {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`heist_police_vehicle:${token}`)
+      .setPlaceholder('選擇本次警方追捕載具')
+      .addOptions(Object.entries(heistPoliceVehicles).map(([value,vehicle])=>({
+        label:vehicle.name.replace(/^[^\p{L}\p{N}]+/u,'').slice(0,100),
+        description:vehicle.description.slice(0,100),
+        value,
+        default:value===selected
+      })))
+  );
+}
 function heistLobbyRows(token,heist) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`heist_informant:${token}:no`).setLabel('拒絕成為線人').setEmoji('🤐').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`heist_informant:${token}:yes`).setLabel('秘密協助警方').setEmoji('🕵️').setStyle(ButtonStyle.Danger)
     ),
-    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`heist_weapon:${token}`).setPlaceholder('選擇本次攜帶槍枝').addOptions(
-      ...Object.entries(heistWeapons).map(([value,weapon])=>({label:weapon.name,description:weapon.description,value}))
-    )),
+    heistWeaponCategoryRow(token),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`heist_police_join:${token}`).setLabel('加入警方阻止搶劫').setEmoji('🚓').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`heist_police_action:${token}:confront`).setLabel('正面對抗劫匪').setEmoji('🛡️').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId(`heist_police_action:${token}:reinforce`).setLabel('呼叫增援').setEmoji('📢').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`heist_police_tactic_menu:${token}`).setLabel('警方部署').setEmoji('🗺️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`heist_scout:${token}`).setLabel('偵查金庫內容').setEmoji('🔎').setStyle(ButtonStyle.Secondary)
     ),
     heistVehicleRow(token,heist),
@@ -1489,7 +3009,9 @@ function heistReadiness(heist) {
     missingReady:heist.members.filter(id=>!heist.ready.has(id)),
     missingWeapons:heist.members.filter(id=>!heist.weapons.has(id)),
     missingPoliceWeapons:[...heist.police].filter(id=>!heist.policeWeapons.has(id)),
-    missingPoliceActions:[...heist.police].filter(id=>!heist.policeActions.has(id))
+    missingPoliceActions:[...heist.police].filter(id=>!heist.policeActions.has(id)),
+    missingPoliceTactics:[...heist.police].filter(id=>!heist.policeTactics.has(id)),
+    missingPoliceVehicles:[...heist.police].filter(id=>!heist.policeVehicles.has(id))
   };
 }
 function heistMentionList(ids) {
@@ -1500,11 +3022,14 @@ function heistCaptainStatus(heist) {
   const remaining=Math.max(0,Math.ceil((heist.factionDeadline-Date.now())/1000));
   return `📋 **搶劫隊伍準備狀態**\n`+
     `• 逃跑載具：${selectedHeistVehicleName(heist)}（成功率 +${selectedHeistVehicleBonus(heist)}%）\n`+
+    `• 同行寵物：成功率 +${teamPetHeistBonus(heist).toFixed(1)}%（全隊合計上限 10%）\n`+
     `• 尚未選擇陣營：${heistMentionList(status.missingFaction)}\n`+
     `• 尚未完成準備：${heistMentionList(status.missingReady)}\n`+
     `• 劫匪尚未選槍：${heistMentionList(status.missingWeapons)}\n`+
     `• 警方尚未選槍：${heistMentionList(status.missingPoliceWeapons)}\n`+
-    `• 警方尚未選擇行動：${heistMentionList(status.missingPoliceActions)}\n\n`+
+    `• 警方尚未選擇行動：${heistMentionList(status.missingPoliceActions)}\n`+
+    `• 警方尚未選擇戰術：${heistMentionList(status.missingPoliceTactics)}\n`+
+    `• 警方尚未選擇載具：${heistMentionList(status.missingPoliceVehicles)}\n\n`+
     `${heist.factionLocked?'🔒 陣營選擇已截止；逾時未選者已自動成為搶匪。':`⏳ 陣營選擇剩餘約 ${remaining} 秒。`}\n`+
     `線人身分仍會保密，隊長只能看到誰尚未完成選擇。`;
 }
@@ -1522,16 +3047,92 @@ function burglaryLobbyEmbed(lobby) {
     `隊長：<@${lobby.leaderId}>\n目標：**${target}**\n成員：${[...lobby.members].map(id=>`<@${id}>`).join('、')}\n人數：**${lobby.members.size}/4**\n目前成功率：**${chance}%**\n\n每名成員開始時消耗 **10 體力**；成功後平均分贓，失敗則全員關進迷子的小黑屋 2 分鐘。`
   );
 }
+const heistPoliceTactics={
+  roadblock:{name:'🚧 設置路障',description:'克制接應車輛；命中時提供 10% 壓制，否則 2%。'},
+  air_intercept:{name:'🚁 空中攔截',description:'克制直升機撤離；命中時提供 10% 壓制，否則 2%。'},
+  k9_blockade:{name:'🐕 警犬封鎖',description:'克制下水道撤離；命中時提供 10% 壓制，否則 2%。'},
+  sniper:{name:'🎯 狙擊部署',description:'正面對抗時提供 5% 壓制，呼叫增援時提供 3%。'},
+  tracker:{name:'📡 安裝追蹤器',description:'提供 4% 壓制，並削弱逃跑載具與藏身處加成。'}
+};
+const heistPoliceVehicles={
+  patrol_car:{name:'🚓 標準巡邏警車',description:'全地形基礎追捕載具，穩定提供 2% 壓制。'},
+  interceptor:{name:'🏎️ 高速攔截警車',description:'克制接應車輛；命中提供 6% 壓制，其他路線 1%。'},
+  swat_armored:{name:'🚔 特勤裝甲車',description:'正面對抗時提供 5% 壓制，呼叫增援時提供 3%。'},
+  police_helicopter:{name:'🚁 警用直升機',description:'克制直升機撤離；命中提供 7% 壓制，其他路線 1%。'},
+  k9_transport:{name:'🐕 警犬運輸車',description:'克制下水道撤離；命中提供 6% 壓制，其他路線 1%。'}
+};
+function heistNpcPolicePressure(heist) {
+  const bank=heistBanks[heist.bankId];
+  if(bank?.sundayOnly||bank?.museumTarget||(bank?.reward||0)>=100000) return 16;
+  if((bank?.reward||0)>=50000) return 12;
+  return 8;
+}
+function heistPoliceTacticModifiers(heist) {
+  const tacticPressures=[];
+  let trackerCount=0;
+  const counts=new Map();
+  for(const [policeId,tactic] of heist.policeTactics||[]) {
+    counts.set(tactic,(counts.get(tactic)||0)+1);
+    if(tactic==='roadblock') tacticPressures.push(heist.plan==='car'?10:2);
+    else if(tactic==='air_intercept') tacticPressures.push(heist.plan==='helicopter'?10:2);
+    else if(tactic==='k9_blockade') tacticPressures.push(heist.plan==='sewer'?10:2);
+    else if(tactic==='sniper') tacticPressures.push(heist.policeActions.get(policeId)==='confront'?5:3);
+    else if(tactic==='tracker') { tacticPressures.push(4); trackerCount+=1; }
+  }
+  return {
+    counts,
+    tacticalPressure:Math.max(0,...tacticPressures),
+    vehicleSuppression:Math.min(6,trackerCount*2),
+    hideoutSuppression:Math.min(6,trackerCount*2)
+  };
+}
+function heistPoliceTacticSummary(heist) {
+  const {counts}=heistPoliceTacticModifiers(heist);
+  if(!counts.size) return 'NPC 基礎警力';
+  return [...counts.entries()].map(([id,count])=>`${heistPoliceTactics[id]?.name||id} ×${count}`).join('、');
+}
+function heistPoliceVehicleModifiers(heist) {
+  const counts=new Map();
+  const pressures=[];
+  for(const [policeId,vehicleId] of heist.policeVehicles||[]) {
+    counts.set(vehicleId,(counts.get(vehicleId)||0)+1);
+    if(vehicleId==='patrol_car') pressures.push(2);
+    else if(vehicleId==='interceptor') pressures.push(heist.plan==='car'?6:1);
+    else if(vehicleId==='swat_armored') pressures.push(heist.policeActions.get(policeId)==='confront'?5:3);
+    else if(vehicleId==='police_helicopter') pressures.push(heist.plan==='helicopter'?7:1);
+    else if(vehicleId==='k9_transport') pressures.push(heist.plan==='sewer'?6:1);
+  }
+  return {
+    counts,
+    policeVehiclePressure:Math.min(10,pressures.reduce((sum,value)=>sum+value,0))
+  };
+}
+function heistPoliceVehicleSummary(heist) {
+  const {counts}=heistPoliceVehicleModifiers(heist);
+  if(!counts.size) return 'NPC 標準巡邏車';
+  return [...counts.entries()].map(([id,count])=>`${heistPoliceVehicles[id]?.name||id} ×${count}`).join('、');
+}
 function heistCombatModifiers(heist) {
   const robberValues=[...heist.weapons.values()].map(id=>heistWeapons[id]?.robber||0);
   const policeValues=[...heist.policeWeapons.values()].map(id=>heistWeapons[id]?.police||0);
   const robberFirepower=robberValues.length?Math.round(robberValues.reduce((a,b)=>a+b,0)/robberValues.length):0;
   const confrontingPolice=[...heist.policeActions.values()].filter(action=>action==='confront').length;
   const reinforcingPolice=[...heist.policeActions.values()].filter(action=>action==='reinforce').length;
-  const confrontationPressure=confrontingPolice*2;
-  const reinforcementPressure=reinforcingPolice*3;
-  const policePressure=heist.police.size*2+(policeValues.length?Math.round(policeValues.reduce((a,b)=>a+b,0)/policeValues.length):0)+heist.informants.size*4+confrontationPressure+reinforcementPressure;
-  return {robberFirepower,policePressure,confrontingPolice,reinforcingPolice,confrontationPressure,reinforcementPressure};
+  const policeWeaponPressure=Math.min(24,Math.round(policeValues.reduce((a,b)=>a+b,0)*0.6));
+  const confrontationPressure=confrontingPolice*4;
+  const reinforcementPressure=reinforcingPolice*5;
+  const informantPressure=heist.informants.size*6;
+  const npcPolicePressure=heistNpcPolicePressure(heist);
+  const tactic=heistPoliceTacticModifiers(heist);
+  const policeVehicles=heistPoliceVehicleModifiers(heist);
+  const playerPolicePressure=heist.police.size*3+policeWeaponPressure+confrontationPressure+reinforcementPressure;
+  const policePressureCap=npcPolicePressure+Math.round(12*Math.min(1,heist.police.size/Math.max(1,heist.members.length)));
+  const activePolicePressure=Math.max(npcPolicePressure,Math.min(playerPolicePressure,policePressureCap));
+  const policePressure=activePolicePressure+tactic.tacticalPressure+policeVehicles.policeVehiclePressure+informantPressure;
+  return {
+    robberFirepower,policePressure,playerPolicePressure,activePolicePressure,policePressureCap,npcPolicePressure,policeWeaponPressure,informantPressure,
+    confrontingPolice,reinforcingPolice,confrontationPressure,reinforcementPressure,...tactic,...policeVehicles
+  };
 }
 function hotBankFor(daysFromToday=0) {
   const date=new Date(Date.now()+daysFromToday*86400000);
@@ -1571,6 +3172,29 @@ function stamina(g,u) {
     return max;
   }
   return row.stamina;
+}
+function dailyStaminaRestoreClaimed(g,u) {
+  return db.prepare('SELECT claim_day FROM daily_stamina_restore WHERE guild_id=? AND user_id=?').get(g,u)?.claim_day===taipeiDay();
+}
+function claimDailyStaminaRestore(g,u) {
+  const current=stamina(g,u),max=staminaMax(g,u),today=taipeiDay();
+  if(current>=max) throw new Error('目前體力已滿，請消耗體力後再使用今日免費恢復');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const claimed=db.prepare(`
+      INSERT INTO daily_stamina_restore(guild_id,user_id,claim_day) VALUES(?,?,?)
+      ON CONFLICT(guild_id,user_id) DO UPDATE SET
+        claim_day=excluded.claim_day,claimed_at=CURRENT_TIMESTAMP
+      WHERE daily_stamina_restore.claim_day<>excluded.claim_day
+    `).run(g,u,today);
+    if(Number(claimed.changes)===0) throw new Error('今天已經使用過免費回體力，請於台北時間 00:00 後再使用');
+    db.prepare('UPDATE player_stats SET stamina=?,stamina_day=? WHERE guild_id=? AND user_id=?').run(max,today,g,u);
+    db.exec('COMMIT');
+    return {before:current,restored:max-current,stamina:max,max};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 function staminaCost(g,u,cost) {
   return (effectActive(g,u,'half_stamina_until')||taipeiWeekday()===3)?Math.ceil(cost/2):cost;
@@ -1619,14 +3243,15 @@ async function triggerRandomEvent(i,g,u) {
     db.prepare('UPDATE event_effects SET double_work_until=? WHERE guild_id=? AND user_id=?').run(Date.now()+600000,g,u);
     title='💼 隨機事件：工作旺季'; description='接下來 **10 分鐘工作收入加倍**！'; color=0x35C46A;
   }
-  await i.followUp({embeds:[new EmbedBuilder().setColor(color).setTitle(title).setDescription(description)]}).catch(()=>{});
+  const eventMessage=await i.followUp({embeds:[new EmbedBuilder().setColor(color).setTitle(title).setDescription(description)]}).catch(()=>null);
+  scheduleDiscordMessageDeletion(eventMessage);
 }
 function scheduleRandomEvent(i,g,u) { setTimeout(()=>triggerRandomEvent(i,g,u),5000); }
-function applyHospitalRandomEvent(g,u) {
+function applyHospitalRandomEvent(g,u,{balanceChanger=changeBalance}={}) {
   if(Math.random()>=0.35) return {text:'',image:null};
   const roll=Math.floor(Math.random()*6);
   if(roll===0) {
-    const fee=Math.min(1000,balance(g,u)); if(fee) changeBalance(g,u,-fee,'medical',u,'特殊傳染病疫苗費｜金幣直接銷毀');
+    const fee=Math.min(1000,balance(g,u)); if(fee) balanceChanger(g,u,-fee,'medical',u,'特殊傳染病疫苗費｜金幣直接銷毀');
     return {text:`\n\n🦠 **住院隨機事件：特殊傳染病！**\n院方要求施打疫苗，支付 **${fmt(fee)}**${fee<1000?'（金庫已被扣至零）':''}。`,image:null};
   }
   if(roll===1) {
@@ -1635,16 +3260,16 @@ function applyHospitalRandomEvent(g,u) {
     return {text:'\n\n🧟 **住院隨機事件：殭屍病毒爆發！**\n醫院遭到封鎖，你被困住 **5 分鐘**，期間不能遊戲或工作。',image:null};
   }
   if(roll===2) {
-    const fee=Math.min(800,balance(g,u)); if(fee) changeBalance(g,u,-fee,'medical',u,'被安排入住豪華病房｜金幣直接銷毀');
+    const fee=Math.min(800,balance(g,u)); if(fee) balanceChanger(g,u,-fee,'medical',u,'被安排入住豪華病房｜金幣直接銷毀');
     return {text:`\n\n🛏️ **住院隨機事件：被安排豪華病房！**\n院方加收病房費 **${fmt(fee)}**。`,image:null};
   }
   if(roll===3) {
     const current=stamina(g,u), lost=Math.min(20,current); if(lost) db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(lost,g,u);
-    const before=balance(g,u), after=changeBalance(g,u,200,'random_event',u,'被迷子全身檢查');
+    const before=balance(g,u), after=balanceChanger(g,u,200,'random_event',u,'被迷子全身檢查');
     return {text:`\n\n🩻 **住院隨機事件：被迷子全身檢查！**\n體力減少 **${lost}** 點，獲得 **${fmt(after-before)}**。`,image:{path:hospitalCheckGif,name:'mizi_check.gif'}};
   }
   if(roll===4) {
-    const before=balance(g,u), after=changeBalance(g,u,500,'random_event',u,'住院保險理賠');
+    const before=balance(g,u), after=balanceChanger(g,u,500,'random_event',u,'住院保險理賠');
     return {text:`\n\n📄 **住院隨機事件：保險理賠通過！**\n保險公司支付 **${fmt(after-before)}**。`,image:null};
   }
   const max=staminaMax(g,u), before=stamina(g,u), restored=Math.min(20,max-before); if(restored) db.prepare('UPDATE player_stats SET stamina=stamina+? WHERE guild_id=? AND user_id=?').run(restored,g,u);
@@ -1677,8 +3302,164 @@ function useItem(g,u,itemId,quantity) {
   } catch(e) { db.exec('ROLLBACK'); throw e; }
 }
 function validBet(g, u, bet) {
-  if (!Number.isInteger(bet) || bet < MIN_BET || bet > MAX_BET) throw new Error(`下注需為 ${MIN_BET.toLocaleString()}～${MAX_BET.toLocaleString()} 金幣`);
+  if (!Number.isFinite(bet) || bet < MIN_BET) throw new Error(`下注至少需要 ${MIN_BET.toLocaleString()} 金幣`);
   if (balance(g, u) < bet) throw new Error('金幣不足');
+}
+function resolveBet(i,g,u) {
+  const allIn=i.options.getBoolean('歐印')===true;
+  const entered=i.options.getInteger('下注');
+  if(allIn&&entered!==null) throw new Error('「下注」與「歐印」只能選擇其中一種');
+  if(!allIn&&entered===null) throw new Error('請輸入「下注」金額，或將「歐印」設為是');
+  const bet=allIn?balance(g,u):entered;
+  validBet(g,u,bet);
+  return bet;
+}
+function addWagerOptions(command,description='自行輸入下注金額') {
+  return command
+    .addIntegerOption(o=>o.setName('下注').setDescription(`${description}（無上限）`).setMinValue(MIN_BET))
+    .addBooleanOption(o=>o.setName('歐印').setDescription('設為「是」會投入目前持有的全部金幣'));
+}
+const miniGameCatalog=[
+  {id:'jenga',command:'抽積木',label:'抽積木',emoji:'🧱',description:'抽出積木後選擇繼續冒險或收手',setup:'bet'},
+  {id:'highlow',command:'比大小',label:'比大小',emoji:'🃏',description:'與莊家各抽一張牌',setup:'bet'},
+  {id:'dragon',command:'射龍門',label:'射龍門',emoji:'🚪',description:'第三張牌射進兩張門牌之間',setup:'bet'},
+  {id:'horse',command:'賽馬',label:'賽馬',emoji:'🏇',description:'選擇 1～4 號馬觀看競賽',setup:'horse'},
+  {id:'race',command:'競速',label:'車輛競速',emoji:'🏁',description:'使用自己的汽車或機車參賽',setup:'bet'},
+  {id:'pet_race',command:'寵物競賽',label:'寵物競賽',emoji:'🐾',description:'派出自己的寵物參加障礙賽',setup:'bet'},
+  {id:'race_pvp',command:'競速pvp',label:'競速 PVP',emoji:'⚔️',description:'指定玩家進行車輛競速對決',setup:'pvp'},
+  {id:'pet_race_pvp',command:'寵物競速pvp',label:'寵物競速 PVP',emoji:'🐕',description:'指定玩家進行寵物障礙對決',setup:'pvp'},
+  {id:'liar_dice',command:'骰盅吹牛',label:'骰盅吹牛 PVP',emoji:'🎲',description:'秘密看骰、喊骰與抓吹牛',setup:'pvp'},
+  {id:'big2',command:'大老二',label:'大老二',emoji:'🃏',description:'從 13 張牌挑戰最高五張牌型',setup:'bet'},
+  {id:'slots',command:'角子機',label:'角子機',emoji:'🎰',description:'轉動三軸圖案取得倍數派彩',setup:'bet'},
+  {id:'wheel',command:'幸運輪盤',label:'幸運輪盤',emoji:'🎡',description:'每日三次免費抽現金或隱藏車',setup:'direct'},
+  {id:'lottery',command:'大樂透',label:'大樂透',emoji:'🎱',description:'選擇 1～49 的幸運號碼',setup:'lottery'},
+  {id:'bingo',command:'賓果',label:'賓果',emoji:'🔢',description:'自選九宮格號碼進行開獎',setup:'bingo'},
+  {id:'scratch',command:'刮刮樂',label:'刮刮樂',emoji:'🪙',description:'親手刮開三個圖案試手氣',setup:'bet'},
+  {id:'mahjong',command:'麻將',label:'台式 16 張麻將',emoji:'🀄',description:'開啟網頁麻將牌桌',setup:'direct'},
+  {id:'duel',command:'決鬥',label:'PvP 輪盤決鬥',emoji:'🔫',description:'指定玩家進行虛構槍械決鬥',setup:'pvp'}
+];
+function miniGameLauncherEmbed() {
+  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🎮 小遊戲大廳').setDescription(`從下方選單選擇遊戲，機器人會接著開啟下注、號碼或對手設定。\n\n🧱 **圖片版網頁遊戲：堆積木**\n完成下注後會取得專屬網站連結；網站會以圖片呈現穩定、搖晃及倒塌的積木塔。每回合從左、中、右三塊積木中選一塊，成功後可安全收手或繼續挑戰。完成六次的基礎派彩為 **4.4 倍**，高風險積木成功時還會累加額外倍率。\n\n下注欄可輸入金額，想投入全部金幣時輸入「**歐印**」。\n\n本選單不包含工作、單人搶劫及團隊搶劫。`);
+}
+function miniGameMenuRow(ownerId) {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`mini_game_select:${ownerId}`).setPlaceholder('選擇要遊玩的遊戲').addOptions(
+      miniGameCatalog.map(game=>({label:game.label,description:game.description,value:game.id,emoji:game.emoji}))
+    )
+  );
+}
+function miniGameSetupModal(ownerId,game) {
+  const modal=new ModalBuilder().setCustomId(`mini_game_setup:${ownerId}:${game.id}`).setTitle(`${game.emoji} ${game.label}｜遊戲設定`);
+  const rows=[];
+  if(game.setup!=='direct') {
+    rows.push(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('bet').setLabel(`下注金額（最低 ${fmt(MIN_BET)}）`).setPlaceholder('例如：1000；投入全部金幣請輸入「歐印」').setStyle(TextInputStyle.Short).setRequired(true)
+    ));
+  }
+  if(game.setup==='pvp') {
+    rows.push(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('opponent').setLabel('對手 Discord ID 或提及').setPlaceholder('例如：123456789012345678 或 @玩家').setStyle(TextInputStyle.Short).setRequired(true)
+    ));
+  } else if(game.setup==='horse') {
+    rows.push(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('horse').setLabel('選擇馬匹（1～4）').setPlaceholder('輸入 1、2、3 或 4').setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(1).setRequired(true)
+    ));
+  } else if(game.setup==='lottery') {
+    rows.push(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('lucky_number').setLabel('幸運號碼（1～49）').setPlaceholder('輸入一個 1～49 的整數').setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(2).setRequired(true)
+    ));
+  } else if(game.setup==='bingo') {
+    rows.push(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('bingo_numbers').setLabel('九個不重複號碼（1～25）').setPlaceholder('例如：1 3 5 7 9 11 13 15 17').setStyle(TextInputStyle.Paragraph).setMinLength(17).setMaxLength(40).setRequired(true)
+    ));
+  }
+  return modal.addComponents(...rows);
+}
+function miniGameProxyInteraction(source,commandName,values={}) {
+  const read=(name,required=false)=>{
+    const value=Object.prototype.hasOwnProperty.call(values,name)?values[name]:null;
+    if(required&&(value===null||value===undefined)) throw new Error(`缺少「${name}」設定`);
+    return value??null;
+  };
+  const options={
+    getInteger:(name,required=false)=>read(name,required),
+    getBoolean:(name,required=false)=>read(name,required),
+    getString:(name,required=false)=>read(name,required),
+    getUser:(name,required=false)=>read(name,required),
+    getSubcommand:()=>null,
+    getSubcommandGroup:()=>null
+  };
+  const falseInteractionTypes=new Set(['isAutocomplete','isButton','isStringSelectMenu','isUserSelectMenu','isRoleSelectMenu','isMentionableSelectMenu','isChannelSelectMenu','isModalSubmit']);
+  return new Proxy(source,{get(target,property){
+    if(property==='commandName') return commandName;
+    if(property==='options') return options;
+    if(property==='isChatInputCommand') return ()=>true;
+    if(falseInteractionTypes.has(property)) return ()=>false;
+    const value=Reflect.get(target,property,target);
+    return typeof value==='function'?value.bind(target):value;
+  }});
+}
+function miniGameBetValues(rawValue) {
+  const raw=String(rawValue||'').trim();
+  if(['歐印','all','allin','all-in','全部'].includes(raw.toLowerCase())) return {下注:null,歐印:true};
+  const normalized=raw.replace(/[,，\s]/g,'');
+  if(!/^\d+$/.test(normalized)) throw new Error('下注請輸入正整數，或輸入「歐印」');
+  const bet=Number(normalized);
+  if(!Number.isSafeInteger(bet)||bet<MIN_BET) throw new Error(`下注至少需要 ${fmt(MIN_BET)} 金幣`);
+  return {下注:bet,歐印:false};
+}
+const jengaPayoutMultipliers=[1.1,1.3,1.65,2.2,3,4.4];
+const jengaRiskProfiles=[
+  {name:'鬆動',emoji:'🟢',base:0.12,bonus:0,style:ButtonStyle.Success},
+  {name:'普通',emoji:'🟡',base:0.20,bonus:0.10,style:ButtonStyle.Primary},
+  {name:'緊實',emoji:'🔴',base:0.30,bonus:0.25,style:ButtonStyle.Danger}
+];
+function jengaRoundBlocks(pulls) {
+  const profiles=[...jengaRiskProfiles];
+  for(let index=profiles.length-1;index>0;index--) {
+    const swap=Math.floor(Math.random()*(index+1));
+    [profiles[index],profiles[swap]]=[profiles[swap],profiles[index]];
+  }
+  return profiles.map(profile=>({...profile,risk:Math.min(0.75,profile.base+pulls*0.04)}));
+}
+function jengaCurrentMultiplier(session) {
+  if(!session.pulls) return 0;
+  return Number((jengaPayoutMultipliers[session.pulls-1]+session.riskBonus).toFixed(2));
+}
+function jengaTowerText(pulls,collapsed=false) {
+  if(collapsed) return '```\n       [██]\n [██]        [██]\n      [██]\n[██]     [██]\n    [██]        [██]\n```';
+  const rows=[];
+  for(let row=0;row<7;row++) {
+    const levelFromBottom=6-row;
+    const removed=levelFromBottom<pulls;
+    const missing=(levelFromBottom+pulls)%3;
+    const blocks=[0,1,2].map(index=>removed&&index===missing?'[  ]':'[██]').join('');
+    rows.push(`${row%2?'  ':''}${blocks}`);
+  }
+  return `\`\`\`\n${rows.join('\n')}\n\`\`\``;
+}
+function jengaGameEmbed(session,message='選擇一塊積木開始挑戰。') {
+  const nextPull=session.pulls+1,currentMultiplier=jengaCurrentMultiplier(session);
+  const riskText=session.blocks.map((block,index)=>`${['左','中','右'][index]}：${block.emoji} **${block.name} ${(block.risk*100).toFixed(0)}%**${block.bonus?`｜成功額外 +${block.bonus} 倍`:''}`).join('\n');
+  return new EmbedBuilder().setColor(0xC47A32).setTitle('🧱 抽積木｜高塔挑戰').setDescription(`${jengaTowerText(session.pulls)}\n${message}\n\n目前完成：**${session.pulls}／6 次**\n${session.pulls?`現在收手：**${currentMultiplier} 倍｜${fmt(Math.floor(session.bet*currentMultiplier))} 金幣**\n`:''}第 ${nextPull} 次風險：\n${riskText}\n\n下注：**${fmt(session.bet)}**｜每塊積木的倒塌率會隨高塔不穩定而增加。`);
+}
+function jengaGameRows(token,session) {
+  const pullRow=new ActionRowBuilder().addComponents(session.blocks.map((block,index)=>
+    new ButtonBuilder().setCustomId(`jenga_pull:${token}:${index}`).setLabel(`${['左側','中間','右側'][index]}｜${block.name} ${(block.risk*100).toFixed(0)}%${block.bonus?`｜+${block.bonus}x`:''}`).setEmoji(block.emoji).setStyle(block.style)
+  ));
+  const cashMultiplier=jengaCurrentMultiplier(session);
+  const cashRow=new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`jenga_cash:${token}`).setLabel(session.pulls?`收手領取 ${cashMultiplier} 倍`:'至少成功抽出一塊才能收手').setEmoji('💰').setStyle(ButtonStyle.Success).setDisabled(session.pulls<1)
+  );
+  return [pullRow,cashRow];
+}
+function jengaSettlementEmbed(session,settlement,{collapsed=false,completed=false}={}) {
+  const multiplier=jengaCurrentMultiplier(session);
+  const dogText=settlement.dog?'\n\n🐕 **博美犬叼走了本局獲利，只留下你的下注本金！**':'';
+  const result=collapsed
+    ? `💥 你抽動積木的瞬間，高塔失去平衡並倒塌！\n\n本局損失：**${fmt(session.bet)} 金幣**`
+    : `${completed?'🏆 連續六次成功，完成最高難度！':'💰 你決定見好就收，安全帶走獎金！'}\n\n完成：**${session.pulls} 次**｜本局倍率：**${multiplier} 倍**\n本局獲得：**${fmt(settlement.credited)} 金幣**${dogText}${titleLuckNotice(settlement)}`;
+  return new EmbedBuilder().setColor(collapsed?0xD94A4A:completed?0xFFD700:0x35C46A).setTitle(collapsed?'🧱 抽積木｜高塔倒塌':'🧱 抽積木｜挑戰結算').setDescription(`${jengaTowerText(session.pulls,collapsed)}\n${result}\n\n金庫：**${fmt(balance(session.guildId,session.userId))}**`);
 }
 function jailRemaining(g, u) {
   const row=db.prepare('SELECT release_at FROM jail WHERE guild_id=? AND user_id=?').get(g,u);
@@ -1777,10 +3558,36 @@ function vehicleModComponents(token,session) {
     new ButtonBuilder().setCustomId(`vehicle_mod_cancel:${token}`).setLabel('取消預覽').setEmoji('❌').setStyle(ButtonStyle.Danger)
   ));
   rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`vehicle_mod_done:${token}`).setLabel('完成改裝').setEmoji('🏁').setStyle(ButtonStyle.Primary).setDisabled(!!session.pending)));
+  const webUrl=vehicleActivityUrl(session.guildId,session.userId,session.assetId);
+  if(webUrl&&rows.length<5) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setURL(webUrl).setLabel('開啟網頁改裝').setEmoji('🌐').setStyle(ButtonStyle.Link)));
   return rows;
 }
 function vehicleModOpenButton(userId,assetId) {
   return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`vehicle_mod_open:${userId}:${assetId}`).setLabel('改裝這輛車').setEmoji('🔧').setStyle(ButtonStyle.Primary));
+}
+const VEHICLE_MOD_TUTORIAL_ID='vehicle_mod_preview_v1';
+function vehicleModTutorialEmbed() {
+  return new EmbedBuilder()
+    .setColor(0xF5B942)
+    .setTitle('📘 首次改裝玩法說明')
+    .setDescription('歡迎來到改裝工坊！這份說明只會在你第一次進入時顯示。')
+    .addFields(
+      {name:'1｜選擇分類與零件',value:'依序選擇烤漆、輪框、尾翼、寬體、引擎或懸吊。'},
+      {name:'2｜先看預覽，不會扣款',value:'選擇零件後會先合成圖片並顯示價格；此時尚未安裝，也不會扣除金幣。'},
+      {name:'3｜確認後才安裝',value:'滿意後按下「確認預覽並安裝」才會扣款與保存；按「取消預覽」則不扣款。'},
+      {name:'4｜結束改裝',value:'沒有待確認的零件時，按下「完成改裝」即可關閉操作按鈕。'}
+    );
+}
+function takeVehicleModTutorial(g,u) {
+  const seen=db.prepare('SELECT 1 FROM player_tutorials WHERE guild_id=? AND user_id=? AND tutorial_id=?').get(g,u,VEHICLE_MOD_TUTORIAL_ID);
+  if(seen) return null;
+  db.prepare('INSERT OR IGNORE INTO player_tutorials (guild_id,user_id,tutorial_id) VALUES (?,?,?)').run(g,u,VEHICLE_MOD_TUTORIAL_ID);
+  return vehicleModTutorialEmbed();
+}
+function includeVehicleModTutorial(payload,g,u) {
+  const tutorial=takeVehicleModTutorial(g,u);
+  if(tutorial) payload.embeds=[tutorial,...(payload.embeds||[])];
+  return payload;
 }
 async function renderVehicleModImage(g,u,assetId,pending=null) {
   const asset=assetCatalog[assetId],image=asset?.image||asset?.images?.[0];
@@ -1822,6 +3629,14 @@ const rankName = ['3','4','5','6','7','8','9','10','J','Q','K','A','2'];
 const drawCard = () => { const n = Math.floor(Math.random()*52); return { rank: Math.floor(n/4), suit:n%4, value:Math.floor(n/4)*4+n%4 }; };
 const cardText = c => `${suitIcon[c.suit]}${rankName[c.rank]}`;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const SHORT_MESSAGE_DELETE_DELAY=60*1000;
+const JAIL_RESULT_DELETE_DELAY=2*60*1000;
+function scheduleInteractionReplyDeletion(interaction,delay=SHORT_MESSAGE_DELETE_DELAY) {
+  setTimeout(()=>interaction.deleteReply().catch(()=>{}),delay);
+}
+function scheduleDiscordMessageDeletion(message,delay=SHORT_MESSAGE_DELETE_DELAY) {
+  if(message?.delete) setTimeout(()=>message.delete().catch(()=>{}),delay);
+}
 const raceVehicleCategories=new Set(['汽車','機車']);
 const raceRarityBonus={普通:0,稀有:0.8,史詩:1.8,傳說:3.2,傳說隱藏:4.2};
 const raceScenes=[
@@ -1964,6 +3779,105 @@ async function runPvpCompetition(i,token,session) {
   session.settled=true;session.status='done';pvpRaceSessions.delete(token);
   return i.editReply({embeds:[new EmbedBuilder().setColor(draw?0xC0C0C0:0xFFD700).setTitle(session.type==='vehicle'?'🏁 競速 PVP 完成':'🐾 寵物競速 PVP 完成').setDescription(`${ranking.map((e,n)=>`${n+1}. ${e.icon} **${e.name}**`).join('\n')}\n\n${result}\n\n${ids.map(id=>`${session.names[id]}：**${fmt(balance(session.guildId,id))}**`).join('\n')}`)],components:[],attachments:[],files:[]});
 }
+const liarDiceFaces=['⚀','⚁','⚂','⚃','⚄','⚅'];
+const liarDicePlayerIds=session=>[session.challengerId,session.opponentId];
+const liarDiceOtherPlayer=(session,userId)=>liarDicePlayerIds(session).find(id=>id!==userId);
+const liarDiceRoll=()=>Array.from({length:5},()=>1+Math.floor(Math.random()*6));
+const liarDiceActiveForUser=(guildId,userId,excludedToken=null)=>[...liarDiceSessions.entries()].some(([token,session])=>token!==excludedToken&&session.guildId===guildId&&session.status!=='done'&&liarDicePlayerIds(session).includes(userId)&&session.expiresAt>Date.now());
+function liarDiceChallengeRow(token,disabled=false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`liar_dice_accept:${token}`).setLabel('接受挑戰').setEmoji('✅').setStyle(ButtonStyle.Success).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`liar_dice_reject:${token}`).setLabel('拒絕挑戰').setEmoji('✖️').setStyle(ButtonStyle.Danger).setDisabled(disabled)
+  );
+}
+function liarDiceActionRow(token,disabled=false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`liar_dice_view:${token}`).setLabel('查看我的骰子').setEmoji('👁️').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`liar_dice_bid:${token}`).setLabel('喊骰').setEmoji('📣').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`liar_dice_call:${token}`).setLabel('抓吹牛').setEmoji('🫵').setStyle(ButtonStyle.Danger).setDisabled(disabled)
+  );
+}
+function liarDiceChallengeEmbed(session) {
+  return new EmbedBuilder().setColor(0x8E44AD).setTitle('🎲 骰盅吹牛｜雙人 PVP 挑戰')
+    .setDescription(`**${session.names[session.challengerId]}** 挑戰 **${session.names[session.opponentId]}**\n\n每人下注：**${fmt(session.bet)}**\n勝者獎池：**${fmt(session.bet*2)}**\n每人消耗：**5 體力**\n\n**核心規則**\n• 每人秘密持有 5 顆骰子\n• 1 點是百搭，可計入任何 2～6 點\n• 喊骰必須提高數量，或在同數量提高點數\n• 認為上一家喊太大時，可直接「抓吹牛」並開盅\n\n挑戰將在 **60 秒**後失效。`);
+}
+function liarDiceGameEmbed(session,resultText=null) {
+  const currentBid=session.bid?`**${session.bid.quantity} 顆 ${session.bid.face} 點**（${session.names[session.bid.bidderId]} 喊）`:'尚未喊骰';
+  const turnName=session.names[session.currentId]||'玩家';
+  const recent=session.lastAction?`\n上一動作：${session.lastAction}`:'';
+  return new EmbedBuilder().setColor(resultText?0xF5B942:0x6C3483).setTitle(resultText?'🎲 骰盅吹牛｜開盅結果':'🎲 骰盅吹牛｜對局中')
+    .setDescription(resultText||`**${session.names[session.challengerId]}** vs **${session.names[session.opponentId]}**\n每人 5 顆骰子｜1 點為百搭\n\n目前喊注：${currentBid}${recent}\n\n輪到：<@${session.currentId}> **${turnName}**\n請選擇繼續「喊骰」，或對上一個喊注「抓吹牛」。`)
+    .setFooter({text:resultText?'本局已完成':'每次行動限時 2 分鐘；逾時會退款，但不退體力'});
+}
+function liarDicePrivateText(session,userId) {
+  const dice=session.dice[userId]||[];
+  return `你的骰子：\n# ${dice.map(value=>liarDiceFaces[value-1]).join('　')}\n點數：**${dice.join('、')}**\n\n只有你能看到這組骰子；**1 點可當作任何 2～6 點**。`;
+}
+function lockLiarDiceWagers(session) {
+  const ids=liarDicePlayerIds(session);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for(const id of ids) {
+      const current=ensureWallet(session.guildId,id);
+      if(current<session.bet) throw new Error(`${session.names[id]} 的金幣不足。`);
+    }
+    for(const id of ids) {
+      const next=ensureWallet(session.guildId,id)-session.bet;
+      db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,session.guildId,id);
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+        .run(session.guildId,id,-session.bet,next,'pvp_wager',liarDiceOtherPlayer(session,id),'骰盅吹牛 PVP 下注');
+    }
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function settleLiarDiceWagers(session,winnerId=null) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if(winnerId) {
+      const prize=session.bet*2,next=ensureWallet(session.guildId,winnerId)+prize;
+      db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,session.guildId,winnerId);
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+        .run(session.guildId,winnerId,prize,next,'pvp_wager',liarDiceOtherPlayer(session,winnerId),'骰盅吹牛 PVP 勝者獎池');
+    } else {
+      for(const id of liarDicePlayerIds(session)) {
+        const next=ensureWallet(session.guildId,id)+session.bet;
+        db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,session.guildId,id);
+        db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+          .run(session.guildId,id,session.bet,next,'wager_return',id,'骰盅吹牛逾時退款');
+      }
+    }
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function scheduleLiarDiceExpiry(token) {
+  const session=liarDiceSessions.get(token);
+  if(!session) return;
+  if(session.timer) clearTimeout(session.timer);
+  session.timer=setTimeout(async()=>{
+    const current=liarDiceSessions.get(token);
+    if(!current||current.status==='done'||current.expiresAt>Date.now()) return;
+    const wasPlaying=current.status==='playing';
+    current.status='done';
+    if(wasPlaying&&current.charged&&!current.settled) {
+      settleLiarDiceWagers(current);
+      current.settled=true;
+    }
+    liarDiceSessions.delete(token);
+    try {
+      const channel=await client.channels.fetch(current.channelId);
+      const message=await channel?.messages.fetch(current.messageId);
+      if(message) await message.edit({embeds:[new EmbedBuilder().setColor(0x607D8B).setTitle('⌛ 骰盅吹牛已逾時').setDescription(wasPlaying?'本局因超過 2 分鐘未操作而結束，雙方下注已退回；已消耗的體力不退還。':'對手沒有在 60 秒內接受挑戰，本次邀請已取消。')],components:[]});
+    } catch(error) {
+      console.error(`骰盅吹牛逾時訊息更新失敗 token=${token}: ${error.message}`);
+    }
+  },Math.max(250,session.expiresAt-Date.now()+250));
+}
 async function runCompetition(i,token,session) {
   const g=session.guildId,u=session.userId,selected=raceChoiceInfo(g,u,session.type,session.selectedId);
   if(!selected) throw new Error('參賽資產已不存在，請重新建立比賽。');
@@ -1994,7 +3908,7 @@ async function runCompetition(i,token,session) {
   }
   const ranking=[...entrants].sort((a,b)=>b.distance-a.distance),place=ranking.findIndex(entry=>entry.id==='player')+1;
   const multiplier=place===1?(session.type==='vehicle'?2.5:3):place===2?(session.type==='vehicle'?1.2:1.25):0;
-  const payout=Math.floor(session.bet*multiplier),settlement=settleGamePayout(g,u,session.bet,payout,session.type==='vehicle'?'競速':'寵物競賽');
+  const payout=Math.floor(session.bet*multiplier),settlement=settleGamePayout(g,u,session.bet,payout,session.type==='vehicle'?'競速':'寵物競賽',{allIn:session.allIn});
   const profit=settlement.credited-session.bet,components=settlement.dog?dogChaseRow(u,settlement.stolen):undefined;
   const resultLines=ranking.map((entry,index)=>`${index+1}. ${entry.icon} **${entry.name}**`).join('\n');
   const resultMessage=competitionResultMessage(session.type,place);
@@ -2012,22 +3926,162 @@ function rollEscapeEvent(context='heist') {
   return {id:'clear',title:'🌙 路線暢通',text:'撤離路線暫時沒有異狀，追兵仍在後方緊追。',modifier:0,forceFail:false};
 }
 const mahjongTiles=['🀇','🀈','🀉','🀊','🀋','🀌','🀍','🀎','🀏','🀙','🀚','🀛','🀜','🀝','🀞','🀟','🀠','🀡','🀐','🀑','🀒','🀓','🀔','🀕','🀖','🀗','🀘','🀀','🀁','🀂','🀃','🀄','🀅','🀆'];
-function drawMahjongHand() {
-  const wall=mahjongTiles.flatMap(tile=>[tile,tile,tile,tile]);
+const mahjongFlowers=['🌸春','🌺夏','🍁秋','❄️冬','🌸梅','🌺蘭','🌼菊','🎋竹'];
+const isMahjongBot=id=>id.startsWith('cpu:');
+function shuffledMahjongWall() {
+  const wall=[...mahjongTiles.flatMap(tile=>[tile,tile,tile,tile]),...mahjongFlowers];
   for(let x=wall.length-1;x>0;x--){const y=Math.floor(Math.random()*(x+1));[wall[x],wall[y]]=[wall[y],wall[x]];}
-  return wall.slice(0,14);
+  return wall;
 }
-function mahjongScore(hand) {
-  const counts=new Map(); hand.forEach(t=>counts.set(t,(counts.get(t)||0)+1));
-  const pairs=[...counts.values()].filter(n=>n>=2).length,triples=[...counts.values()].filter(n=>n>=3).length,quads=[...counts.values()].filter(n=>n===4).length;
-  const honors=hand.filter(t=>['🀀','🀁','🀂','🀃','🀄','🀅','🀆'].includes(t)).length;
-  return triples*18+quads*12+pairs*5+honors+Math.floor(Math.random()*18);
+function taiwanMahjongDraw(game,playerId) {
+  let tile=game.wall.pop();
+  while(tile&&mahjongFlowers.includes(tile)) { game.flowers.get(playerId).push(tile); tile=game.wall.pop(); }
+  if(tile) game.hands.get(playerId).push(tile);
+  return tile;
+}
+function taiwanMahjongCanMeld(counts,needed) {
+  const index=counts.findIndex(count=>count>0);
+  if(index<0) return needed===0;
+  if(needed<=0) return false;
+  if(counts[index]>=3) { counts[index]-=3; if(taiwanMahjongCanMeld(counts,needed-1)) { counts[index]+=3; return true; } counts[index]+=3; }
+  const suitStart=Math.floor(index/9)*9;
+  if(index<27&&index<=suitStart+6&&counts[index+1]>0&&counts[index+2]>0) {
+    counts[index]--;counts[index+1]--;counts[index+2]--;
+    if(taiwanMahjongCanMeld(counts,needed-1)) { counts[index]++;counts[index+1]++;counts[index+2]++; return true; }
+    counts[index]++;counts[index+1]++;counts[index+2]++;
+  }
+  return false;
+}
+function taiwanMahjongWin(hand,melds=[]) {
+  const needed=5-melds.length;
+  if(needed<0||hand.length!==needed*3+2) return false;
+  const counts=mahjongTiles.map(tile=>hand.filter(value=>value===tile).length);
+  for(let index=0;index<counts.length;index++) if(counts[index]>=2) {
+    counts[index]-=2;
+    if(taiwanMahjongCanMeld(counts,needed)) { counts[index]+=2; return true; }
+    counts[index]+=2;
+  }
+  return false;
 }
 function mahjongRoomRow(token,disabled=false) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`mahjong_join:${token}`).setLabel('加入牌桌').setEmoji('🪑').setStyle(ButtonStyle.Primary).setDisabled(disabled),
     new ButtonBuilder().setCustomId(`mahjong_start:${token}`).setLabel('開始對局').setEmoji('🀄').setStyle(ButtonStyle.Success).setDisabled(disabled)
   );
+}
+function mahjongPlayerLabel(id) { return isMahjongBot(id)?`🤖 電腦 ${id.split(':')[1]}`:`<@${id}>`; }
+function mahjongDiscard(game,playerId,index) {
+  const hand=game.hands.get(playerId);
+  if(!hand||!Number.isInteger(index)||index<0||index>=hand.length) throw new Error('指定的手牌不存在');
+  const [tile]=hand.splice(index,1);
+  game.discards.get(playerId).push(tile);
+  game.lastDiscard={playerId,tile};
+  game.state='claim';
+  return tile;
+}
+function mahjongBotDiscardIndex(hand) {
+  const counts=new Map(); hand.forEach(tile=>counts.set(tile,(counts.get(tile)||0)+1));
+  const singles=hand.map((tile,index)=>({tile,index})).filter(({tile})=>counts.get(tile)===1);
+  return (singles.length?singles:hand.map((tile,index)=>({tile,index})))[Math.floor(Math.random()*(singles.length||hand.length))].index;
+}
+function mahjongChiTiles(hand,tile) {
+  const index=mahjongTiles.indexOf(tile); if(index<0||index>=27) return [];
+  const start=Math.floor(index/9)*9,options=[];
+  for(const offsets of [[-2,-1],[-1,1],[1,2]]) {
+    const indices=offsets.map(offset=>index+offset);
+    if(indices.every(value=>value>=start&&value<start+9)) {
+      const tiles=indices.map(value=>mahjongTiles[value]),copy=[...hand];
+      if(tiles.every(value=>{const at=copy.indexOf(value);if(at<0)return false;copy.splice(at,1);return true;})) options.push(tiles);
+    }
+  }
+  return options;
+}
+function mahjongClaimActions(game,playerId) {
+  const discard=game.lastDiscard,hand=game.hands.get(playerId),melds=game.melds.get(playerId)||[];
+  if(!discard||discard.playerId===playerId||!hand) return [];
+  const count=hand.filter(tile=>tile===discard.tile).length,actions=[];
+  if(taiwanMahjongWin([...hand,discard.tile],melds)) actions.push('hu');
+  if(count>=3) actions.push('kong');
+  if(count>=2) actions.push('pong');
+  const nextId=game.players[(game.players.indexOf(discard.playerId)+1)%4];
+  if(playerId===nextId&&mahjongChiTiles(hand,discard.tile).length) actions.push('chi');
+  return actions;
+}
+function createMahjongGame(guildId,ownerId,humanPlayers,bet,mode) {
+  const players=[...humanPlayers]; let botNumber=1; while(players.length<4) players.push(`cpu:${botNumber++}`);
+  const game={state:'discard',guildId,ownerId,players,humanPlayers,bet,mode,wall:shuffledMahjongWall(),hands:new Map(),discards:new Map(),flowers:new Map(),melds:new Map(),turnIndex:0,lastDiscard:null};
+  for(const playerId of players) { game.hands.set(playerId,[]);game.discards.set(playerId,[]);game.flowers.set(playerId,[]);game.melds.set(playerId,[]);for(let count=0;count<16;count++) taiwanMahjongDraw(game,playerId); }
+  taiwanMahjongDraw(game,players[0]);
+  return game;
+}
+function mahjongGameEmbed(game,notice='') {
+  const currentId=game.players[game.turnIndex],hand=game.hands.get(currentId),discard=game.lastDiscard;
+  const summaries=game.players.map(id=>{
+    const discarded=game.discards.get(id),recent=discarded.slice(-8).join(' ')||'尚未出牌',flowers=game.flowers.get(id).join(' ')||'無',melds=game.melds.get(id).map(group=>`[${group.join(' ')}]`).join(' ')||'無';
+    return `${mahjongPlayerLabel(id)}｜花：${flowers}｜副露：${melds}\n棄牌：${recent}`;
+  }).join('\n');
+  const action=game.state==='claim'?`可對 ${mahjongPlayerLabel(discard.playerId)} 打出的 **${discard.tile}** 選擇吃、碰、槓、胡，或全員過。`:`輪到 **${mahjongPlayerLabel(currentId)}** 出牌。`;
+  return new EmbedBuilder().setColor(0x2E7D32).setTitle(`🀄 台式 16 張麻將｜${game.state==='claim'?'叫牌階段':'出牌階段'}`)
+    .setDescription(`${action}\n\n**目前手牌**\n${hand.join(' ')}\n\n${summaries}${notice?`\n\n${notice}`:''}`)
+    .setFooter({text:`牌牆剩餘 ${game.wall.length} 張｜莊家 17 張先出，其餘玩家摸 1 打 1；花牌自動補花`});
+}
+function mahjongGameRows(token,game,disabled=false) {
+  const currentId=game.players[game.turnIndex],hand=game.hands.get(currentId)||[];
+  if(disabled) return [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`mahjong_closed:${token}`).setLabel('本局已結束').setStyle(ButtonStyle.Secondary).setDisabled(true))];
+  if(game.state==='claim') return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`mahjong_claim:${token}:hu`).setLabel('胡').setEmoji('🏆').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`mahjong_claim:${token}:pong`).setLabel('碰').setEmoji('🀄').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`mahjong_claim:${token}:kong`).setLabel('槓').setEmoji('🀫').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`mahjong_claim:${token}:chi`).setLabel('吃').setEmoji('🥢').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`mahjong_claim:${token}:pass`).setLabel('全員過').setStyle(ButtonStyle.Secondary)
+  )];
+  const menu=new StringSelectMenuBuilder().setCustomId(`mahjong_discard:${token}`).setPlaceholder(`輪到 ${mahjongPlayerLabel(currentId)} 選擇要打出的牌`)
+    .addOptions(hand.map((tile,index)=>({label:`打出第 ${index+1} 張 ${tile}`,value:String(index)})));
+  const rows=[new ActionRowBuilder().addComponents(menu)];
+  if(taiwanMahjongWin(hand,game.melds.get(currentId))) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`mahjong_self_hu:${token}`).setLabel('自摸胡牌').setEmoji('🏆').setStyle(ButtonStyle.Success)));
+  return rows;
+}
+function settleMahjongGame(game,winnerId=null,method='流局') {
+  const reveal=game.players.map(id=>`${mahjongPlayerLabel(id)}\n${game.hands.get(id).join(' ')}`).join('\n\n');
+  if(!winnerId) {
+    for(const id of game.humanPlayers) changeBalance(game.guildId,id,game.bet,'wager_return',id,'台式麻將流局退還本金');
+    return new EmbedBuilder().setColor(0x607D8B).setTitle('🀄 台式麻將｜流局').setDescription(`牌牆已盡，無人胡牌；所有真人玩家已退還本金。\n\n${reveal}`);
+  }
+  if(game.mode==='solo') {
+    const won=winnerId===game.ownerId,payout=won?Math.floor(game.bet*4*weeklyMahjongMultiplier()):0,settlement=settleGamePayout(game.guildId,game.ownerId,game.bet,payout,'麻將');
+    return new EmbedBuilder().setColor(won?0x35C46A:0xD94A4A).setTitle('🀄 台式麻將｜胡牌結算').setDescription(`${mahjongPlayerLabel(winnerId)} 以 **${method}** 胡牌！\n\n${reveal}\n\n${won?`🎉 你胡牌，入帳 **${fmt(settlement.credited)}**${taipeiWeekday()===6?'（週六 ×1.5）':''}`:`你本局失敗，損失 ${fmt(game.bet)}。`}${titleLuckNotice(settlement)}\n金庫：${fmt(balance(game.guildId,game.ownerId))}`);
+  }
+  const pot=Math.floor(game.bet*game.humanPlayers.length*weeklyMahjongMultiplier());
+  if(!isMahjongBot(winnerId)) changeBalance(game.guildId,winnerId,pot,'payout',winnerId,'台式麻將胡牌');
+  return new EmbedBuilder().setColor(isMahjongBot(winnerId)?0xD94A4A:0x35C46A).setTitle('🀄 台式麻將｜胡牌結算').setDescription(`${mahjongPlayerLabel(winnerId)} 以 **${method}** 胡牌！\n\n${reveal}\n\n${isMahjongBot(winnerId)?'電腦胡牌，本局獎池由莊家收回。':`獎池入帳：**${fmt(pot)}**${taipeiWeekday()===6?'（週六 ×1.5）':''}`}`);
+}
+function advanceMahjongTurn(game) {
+  game.turnIndex=(game.turnIndex+1)%4;
+  const playerId=game.players[game.turnIndex];
+  if(!taiwanMahjongDraw(game,playerId)) return {finished:true};
+  game.state='discard'; game.lastDiscard=null;
+  if(!isMahjongBot(playerId)) return {finished:false};
+  if(taiwanMahjongWin(game.hands.get(playerId),game.melds.get(playerId))) return {finished:true,winnerId:playerId,method:'自摸'};
+  mahjongDiscard(game,playerId,mahjongBotDiscardIndex(game.hands.get(playerId)));
+  return {finished:false,botDiscard:true};
+}
+function removeMahjongTiles(hand,tiles) {
+  for(const tile of tiles) { const index=hand.indexOf(tile); if(index<0) throw new Error('手牌已變更，無法叫牌'); hand.splice(index,1); }
+}
+function applyMahjongClaim(game,playerId,action) {
+  const actions=mahjongClaimActions(game,playerId),discard=game.lastDiscard;
+  if(!actions.includes(action)) throw new Error('你目前不能使用這個叫牌動作');
+  if(action==='hu') return {winnerId:playerId,method:'榮和'};
+  const hand=game.hands.get(playerId),melds=game.melds.get(playerId);
+  let consumed=[];
+  if(action==='pong') consumed=[discard.tile,discard.tile];
+  if(action==='kong') consumed=[discard.tile,discard.tile,discard.tile];
+  if(action==='chi') consumed=mahjongChiTiles(hand,discard.tile)[0];
+  removeMahjongTiles(hand,consumed);
+  melds.push([...consumed,discard.tile]);
+  game.turnIndex=game.players.indexOf(playerId); game.state='discard'; game.lastDiscard=null;
+  if(action==='kong'&&!taiwanMahjongDraw(game,playerId)) return {finished:true};
+  return {finished:false};
 }
 function riotRow(token,disabled=false) {
   return new ActionRowBuilder().addComponents(
@@ -2036,7 +4090,7 @@ function riotRow(token,disabled=false) {
   );
 }
 const gameHelpDetails={
-  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/每日\`、\`/賺錢\` 累積金幣，再選擇喜歡的遊戲下注。\n\n🃏 桌上遊戲｜比大小、射龍門、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 3 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n一般賭場遊戲每局消耗 **10 體力**，下注範圍 **${fmt(MIN_BET)}～${fmt(MAX_BET)}**；所有收益皆無每日金幣上限。`},
+  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/每日\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 3 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限；也可以輸入「歐印」，投入當下全部金幣。所有收益皆無每日金幣上限。`},
   highlow:{label:'比大小',emoji:'🃏',hint:'與莊家各抽一張牌',title:'🃏 比大小',body:'你與莊家各抽一張牌，點數與花色較大者獲勝。勝利獲得下注額 **2 倍**，平手退回下注，落敗則失去下注。'},
   dragon:{label:'射龍門',emoji:'🚪',hint:'判斷第三張牌是否落在門牌中間',title:'🚪 射龍門',body:'先開出兩張門牌，再選擇射牌或不射。第三張牌嚴格落在兩張門牌之間即獲得 **2 倍**；撞柱或射偏會失去下注，不射則退回下注。'},
   horse:{label:'賽馬',emoji:'🏇',hint:'選擇一匹馬觀看即時競賽',title:'🏇 賽馬',body:'從 1～4 號馬選擇一匹下注，畫面會即時更新到衝線。猜中冠軍獲得下注額 **4 倍**。'},
@@ -2044,29 +4098,33 @@ const gameHelpDetails={
   petRace:{label:'寵物競賽',emoji:'🐾',hint:'派出自己的寵物參加障礙賽',title:'🐾 寵物障礙競賽',body:'使用 `/寵物競賽` 輸入下注後，從下拉選單派出自己領養的寵物。幸福度與寵物價值會影響表現，每次參賽幸福度 -8。冠軍獲得 **3 倍**，亞軍獲得 **1.25 倍**派彩，每場消耗 **8 體力**。'},
   racePvp:{label:'競速 PVP',emoji:'⚔️',hint:'指定玩家進行車輛競速對決',title:'⚔️ 競速 PVP',body:'使用 `/競速pvp` 指定對手與下注。對手接受後，雙方從下拉選單挑選自己的車輛，由挑戰者開始賽事。雙方各押同額，勝者取得完整獎池；每人消耗 **10 體力**。'},
   petRacePvp:{label:'寵物競速 PVP',emoji:'🐾',hint:'指定玩家進行寵物障礙對決',title:'🐾 寵物競速 PVP',body:'使用 `/寵物競速pvp` 指定對手與下注。對手接受後，雙方各派一隻寵物參賽。勝者取得雙方獎池；每人消耗 **8 體力**，參賽寵物幸福度 -8。'},
+  liarDice:{label:'骰盅吹牛 PVP',emoji:'🎲',hint:'秘密看骰、輪流喊骰與抓吹牛',title:'🎲 骰盅吹牛｜雙人 PVP',body:'使用 `/骰盅吹牛` 指定對手與下注。對手接受後，雙方各擲 **5 顆秘密骰子**，可按「查看我的骰子」取得只有自己看得到的點數。挑戰者先喊；每次喊注必須增加骰子數量，或在相同數量提高點數。**1 點為百搭**，可計入任何 2～6 點，因此喊骰只使用 2～6 點。輪到的玩家若認為上一家喊得超過雙方實際骰數，可按「抓吹牛」開盅：數量不足則抓人的玩家獲勝，數量足夠則上一位喊骰玩家獲勝。雙方各押同額，勝者取得完整獎池；每人消耗 **5 體力**。每次行動限時 **2 分鐘**，逾時退還下注但不退體力。'},
   big2:{label:'大老二',emoji:'🂡',hint:'挑戰五張牌型強度',title:'🂡 大老二挑戰',body:'系統發出 13 張牌並選出最高五張牌型。牌型通過本局強度門檻即可獲得下注額 **2 倍**。'},
+  miniGames:{label:'小遊戲大廳',emoji:'🎮',hint:'用單一下拉選單開啟所有遊戲',title:'🎮 小遊戲大廳與圖片版堆積木',body:'使用 `/小遊戲` 後，從下拉式選單選擇遊戲；需要下注、號碼、馬匹或 PVP 對手時，機器人會自動開啟設定視窗。選單不包含工作與搶劫。「抽積木」完成下注後會提供專屬網站連結，以圖片呈現積木塔的穩定、搖晃與倒塌狀態。玩家從左、中、右三塊積木中選擇一塊抽出，畫面會標示每塊的倒塌率；每次成功後可立即收手領取目前倍率，或繼續挑戰。成功 1～6 次的基礎派彩依序為 **1.1、1.3、1.65、2.2、3、4.4 倍**；普通與緊實積木風險較高，但成功時會額外累加倍率。高塔倒塌會失去本局下注，結果與派彩皆由 Oracle 伺服器保存，重新整理不會重抽。'},
   slots:{label:'角子機',emoji:'🎰',hint:'三軸圖案配對派彩',title:'🎰 角子機',body:'三個 7️⃣ 可獲得 **20 倍**，其他三個相同圖案 **10 倍**，兩個相同圖案 **2 倍**；沒有配對則失去下注。'},
   lottery:{label:'大樂透',emoji:'🎱',hint:'從 1～49 選擇幸運號碼',title:'🎱 大樂透',body:'選擇 1～49 的一個幸運號碼，完全命中系統開出的號碼即可獲得下注額 **40 倍**。'},
   bingo:{label:'賓果',emoji:'🔢',hint:'自選九宮格號碼連線',title:'🔢 賓果',body:'自選 9 個不重複的 1～25 數字組成九宮格。橫、直或斜線完成連線即可獲得下注額 **4 倍**。'},
-  scratch:{label:'刮刮樂',emoji:'🪙',hint:'親手刮開三個圖案',title:'🪙 刮刮樂',body:'依序按下三格親手刮開圖案。三個相同獲得 **10 倍**，兩個相同獲得 **2 倍**。'},
+  scratch:{label:'刮刮樂',emoji:'🪙',hint:'在實體卡面刮開三個圖案',title:'🪙 互動式刮刮樂',body:'購買後按下「開啟實體刮刮卡」，在專屬網頁用手指或滑鼠刮除銀色塗層。刮開達 **45%** 後會自動驗證並派彩。三個相同獲得 **10 倍**，兩個相同獲得 **2 倍**。獎項於下注時由伺服器封存，重新整理不會重抽或重複派彩。'},
   wheel:{label:'幸運輪盤',emoji:'🎡',hint:'每天三次免費抽獎',title:'🎡 幸運輪盤',body:'每天可免費轉動 **3 次**，台北時間 00:00 重置。可抽中金幣，最大獎為每週日更新的隱藏車輛。'},
-  mahjong:{label:'麻將',emoji:'🀄',hint:'單人或多人牌桌',title:'🀄 麻將',body:'可單人挑戰三名電腦，或開設 2～4 人多人牌桌。單人獲勝基本派彩 **4 倍**，多人勝者取得全桌獎池；週六獎金 ×1.5。'},
+  mahjong:{label:'麻將',emoji:'🀄',hint:'台式 16 張｜吃、碰、槓、胡與補花',title:'🀄 台式 16 張麻將',body:'採用四家台式 16 張核心規則：莊家 17 張先出，其他家 16 張摸 1 打 1；花牌會自動補花。輪到自己時從下拉選單選擇出牌；他家打出牌後可依規則選擇吃、碰、槓或胡。單人不足座位由三名電腦補齊，多人桌不足四位也會補電腦。胡牌依 **五組面子加一對將** 判定；流局會退回真人玩家本金。單人胡牌基本派彩 **4 倍**，多人胡牌取得真人玩家獎池；週六獎金 ×1.5。'},
   duel:{label:'PvP 輪盤決鬥',emoji:'⚔️',hint:'指定玩家進行虛構槍械決鬥',title:'⚔️ PvP 輪盤決鬥',body:'指定另一名玩家並下注，選擇左輪或霰彈槍模式。對方接受後輪流行動，勝者取得雙方獎池。'},
-  heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；警員加入並選槍後，可選擇「正面對抗劫匪」或「呼叫增援」。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率，未選擇則使用預設接應車。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費，槍枝另計；所有費用直接銷毀，無論成敗均不退還。地圖、槍枝、線人、方案與逃跑路線都會影響結果。`},
+  heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
   money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/每日\` 領取獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。大多數行動會消耗體力，食物與飲料可恢復；所有合法工作、冒險、搶劫與賭場收益皆無每日金幣上限。`},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、車庫與交易',title:'🏎️ 資產收藏',body:'使用 `/資產商城` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 `/車庫`、`/停機坪`、`/碼頭` 展示，或透過二手市場交易。'},
+  transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、車庫與交易',title:'🏎️ 資產收藏',body:'使用 `/資產商城` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 `/車庫`、`/停機坪`、`/碼頭` 展示；目前共有 **16 座國際機場**，持有機場與客機後可用 `/機場` 註冊航空公司，經營包含 15、25、45 分鐘短途航線及 3、4 小時長途航線。'},
+  hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
   pets:{label:'寵物系統',emoji:'🐾',hint:'領養、陪伴、照顧與特殊增益',title:'🐾 寵物陪伴系統',body:'使用 `/寵物店` 預覽並領養寵物，或購買罐頭、玩具與洗護用品。再用 `/我的寵物` 設定同行夥伴與使用用品。寵物每天心情 -10，心情低於 20 時特殊功能暫停；好好照顧即可持續獲得小幅工作、賭場、商城或體力加成。'}
 };
 const commandHelpCategories={
-  casino:{label:'🎰 賭場與賺錢',description:'所有下注遊戲、免費輪盤與工作',commands:['賺錢','比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥']},
-  account:{label:'👤 玩家與經濟',description:'個人資料、金庫、銀行、體力與每日獎勵',commands:['金庫','個人資料','成就','稱號','每日增益','銀行','體力','每日']},
+  casino:{label:'🎰 賭場與賺錢',description:'所有下注遊戲、免費輪盤與工作',commands:['小遊戲','比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','骰盅吹牛','大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥','賺錢']},
+  account:{label:'👤 玩家與經濟',description:'個人資料、金庫、轉帳、銀行、體力與每日獎勵',commands:['金庫','轉帳','個人資料','成就','稱號','每日增益','銀行','體力','每日回體力','每日']},
   shop:{label:'🛒 商城與背包',description:'購買、查看及使用補給品',commands:['商城','背包','購買','使用']},
   pets:{label:'🐾 寵物與陪伴',description:'領養寵物、購買用品並設定同行同伴',commands:['寵物店','我的寵物']},
-  assets:{label:'🏎️ 資產與交易',description:'房產、載具、改裝、盲盒、展示與二手市場',commands:['資產商城','購買資產','汽車盲盒','汽車盲盒內容','我的資產','車庫','改裝','停機坪','碼頭','資產交易','變賣資產','二手市場']},
+  assets:{label:'🏎️ 資產與交易',description:'房產、機場經營、載具、改裝、盲盒、展示與二手市場',commands:['資產商城','購買資產','我的資產','藏身處','機場','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','變賣資產','回收廠','二手市場']},
   heist:{label:'🚓 團隊與小黑屋',description:'隊伍搶劫、情報、救援、逃獄與暴動',commands:['隊伍','團隊搶銀行','銀行情報','賄絡迷子','減刑','逃獄','小黑屋暴動','救援同伴']},
-  admin:{label:'🛡️ 管理員與系統',description:'玩法入口及限管理員使用的維護指令',commands:['玩法','搶劫公告頻道','單人搶劫機率','稱號設定','資產調整','金幣調整','帳務紀錄','經濟監控']}
+  admin:{label:'🛡️ 管理員與系統',description:'玩法入口及限管理員使用的維護指令',commands:['玩法','搶劫公告頻道','單人搶劫機率','稱號設定','資產調整','金幣調整','管理員入金','帳務紀錄','經濟監控']}
 };
-const detailedHelpCommandKeys={比大小:'highlow',射龍門:'dragon',賽馬:'horse',競速:'race',寵物競賽:'petRace',競速pvp:'racePvp',寵物競速pvp:'petRacePvp',大老二:'big2',角子機:'slots',幸運輪盤:'wheel',大樂透:'lottery',賓果:'bingo',刮刮樂:'scratch',麻將:'mahjong',決鬥:'duel',團隊搶銀行:'heist',賺錢:'money',資產商城:'assets',寵物店:'pets',我的寵物:'pets'};
+const detailedHelpCommandKeys={小遊戲:'miniGames',比大小:'highlow',射龍門:'dragon',賽馬:'horse',競速:'race',寵物競賽:'petRace',競速pvp:'racePvp',寵物競速pvp:'petRacePvp',骰盅吹牛:'liarDice',大老二:'big2',角子機:'slots',幸運輪盤:'wheel',大樂透:'lottery',賓果:'bingo',刮刮樂:'scratch',麻將:'mahjong',決鬥:'duel',團隊搶銀行:'heist',賺錢:'money',轉帳:'transfers',資產商城:'assets',藏身處:'hideout',寵物店:'pets',我的寵物:'pets'};
 function commandHelpCategoryRow(selected='casino') {
   return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('game_help_category').setPlaceholder('第一步：選擇指令分類').addOptions(
     Object.entries(commandHelpCategories).map(([value,category])=>({label:category.label,description:category.description,value,default:value===selected}))
@@ -2133,53 +4191,65 @@ function raceTrack(positions, finish = 20) {
 
 const integerChoiceOptions=(max,label='數量')=>Array.from({length:max},(_,index)=>({name:`${label} ${index+1}`,value:index+1}));
 
-function petShopSelectRow(userId,selected=null) {
+function petShopSelectRows(userId,selected=null) {
   const options=[
     ...Object.entries(petCatalog).map(([id,pet])=>({label:pet.name,description:`${fmt(pet.price)}｜${pet.bonusText}`,emoji:pet.emoji,value:`pet:${id}`,default:selected===`pet:${id}`})),
-    ...Object.entries(petItemCatalog).map(([id,item])=>({label:item.name,description:`${fmt(item.price)}｜心情 +${item.mood}`,emoji:item.emoji,value:`item:${id}`,default:selected===`item:${id}`}))
+    ...Object.entries(petItemCatalog).map(([id,item])=>({label:item.name,description:`${fmt(item.price)}｜${petItemEffectLabel(item)}${petItemTargetLabel(item)?`｜${petItemTargetLabel(item)}`:''}`,emoji:item.emoji,value:`item:${id}`,default:selected===`item:${id}`}))
   ];
-  return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`pet_shop_select:${userId}`).setPlaceholder('選擇寵物或用品，立即預覽').addOptions(options));
+  const pages=[];
+  for(let index=0;index<options.length;index+=25) pages.push(options.slice(index,index+25));
+  return pages.map((page,index)=>new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`pet_shop_select:${userId}:${index}`).setPlaceholder(pages.length===1?'選擇寵物或用品，立即預覽':`選擇寵物或用品（${index+1}/${pages.length}）`).addOptions(page)
+  ));
 }
 function petShopOverviewEmbed() {
-  const pets=Object.values(petCatalog).map(p=>`${p.emoji} **${p.name}**｜${fmt(p.price)}\n${p.bonusText}`).join('\n\n');
-  const items=Object.values(petItemCatalog).map(item=>`${item.emoji} **${item.name}**｜${fmt(item.price)}｜心情 +${item.mood}`).join('\n');
+  const pets=Object.values(petCatalog).map(p=>`${p.emoji} **${p.name}**${p.rarity?`｜🌟 ${p.rarity}`:''}｜${fmt(p.price)}\n${p.bonusText}${p.hungerMultiplier>1?`｜每日心情消耗 ×${p.hungerMultiplier}`:''}`).join('\n\n');
+  const items=Object.values(petItemCatalog).map(item=>`${item.emoji} **${item.name}**｜${fmt(item.price)}｜${petItemEffectLabel(item)}${petItemTargetLabel(item)?`｜${petItemTargetLabel(item)}`:''}`).join('\n');
   return new EmbedBuilder().setColor(0xE8A2C8).setTitle('🐾 迷子寵物店').setDescription(`領養一位陪伴同伴，並在 **/我的寵物** 設定同行。\n\n${pets}\n\n**寵物用品**\n${items}\n\n寵物每天心情 -10；心情低於 20 時增益暫停。所有消費直接銷毀金幣。`);
 }
 function petProfileEmbed(g,u) {
   const pets=ownedPets(g,u),active=activePet(g,u);
   if(!pets.length) return new EmbedBuilder().setColor(0x9AA0A6).setTitle('🐾 我的寵物').setDescription('你還沒有寵物。使用 **/寵物店** 領養第一位陪伴同伴吧！');
-  const inventory=Object.entries(petItemCatalog).map(([id,item])=>`${item.emoji} ${item.name} × ${db.prepare('SELECT quantity FROM pet_inventory WHERE guild_id=? AND user_id=? AND item_id=?').get(g,u,id)?.quantity||0}`).join('\n');
-  const lines=pets.map(row=>{const p=petCatalog[row.petId],marker=active?.petId===row.petId?'**同行中**':'收藏'; return `【${marker}】**${petDisplayName(row.petId,row.nickname)}**｜心情 ${row.happiness}/100 ${petMoodBar(row.happiness)}\n${p.bonusText}${row.happiness<20?'（目前暫停）':''}`;}).join('\n\n');
+  const inventory=Object.entries(petItemCatalog).map(([id,item])=>{const quantity=db.prepare('SELECT quantity FROM pet_inventory WHERE guild_id=? AND user_id=? AND item_id=?').get(g,u,id)?.quantity||0; return `${item.emoji} ${item.name}${item.permanent?(quantity>0?'｜**已擁有・自動生效**':'｜未擁有'):` × ${quantity}`}`;}).join('\n');
+  const lines=pets.map(row=>{const p=petCatalog[row.petId],marker=active?.petId===row.petId?'**同行中**':'收藏'; return `【${marker}】**${petDisplayName(row.petId,row.nickname)}**${p.rarity?`｜🌟 ${p.rarity}`:''}｜心情 ${row.happiness}/100 ${petMoodBar(row.happiness)}\n${p.bonusText}${p.hungerMultiplier>1?`｜食量 ×${p.hungerMultiplier}`:''}${row.happiness<20?'（目前暫停）':''}`;}).join('\n\n');
   return new EmbedBuilder().setColor(0xE8A2C8).setTitle('🐾 我的寵物夥伴').setDescription(`${lines}\n\n**用品背包**\n${inventory}`);
 }
 function petProfilePayload(g,u) {
   const embed=petProfileEmbed(g,u),active=activePet(g,u);
   if(!active) return {embeds:[embed]};
-  const path=assetPath(active.pet.image),name=`companion_${active.petId}${extname(path)}`;
+  if(!active.pet.image) return {embeds:[embed.setFooter({text:`目前同行：${petDisplayName(active.petId,active.nickname)}`})]};
+  const path=assetPath(active.pet.image);
+  if(!existsSync(path)) return {embeds:[embed.setFooter({text:`目前同行：${petDisplayName(active.petId,active.nickname)}`})]};
+  const name=`companion_${active.petId}${extname(path)}`;
   embed.setThumbnail(`attachment://${name}`).setFooter({text:`目前同行：${petDisplayName(active.petId,active.nickname)}`});
   return {embeds:[embed],files:[new AttachmentBuilder(path,{name})]};
 }
 function petProfileComponents(g,u) {
   const pets=ownedPets(g,u),rows=[];
   if(pets.length) rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`pet_companion:${u}`).setPlaceholder('選擇同行寵物').addOptions(pets.map(row=>({label:petDisplayName(row.petId,row.nickname),value:row.petId})))));
-  const items=Object.entries(petItemCatalog).filter(([id])=>(db.prepare('SELECT quantity FROM pet_inventory WHERE guild_id=? AND user_id=? AND item_id=?').get(g,u,id)?.quantity||0)>0);
-  if(items.length&&activePet(g,u)) rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`pet_care:${u}`).setPlaceholder('使用用品照顧同行寵物').addOptions(items.map(([id,item])=>({label:item.name,description:`心情 +${item.mood}`,value:id,emoji:item.emoji})))));
-  if(activePet(g,u)) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`pet_rename:${u}`).setLabel('替同行寵物命名').setStyle(ButtonStyle.Primary)));
+  const active=activePet(g,u);
+  const items=Object.entries(petItemCatalog).filter(([id,item])=>!item.permanent&&(db.prepare('SELECT quantity FROM pet_inventory WHERE guild_id=? AND user_id=? AND item_id=?').get(g,u,id)?.quantity||0)>0&&active&&petItemCompatible(item,active.pet));
+  if(items.length&&active) rows.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`pet_care:${u}`).setPlaceholder('使用用品照顧同行寵物').addOptions(items.map(([id,item])=>({label:item.name,description:`心情 +${item.mood}${petItemTargetLabel(item)?`｜${petItemTargetLabel(item)}`:''}`,value:id,emoji:item.emoji})))));
+  if(active) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`pet_rename:${u}`).setLabel('替同行寵物命名').setStyle(ButtonStyle.Primary)));
   return rows;
 }
 
 const commands = [
   new SlashCommandBuilder().setName('金庫').setDescription('查看自己或其他玩家的金幣').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
+  new SlashCommandBuilder().setName('轉帳').setDescription('轉帳金幣給其他玩家（收取 2% 手續費）')
+    .addUserOption(o=>o.setName('收款人').setDescription('選擇要收款的玩家').setRequired(true))
+    .addIntegerOption(o=>o.setName('金額').setDescription('輸入轉帳本金，手續費另計').setRequired(true).setMinValue(1).setAutocomplete(true)),
   new SlashCommandBuilder().setName('個人資料').setDescription('查看類似 Tatsu 的玩家資料卡').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
   new SlashCommandBuilder().setName('成就').setDescription('查看自己或其他玩家的成就進度').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
   new SlashCommandBuilder().setName('稱號').setDescription('裝備由成就解鎖的個人稱號').addStringOption(o=>o.setName('選擇').setDescription('選擇已解鎖的稱號').setRequired(true).addChoices(
-    {name:'🐣 萌禽',value:'cute_bird'},{name:'🐶 萌犬',value:'cute_dog'},{name:'🐕 猛犬',value:'fierce_dog'},{name:'🦅 猛禽',value:'fierce_bird'},{name:'🐈 貓的報恩｜派彩全靠運氣',value:'cat_returns'},{name:'🐕 犬的報恩｜派彩全靠運氣',value:'dog_returns'},{name:'❌ 取消目前稱號',value:'clear'})),
+    {name:'🐣 萌禽',value:'cute_bird'},{name:'🐶 萌犬',value:'cute_dog'},{name:'🐕 猛犬',value:'fierce_dog'},{name:'🦅 猛禽',value:'fierce_bird'},{name:'🐈 貓的報恩｜派彩全靠運氣',value:'cat_returns'},{name:'🐕 犬的報恩｜派彩全靠運氣',value:'dog_returns'},{name:'🔥 歐印勇者｜傳奇',value:'all_in_hero'},{name:'❌ 取消目前稱號',value:'clear'})),
   new SlashCommandBuilder().setName('每日增益').setDescription('查看週一到週日的輪替增益'),
   new SlashCommandBuilder().setName('銀行').setDescription('查詢、借款或償還虛擬金幣')
     .addSubcommand(s=>s.setName('查詢').setDescription('查看金庫、負債與可借額度'))
-    .addSubcommand(s=>s.setName('借款').setDescription('向銀行借入虛擬金幣').addIntegerOption(o=>o.setName('金額').setDescription('從建議下拉選擇或輸入借款金額').setRequired(true).setMinValue(1).setMaxValue(LOAN_LIMIT).setAutocomplete(true)))
+    .addSubcommand(s=>s.setName('借款').setDescription('依個人核貸額度向銀行借入虛擬金幣').addIntegerOption(o=>o.setName('金額').setDescription('最高依個人額度核貸，上限 1 億').setRequired(true).setMinValue(1).setMaxValue(LOAN_LIMIT).setAutocomplete(true)))
     .addSubcommand(s=>s.setName('還款').setDescription('償還銀行負債').addIntegerOption(o=>o.setName('金額').setDescription('從建議下拉選擇或輸入還款金額').setRequired(true).setMinValue(1).setMaxValue(LOAN_LIMIT).setAutocomplete(true))),
   new SlashCommandBuilder().setName('體力').setDescription('查看今日剩餘體力'),
+  new SlashCommandBuilder().setName('每日回體力').setDescription('每天免費一次將目前體力恢復至上限'),
   new SlashCommandBuilder().setName('商城').setDescription('查看可購買的食物與飲料'),
   new SlashCommandBuilder().setName('背包').setDescription('查看持有的食物與飲料'),
   new SlashCommandBuilder().setName('寵物店').setDescription('領養陪伴寵物或購買寵物用品'),
@@ -2188,12 +4258,14 @@ const commands = [
     .addStringOption(o=>o.setName('分類').setDescription('篩選資產種類').addChoices(...assetCategories.map(category=>({name:category,value:category}))))
     .addStringOption(o=>o.setName('商品').setDescription('輸入名稱搜尋商品圖片與完整資料').setAutocomplete(true)),
   new SlashCommandBuilder().setName('購買資產').setDescription('使用分類與商品下拉選單購買資產'),
-  new SlashCommandBuilder().setName('汽車盲盒').setDescription('選擇綜合車包或福特車包，每盒 10,000 金幣')
-    .addStringOption(o=>o.setName('車包').setDescription('選擇要開啟的汽車盲盒').addChoices({name:'綜合車包｜含隱藏車',value:'standard'},{name:'福特車包｜限定 8 台 Ford',value:'ford'}))
+  new SlashCommandBuilder().setName('汽車盲盒').setDescription('選擇七種不同價格、車款與稀有度的汽車盲盒')
+    .addStringOption(o=>o.setName('車包').setDescription('選擇要開啟的汽車盲盒').addChoices(...blindBoxPackChoices))
     .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇購買數量，未填寫時預設為 1').setMinValue(1).setMaxValue(10).addChoices(...integerChoiceOptions(10))),
   new SlashCommandBuilder().setName('汽車盲盒內容').setDescription('查看指定車包內的所有車款、圖片、機率與增益')
-    .addStringOption(o=>o.setName('車包').setDescription('選擇要查看的車包').addChoices({name:'綜合車包',value:'standard'},{name:'福特車包｜8 台 Ford',value:'ford'})),
+    .addStringOption(o=>o.setName('車包').setDescription('選擇要查看的汽車盲盒').addChoices(...blindBoxPackChoices)),
   new SlashCommandBuilder().setName('我的資產').setDescription('查看玩家擁有的房地產與載具').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
+  new SlashCommandBuilder().setName('藏身處').setDescription('將現有房地產設為藏身處並進行高階升級'),
+  new SlashCommandBuilder().setName('機場').setDescription('註冊航空公司並使用自己的機場與客機經營航線'),
   new SlashCommandBuilder().setName('車庫').setDescription('查看自己的汽車、機車與資產增益')
     .addStringOption(o=>o.setName('展示').setDescription('輸入名稱搜尋車輛').setAutocomplete(true)),
   new SlashCommandBuilder().setName('改裝').setDescription('開啟車庫改裝選單並即時合成預覽')
@@ -2211,8 +4283,12 @@ const commands = [
     .addStringOption(o=>o.setName('資產').setDescription('輸入名稱搜尋要變賣的資產').setRequired(true).setAutocomplete(true))
     .addIntegerOption(o=>o.setName('售價').setDescription('從建議下拉選擇或輸入整筆商品售價').setRequired(true).setMinValue(1).setMaxValue(100000000).setAutocomplete(true))
     .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇刊登數量，未填寫時預設為 1').setMinValue(1).setMaxValue(10).addChoices(...integerChoiceOptions(10))),
+  new SlashCommandBuilder().setName('回收廠').setDescription('把不要的載具壓成廢鐵，確認後返還原價 30%')
+    .addStringOption(o=>o.setName('載具').setDescription('輸入名稱搜尋要回收的載具').setRequired(true).setAutocomplete(true))
+    .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇回收數量，未填寫時預設為 1').setMinValue(1).setMaxValue(10).addChoices(...integerChoiceOptions(10))),
   new SlashCommandBuilder().setName('二手市場').setDescription('查看其他玩家刊登的二手資產')
     .addIntegerOption(o=>o.setName('編號').setDescription('從下拉選擇市場商品').setMinValue(1).setAutocomplete(true)),
+  new SlashCommandBuilder().setName('小遊戲').setDescription('從下拉式選單開啟所有小遊戲（不含工作與搶劫）'),
   new SlashCommandBuilder().setName('玩法').setDescription('快速查看賭場玩法與常用指令'),
   new SlashCommandBuilder().setName('賭場寶庫').setDescription('查看玩家消費累積的賭場中央寶庫'),
   new SlashCommandBuilder().setName('隊伍').setDescription('建立與管理搶銀行隊伍')
@@ -2263,25 +4339,29 @@ const commands = [
       {name:'⚡ 剪電線去賣（30% 成功；失敗罰款 2,000）',value:'wire'},
       {name:'🏦 搶銀行（5% 成功，失敗關 8 分鐘）',value:'robbery'}))
     .addUserOption(o=>o.setName('目標').setDescription('闖空門時可指定玩家；未指定則直接尋找無人住宅').setRequired(false)),
-  new SlashCommandBuilder().setName('比大小').setDescription('與莊家各抽一張牌').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
-  new SlashCommandBuilder().setName('射龍門').setDescription('兩張門牌之間即獲勝').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
-  new SlashCommandBuilder().setName('賽馬').setDescription('從四匹馬選一匹下注').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)).addIntegerOption(o=>o.setName('馬匹').setDescription('下拉選擇 1～4 號馬').setRequired(true).setMinValue(1).setMaxValue(4).addChoices(...integerChoiceOptions(4,'馬匹'))),
-  new SlashCommandBuilder().setName('競速').setDescription('使用自己的汽車或機車參加動態競速').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
-  new SlashCommandBuilder().setName('寵物競賽').setDescription('派出自己的寵物參加動態障礙賽').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
-  new SlashCommandBuilder().setName('競速pvp').setDescription('指定玩家，以自己的車輛進行零和競速對決').addUserOption(o=>o.setName('對手').setDescription('指定挑戰對手').setRequired(true)).addIntegerOption(o=>o.setName('下注').setDescription('雙方各自支付的下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
-  new SlashCommandBuilder().setName('寵物競速pvp').setDescription('指定玩家，派出寵物進行零和障礙賽對決').addUserOption(o=>o.setName('對手').setDescription('指定挑戰對手').setRequired(true)).addIntegerOption(o=>o.setName('下注').setDescription('雙方各自支付的下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
-  new SlashCommandBuilder().setName('大老二').setDescription('單人挑戰：從 13 張牌選出最大的五張牌型').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
-  new SlashCommandBuilder().setName('角子機').setDescription('轉動三軸角子機').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
+  addWagerOptions(new SlashCommandBuilder().setName('比大小').setDescription('與莊家各抽一張牌')),
+  addWagerOptions(new SlashCommandBuilder().setName('射龍門').setDescription('兩張門牌之間即獲勝')),
+  addWagerOptions(new SlashCommandBuilder().setName('賽馬').setDescription('從四匹馬選一匹下注')
+    .addIntegerOption(o=>o.setName('馬匹').setDescription('下拉選擇 1～4 號馬').setRequired(true).setMinValue(1).setMaxValue(4).addChoices(...integerChoiceOptions(4,'馬匹')))),
+  addWagerOptions(new SlashCommandBuilder().setName('競速').setDescription('使用自己的汽車或機車參加動態競速')),
+  addWagerOptions(new SlashCommandBuilder().setName('寵物競賽').setDescription('派出自己的寵物參加動態障礙賽')),
+  addWagerOptions(new SlashCommandBuilder().setName('競速pvp').setDescription('指定玩家，以自己的車輛進行零和競速對決')
+    .addUserOption(o=>o.setName('對手').setDescription('指定挑戰對手').setRequired(true)),'雙方各自支付的下注金額'),
+  addWagerOptions(new SlashCommandBuilder().setName('寵物競速pvp').setDescription('指定玩家，派出寵物進行零和障礙賽對決')
+    .addUserOption(o=>o.setName('對手').setDescription('指定挑戰對手').setRequired(true)),'雙方各自支付的下注金額'),
+  addWagerOptions(new SlashCommandBuilder().setName('骰盅吹牛').setDescription('向另一位玩家發起秘密骰盅吹牛 PVP')
+    .addUserOption(o=>o.setName('對手').setDescription('指定挑戰對手').setRequired(true)),'雙方各自支付的下注金額'),
+  addWagerOptions(new SlashCommandBuilder().setName('大老二').setDescription('單人挑戰：從 13 張牌選出最大的五張牌型')),
+  addWagerOptions(new SlashCommandBuilder().setName('角子機').setDescription('轉動三軸角子機')),
   new SlashCommandBuilder().setName('幸運輪盤').setDescription('每日 3 次免費抽現金或本週隱藏車輛'),
-  new SlashCommandBuilder().setName('大樂透').setDescription('選一個幸運號碼並對獎').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)).addIntegerOption(o=>o.setName('幸運號碼').setDescription('從可搜尋下拉選擇 1～49').setRequired(true).setMinValue(1).setMaxValue(49).setAutocomplete(true)),
-  new SlashCommandBuilder().setName('賓果').setDescription('自選九宮格號碼並進行開獎').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)).addStringOption(o=>o.setName('號碼').setDescription('輸入 9 個數字，以空格、英文逗號或中文逗號分隔').setRequired(true).setMinLength(17).setMaxLength(40)),
-  new SlashCommandBuilder().setName('刮刮樂').setDescription('刮開三個圖案試手氣').addIntegerOption(o=>o.setName('下注').setDescription('自行輸入下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
-  new SlashCommandBuilder().setName('麻將').setDescription('遊玩單人或 2～4 人簡化麻將')
-    .addStringOption(o=>o.setName('模式').setDescription('選擇模式').setRequired(true).addChoices({name:'🤖 單人對戰三名電腦',value:'solo'},{name:'👥 多人牌桌',value:'multi'}))
-    .addIntegerOption(o=>o.setName('下注').setDescription('自行輸入每位玩家的下注金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
-  new SlashCommandBuilder().setName('決鬥').setDescription('向另一位玩家發起卡通 PvP 輪盤決鬥')
-    .addUserOption(o=>o.setName('對手').setDescription('指定決鬥對手').setRequired(true))
-    .addIntegerOption(o=>o.setName('下注').setDescription('自行輸入雙方各自支付的金額').setRequired(true).setMinValue(MIN_BET).setMaxValue(MAX_BET)),
+  addWagerOptions(new SlashCommandBuilder().setName('大樂透').setDescription('選一個幸運號碼並對獎')
+    .addIntegerOption(o=>o.setName('幸運號碼').setDescription('從可搜尋下拉選擇 1～49').setRequired(true).setMinValue(1).setMaxValue(49).setAutocomplete(true))),
+  addWagerOptions(new SlashCommandBuilder().setName('賓果').setDescription('自選九宮格號碼並進行開獎')
+    .addStringOption(o=>o.setName('號碼').setDescription('輸入 9 個數字，以空格、英文逗號或中文逗號分隔').setRequired(true).setMinLength(17).setMaxLength(40))),
+  addWagerOptions(new SlashCommandBuilder().setName('刮刮樂').setDescription('刮開三個圖案試手氣')),
+  new SlashCommandBuilder().setName('麻將').setDescription('開啟網頁版台式 16 張麻將（8 台起胡）'),
+  addWagerOptions(new SlashCommandBuilder().setName('決鬥').setDescription('向另一位玩家發起卡通 PvP 輪盤決鬥')
+    .addUserOption(o=>o.setName('對手').setDescription('指定決鬥對手').setRequired(true)),'雙方各自支付的下注金額'),
   new SlashCommandBuilder().setName('稱號設定').setDescription('管理員設定玩家資料卡稱號').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption(o=>o.setName('玩家').setDescription('目標玩家').setRequired(true))
     .addStringOption(o=>o.setName('稱號').setDescription('指定特殊稱號').setRequired(true).addChoices(
@@ -2298,6 +4378,9 @@ const commands = [
     .addIntegerOption(o=>o.setName('數量').setDescription('從建議下拉選擇或輸入調整數量').setRequired(true).setMinValue(1).setMaxValue(100).setAutocomplete(true))
     .addStringOption(o=>o.setName('原因').setDescription('管理紀錄原因').setRequired(true).setMaxLength(200)),
   new SlashCommandBuilder().setName('金幣調整').setDescription('管理員增加或扣除玩家金幣').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addUserOption(o=>o.setName('玩家').setDescription('目標玩家').setRequired(true)).addIntegerOption(o=>o.setName('數量').setDescription('從建議下拉選擇或輸入正負數量').setRequired(true).setAutocomplete(true)).addStringOption(o=>o.setName('原因').setDescription('帳務紀錄原因').setRequired(true)),
+  new SlashCommandBuilder().setName('管理員入金').setDescription('管理員手動分配金幣至賭場中央寶庫').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addIntegerOption(o=>o.setName('數量').setDescription('要存入賭場中央寶庫的金幣數量').setRequired(true).setMinValue(1))
+    .addStringOption(o=>o.setName('原因').setDescription('本次入金的帳務紀錄原因').setRequired(true).setMaxLength(200)),
   new SlashCommandBuilder().setName('帳務紀錄').setDescription('管理員查看玩家最近帳務').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addUserOption(o=>o.setName('玩家').setDescription('目標玩家').setRequired(true)),
   new SlashCommandBuilder().setName('經濟監控').setDescription('管理員查看金幣供給、銷毀、負債與集中度').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(c=>c.toJSON());
@@ -2326,7 +4409,7 @@ client.on('error',error=>console.error('Discord client error:',error));
 process.on('unhandledRejection',error=>console.error('Unhandled promise rejection:',error));
 const daily = new Map();
 
-client.on('interactionCreate', async i => {
+async function handleInteraction(i) {
   if(i.isAutocomplete()) {
     const focused=i.options.getFocused(true),query=String(focused.value||'').trim().toLowerCase();
     if(i.commandName==='二手市場'&&focused.name==='編號') {
@@ -2341,7 +4424,15 @@ client.on('interactionCreate', async i => {
     if(numericFields.includes(focused.name)) {
       let values=[];
       if(focused.name==='幸運號碼') values=Array.from({length:49},(_,index)=>index+1);
-      else if(focused.name==='金額') values=[1000,5000,10000,25000,50000,100000,250000,500000].filter(value=>value<=LOAN_LIMIT);
+      else if(focused.name==='金額'&&i.commandName==='銀行'&&i.guildId) {
+        const action=i.options.getSubcommand(false),currentDebt=debt(i.guildId,i.user.id);
+        const upper=action==='還款'
+          ? Math.min(currentDebt,balance(i.guildId,i.user.id))
+          : Math.max(0,loanCreditProfile(i.guildId,i.user.id,currentDebt).limit-currentDebt);
+        values=[1000,5000,10000,25000,50000,100000,250000,500000,1_000_000,5_000_000,10_000_000,25_000_000,50_000_000,upper]
+          .filter(value=>value>0&&value<=upper);
+      }
+      else if(focused.name==='金額') values=[1000,5000,10000,25000,50000,100000,250000,500000];
       else if(['價格','售價'].includes(focused.name)) values=[1000,5000,10000,25000,50000,100000,250000,500000,1000000,5000000,10000000];
       else if(i.commandName==='金幣調整') values=[-100000,-50000,-10000,-5000,-1000,1000,5000,10000,50000,100000];
       else values=[1,2,5,10,20,50,100];
@@ -2350,16 +4441,20 @@ client.on('interactionCreate', async i => {
         .slice(0,25)
         .map(value=>({name:`${value<0?'扣除':'選擇'} ${Math.abs(value).toLocaleString('zh-TW')}`,value})));
     }
-    if(!['資產商城','購買資產','資產交易','變賣資產','車庫','改裝','停機坪','碼頭','資產調整'].includes(i.commandName)) return i.respond([]);
+    if(!['資產商城','購買資產','資產交易','變賣資產','回收廠','車庫','改裝','停機坪','碼頭','資產調整'].includes(i.commandName)) return i.respond([]);
     let entries=Object.entries(assetCatalog);
     if(i.commandName==='資產商城') {
       const category=i.options.getString('分類');
       if(category) entries=entries.filter(([,asset])=>asset.category===category);
     }
-    if(['資產商城','購買資產'].includes(i.commandName)) entries=entries.filter(([,asset])=>asset.forSale!==false);
+    if(['資產商城','購買資產'].includes(i.commandName)) entries=entries.filter(([,asset])=>assetIsForSale(asset));
     if(['資產交易','變賣資產'].includes(i.commandName)&&i.guildId) {
       const owned=new Set(assetsOf(i.guildId,i.user.id).map(row=>row.asset_id));
       entries=entries.filter(([assetId])=>owned.has(assetId));
+    }
+    if(i.commandName==='回收廠'&&i.guildId) {
+      const owned=new Set(assetsOf(i.guildId,i.user.id).map(row=>row.asset_id));
+      entries=entries.filter(([assetId,asset])=>owned.has(assetId)&&vehicleAssetCategories.has(asset.category));
     }
     if(i.commandName==='資產調整'&&i.guildId&&i.options.getString('操作')==='remove') {
       const target=i.options.getUser('玩家');
@@ -2378,6 +4473,41 @@ client.on('interactionCreate', async i => {
       .slice(0,25).map(([value,asset])=>({name:`${asset.name}｜${fmt(asset.price)} 金幣`,value}));
     return i.respond(choices);
   }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('mini_game_select:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的 `/小遊戲` 選單。',ephemeral:true});
+    const game=miniGameCatalog.find(entry=>entry.id===i.values[0]);
+    if(!game) return i.reply({content:'⚠️ 找不到這款小遊戲。',ephemeral:true});
+    if(game.setup==='direct') return handleInteraction(miniGameProxyInteraction(i,game.command,{}));
+    return i.showModal(miniGameSetupModal(ownerId,game));
+  }
+  if(i.isModalSubmit()&&i.customId.startsWith('mini_game_setup:')&&i.guildId) {
+    const [,ownerId,gameId]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 這不是你的遊戲設定視窗。',ephemeral:true});
+    const game=miniGameCatalog.find(entry=>entry.id===gameId);
+    if(!game) return i.reply({content:'⚠️ 找不到這款小遊戲。',ephemeral:true});
+    try {
+      const values=miniGameBetValues(i.fields.getTextInputValue('bet'));
+      if(game.setup==='pvp') {
+        const opponentInput=i.fields.getTextInputValue('opponent'),opponentId=opponentInput.match(/\d{17,20}/)?.[0];
+        if(!opponentId) throw new Error('請輸入有效的對手 Discord ID，或在欄位中提及玩家');
+        values.對手=await client.users.fetch(opponentId);
+      } else if(game.setup==='horse') {
+        const horse=Number(i.fields.getTextInputValue('horse').trim());
+        if(!Number.isInteger(horse)||horse<1||horse>4) throw new Error('馬匹只能輸入 1、2、3 或 4');
+        values.馬匹=horse;
+      } else if(game.setup==='lottery') {
+        const luckyNumber=Number(i.fields.getTextInputValue('lucky_number').trim());
+        if(!Number.isInteger(luckyNumber)||luckyNumber<1||luckyNumber>49) throw new Error('幸運號碼必須是 1～49 的整數');
+        values.幸運號碼=luckyNumber;
+      } else if(game.setup==='bingo') {
+        values.號碼=i.fields.getTextInputValue('bingo_numbers').trim();
+      }
+      return handleInteraction(miniGameProxyInteraction(i,game.command,values));
+    } catch(error) {
+      return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
+    }
+  }
   if(i.isStringSelectMenu() && i.customId==='game_help_category') {
     const categoryKey=i.values[0] in commandHelpCategories?i.values[0]:'casino';
     return i.update({embeds:[commandHelpOverviewEmbed(categoryKey)],components:commandHelpComponents(categoryKey),attachments:[]});
@@ -2391,15 +4521,114 @@ client.on('interactionCreate', async i => {
   if(i.isStringSelectMenu() && i.customId==='game_help_select') {
     return i.update({embeds:[commandHelpOverviewEmbed('casino')],components:commandHelpComponents('casino'),attachments:[]});
   }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('hideout_property:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1],propertyId=i.values[0],property=assetCatalog[propertyId];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有藏身處主人可以變更據點。',ephemeral:true});
+    if(!property||property.category!=='房地產'||property.temporaryHours||assetQuantity(i.guildId,ownerId,propertyId)<1) {
+      return i.reply({content:'⚠️ 這項房地產無法設為藏身處，或已不在你的資產中。',ephemeral:true});
+    }
+    db.prepare(`INSERT INTO player_hideouts(guild_id,user_id,property_id) VALUES(?,?,?)
+      ON CONFLICT(guild_id,user_id) DO UPDATE SET property_id=excluded.property_id,updated_at=CURRENT_TIMESTAMP`).run(i.guildId,ownerId,propertyId);
+    return i.update({embeds:[hideoutEmbed(i.guildId,ownerId,`✅ 已將 **${property.name}** 設為目前藏身處；既有升級全部保留。`)],components:hideoutComponents(i.guildId,ownerId)});
+  }
+  if(i.isButton()&&i.customId.startsWith('hideout_upgrade:')&&i.guildId) {
+    const [,ownerId,key]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有藏身處主人可以購買升級。',ephemeral:true});
+    try {
+      const result=purchaseHideoutUpgrade(i.guildId,ownerId,key);
+      return i.update({embeds:[hideoutEmbed(i.guildId,ownerId,`✅ ${result.definition.emoji} **${result.definition.name}** 已升至 **Lv.${result.level}**，支付 ${fmt(result.cost)} 金幣。`)],components:hideoutComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('hideout_showcase_category:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1],categoryKey=i.values[0];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有藏身處主人可以操作資產展示。',ephemeral:true});
+    if(!hideoutRecord(i.guildId,ownerId)) return i.reply({content:'⚠️ 請先設定一間有效的藏身處。',ephemeral:true});
+    if(!hideoutShowcaseCategories[categoryKey]) return i.reply({content:'⚠️ 找不到這個展示分類。',ephemeral:true});
+    return i.update({
+      embeds:[hideoutEmbed(i.guildId,ownerId),hideoutShowcaseEmbed(i.guildId,ownerId,categoryKey)],
+      components:hideoutComponents(i.guildId,ownerId,{showcaseCategory:categoryKey}),
+      attachments:[]
+    });
+  }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('hideout_showcase_asset:')&&i.guildId) {
+    const [,ownerId,categoryKey]=i.customId.split(':'),assetId=i.values[0];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有藏身處主人可以操作資產展示。',ephemeral:true});
+    if(!hideoutRecord(i.guildId,ownerId)) return i.reply({content:'⚠️ 請先設定一間有效的藏身處。',ephemeral:true});
+    const row=hideoutShowcaseAssets(i.guildId,ownerId,categoryKey).find(entry=>entry.asset_id===assetId);
+    const asset=row&&assetCatalog[assetId],detail=asset&&hideoutShowcaseEmbed(i.guildId,ownerId,categoryKey,assetId);
+    if(!asset||!detail) return i.reply({content:'⚠️ 這項資產已不在你的收藏中。',ephemeral:true});
+    const payload={
+      embeds:[hideoutEmbed(i.guildId,ownerId),detail],
+      components:hideoutComponents(i.guildId,ownerId,{showcaseCategory:categoryKey,showcaseAssetId:assetId}),
+      attachments:[]
+    };
+    const image=assetDisplayImage(asset,assetId),path=image&&assetPath(image);
+    if(path&&existsSync(path)) {
+      const imageName=`hideout_${assetId}${extname(image)||'.png'}`;
+      detail.setImage(`attachment://${imageName}`);
+      payload.files=[new AttachmentBuilder(path,{name:imageName})];
+    }
+    return i.update(payload);
+  }
+  if(i.isButton()&&i.customId.startsWith('hideout_raid_return:')&&i.guildId) {
+    const token=i.customId.split(':')[1],raid=activeHideoutRaids.get(token);
+    if(!raid||raid.resolved||raid.guildId!==i.guildId) return i.reply({content:'⚠️ 這次警察攻堅已經結束。',ephemeral:true});
+    if(i.user.id!==raid.userId) return i.reply({content:'⚠️ 只有遭到攻堅的藏身處主人可以反擊。',ephemeral:true});
+    raid.returned=true;
+    const weapons=ownedHideoutRaidWeapons(raid.guildId,raid.userId);
+    const notice=weapons.length?'你已趕回藏身處，立刻從武器庫選擇武器！':'你已趕回藏身處，但目前沒有同時備有彈藥的武器，只能棄守撤離。';
+    return i.update({content:`🚨 <@${raid.userId}> 已返回藏身處。`,embeds:[hideoutRaidEmbed(raid,notice)],components:hideoutRaidRows(token,raid)});
+  }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('hideout_raid_weapon:')&&i.guildId) {
+    const token=i.customId.split(':')[1],raid=activeHideoutRaids.get(token),weaponId=i.values[0];
+    if(!raid||raid.resolved||raid.guildId!==i.guildId) return i.reply({content:'⚠️ 這次警察攻堅已經結束。',ephemeral:true});
+    if(i.user.id!==raid.userId) return i.reply({content:'⚠️ 只有藏身處主人可以選擇反擊武器。',ephemeral:true});
+    if(!ownedHideoutRaidWeapons(raid.guildId,raid.userId).some(entry=>entry.weaponId===weaponId)) return i.reply({content:'⚠️ 你沒有這把武器，或對應彈藥已用完。',ephemeral:true});
+    raid.weaponId=weaponId;
+    return i.update({embeds:[hideoutRaidEmbed(raid,'武器已就緒，按下「反擊警察」開始交火。')],components:hideoutRaidRows(token,raid)});
+  }
+  if(i.isButton()&&i.customId.startsWith('hideout_raid_fight:')&&i.guildId) {
+    const token=i.customId.split(':')[1],raid=activeHideoutRaids.get(token);
+    if(!raid||raid.resolved||raid.guildId!==i.guildId) return i.reply({content:'⚠️ 這次警察攻堅已經結束。',ephemeral:true});
+    if(i.user.id!==raid.userId) return i.reply({content:'⚠️ 只有藏身處主人可以反擊。',ephemeral:true});
+    const selected=ownedHideoutRaidWeapons(raid.guildId,raid.userId).find(entry=>entry.weaponId===raid.weaponId);
+    if(!raid.returned||!selected) return i.reply({content:'⚠️ 請先返回藏身處並選擇持有且備有彈藥的武器。',ephemeral:true});
+    const remaining=assetQuantity(raid.guildId,raid.userId,selected.weapon.ammoId)-1;
+    setAssetQuantity(raid.guildId,raid.userId,selected.weapon.ammoId,remaining);
+    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+      .run(raid.guildId,raid.userId,0,balance(raid.guildId,raid.userId),'hideout_raid_ammo',raid.userId,`${selected.weapon.name} 反擊警察消耗 ${assetCatalog[selected.weapon.ammoId].name} x1｜剩餘 ${remaining}`);
+    const successChance=Math.min(95,45+selected.weapon.robber*5+raid.securityLevel*5),success=Math.random()*100<successChance;
+    raid.resolved=true;
+    activeHideoutRaids.delete(token);
+    if(success) {
+      return i.update({content:`✅ <@${raid.userId}> 成功守住藏身處！`,embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔫 藏身處反擊成功').setDescription(
+        `<@${raid.userId}> 使用 **${selected.weapon.name}** 擊退攻堅警察！\n\n反擊成功率：**${successChance}%**\n保全系統：**Lv.${raid.securityLevel}**\n彈藥消耗：**${assetCatalog[selected.weapon.ammoId].name} ×1**\n\n藏身處、房產與所有展示資產均安全無損。`
+      )],components:[]});
+    }
+    const result=applyHideoutRaidLoss(raid,`使用 ${selected.weapon.name} 反擊失敗。`);
+    return i.update({content:`🚔 <@${raid.userId}> 反擊失敗。`,embeds:[hideoutRaidLossEmbed(raid,result,`使用 **${selected.weapon.name}** 交火後遭到警方壓制。反擊成功率為 **${successChance}%**。`)],components:[]});
+  }
+  if(i.isButton()&&i.customId.startsWith('hideout_raid_abandon:')&&i.guildId) {
+    const token=i.customId.split(':')[1],raid=activeHideoutRaids.get(token);
+    if(!raid||raid.resolved||raid.guildId!==i.guildId) return i.reply({content:'⚠️ 這次警察攻堅已經結束。',ephemeral:true});
+    if(i.user.id!==raid.userId) return i.reply({content:'⚠️ 只有藏身處主人可以做出決定。',ephemeral:true});
+    raid.resolved=true;
+    activeHideoutRaids.delete(token);
+    const result=applyHideoutRaidLoss(raid,'選擇棄守藏身處，警方在撤離途中逮捕玩家。');
+    return i.update({content:`🚔 <@${raid.userId}> 選擇棄守藏身處。`,embeds:[hideoutRaidLossEmbed(raid,result,'選擇棄守藏身處，警方在撤離途中逮捕玩家。')],components:[]});
+  }
   if(i.isButton()&&i.customId.startsWith('vehicle_mod_open:')&&i.guildId) {
     const [,ownerId,assetId]=i.customId.split(':');
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有車主可以改裝這輛車。',ephemeral:true});
-    const asset=assetCatalog[assetId],owned=db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(i.guildId,ownerId,assetId)?.quantity||0;
+    const asset=assetCatalog[assetId],owned=assetQuantity(i.guildId,ownerId,assetId);
     if(!owned||!asset||!modifiableVehicleCategories.has(asset.category)) return i.reply({content:'⚠️ 這輛車已不在你的車庫，或不支援改裝。',ephemeral:true});
     const token=Math.random().toString(36).slice(2,10),session={guildId:i.guildId,userId:ownerId,assetId,category:null,pending:null};
     vehicleModSessions.set(token,session); setTimeout(()=>vehicleModSessions.delete(token),10*60*1000);
     await i.deferUpdate();
-    return i.editReply({...await vehicleModPayload(i.guildId,ownerId,assetId),components:vehicleModComponents(token,session),attachments:[]});
+    const payload=includeVehicleModTutorial(await vehicleModPayload(i.guildId,ownerId,assetId),i.guildId,ownerId);
+    return i.editReply({...payload,components:vehicleModComponents(token,session),attachments:[]});
   }
   if(i.isStringSelectMenu()&&i.customId.startsWith('vehicle_mod_vehicle:')&&i.guildId) {
     const token=i.customId.split(':')[1],session=vehicleModSessions.get(token);
@@ -2477,9 +4706,9 @@ client.on('interactionCreate', async i => {
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('car_blindbox_catalog:')) {
     const packId=i.customId.split(':')[1]||'standard',pack=blindBoxPacks[packId],assetId=i.values[0],asset=assetCatalog[assetId];
-    if(!pack||!pack.ids.includes(assetId)||!asset?.blindBox) return i.reply({content:'⚠️ 找不到這輛盲盒車款。',ephemeral:true});
-    const hidden=packId==='standard'&&blindBoxHiddenIds.includes(assetId),chance=blindBoxChanceLabel(assetId,packId);
-    const embed=new EmbedBuilder().setColor(hidden?0xFFD700:0x5865F2).setTitle(asset.name).setDescription(`稀有度：**${asset.rarity}**\n取得機率：**${chance}**\n參考價值：**${fmt(asset.price)}**\n資產增益：**${assetBuffLabel(assetId,asset.buff)}**\n${assetBuffDescription(assetId,asset.buff)}\n\n${asset.description}`);
+    if(!pack||!pack.ids.includes(assetId)||!asset) return i.reply({content:'⚠️ 找不到這輛汽車盲盒車款。',ephemeral:true});
+    const hidden=blindBoxPackHiddenIds(packId).includes(assetId),chance=blindBoxChanceLabel(assetId,packId);
+    const embed=new EmbedBuilder().setColor(hidden?0xFFD700:pack.color).setTitle(asset.name).setDescription(`所屬盲盒：**${pack.name}**\n稀有度：**${asset.rarity}**\n取得機率：**${chance}**\n參考價值：**${fmt(asset.price)}**\n資產增益：**${assetBuffLabel(assetId,asset.buff)}**\n${assetBuffDescription(assetId,asset.buff)}\n\n${asset.description}`);
     return i.update({...assetMediaPayload(embed,assetId,asset),components:[carBlindBoxCatalogRow(packId,assetId)],attachments:[]});
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('asset_shop_category:') && i.guildId) {
@@ -2488,27 +4717,39 @@ client.on('interactionCreate', async i => {
     if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以操作這組選單。',ephemeral:true});
     if(!assetShopCategories[categoryKey]) return i.reply({content:'⚠️ 找不到這個資產分類。',ephemeral:true});
     session.categoryKey=categoryKey;
+    session.sectionKey=null;
     session.page=0;
     session.assetId=null;
     return i.update({embeds:[assetShopOverviewEmbed(categoryKey,0)],components:assetShopComponents(token,categoryKey,0),attachments:[]});
+  }
+  if(i.isStringSelectMenu() && i.customId.startsWith('asset_shop_armory_section:') && i.guildId) {
+    const token=i.customId.split(':')[1],session=assetShopSessions.get(token),sectionKey=i.values[0];
+    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/購買資產`。',ephemeral:true});
+    if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以操作這組選單。',ephemeral:true});
+    if(session.categoryKey!=='armory'||!armoryShopSections[sectionKey]) return i.reply({content:'⚠️ 找不到這個武器商城分類。',ephemeral:true});
+    session.sectionKey=sectionKey;
+    session.page=0;
+    session.assetId=null;
+    return i.update({embeds:[assetShopOverviewEmbed('armory',0,sectionKey)],components:assetShopComponents(token,'armory',0,null,null,sectionKey),attachments:[]});
   }
   if(i.isButton() && i.customId.startsWith('asset_shop_page:') && i.guildId) {
     const [,token,categoryKey,pageText]=i.customId.split(':'),session=assetShopSessions.get(token);
     if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/購買資產`。',ephemeral:true});
     if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以操作這組按鈕。',ephemeral:true});
     if(!assetShopCategories[categoryKey]) return i.reply({content:'⚠️ 找不到這個資產分類。',ephemeral:true});
-    const info=assetShopPageInfo(categoryKey,Number(pageText));
+    const sectionKey=categoryKey==='armory'?session.sectionKey:null;
+    const info=assetShopPageInfo(categoryKey,Number(pageText),sectionKey);
     session.categoryKey=categoryKey;
     session.page=info.page;
     session.assetId=null;
-    return i.update({embeds:[assetShopOverviewEmbed(categoryKey,info.page)],components:assetShopComponents(token,categoryKey,info.page),attachments:[]});
+    return i.update({embeds:[assetShopOverviewEmbed(categoryKey,info.page,sectionKey)],components:assetShopComponents(token,categoryKey,info.page,null,null,sectionKey),attachments:[]});
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('asset_shop_product:') && i.guildId) {
     const [,token,pageText]=i.customId.split(':'),session=assetShopSessions.get(token),assetId=i.values[0],asset=assetCatalog[assetId];
     if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/購買資產`。',ephemeral:true});
     if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以選擇商品。',ephemeral:true});
-    const categoryKey=session.categoryKey,page=assetShopPageInfo(session.categoryKey,Number(pageText)).page;
-    if(!asset||asset.forSale===false||!assetShopEntries(categoryKey).some(([id])=>id===assetId)) return i.reply({content:'⚠️ 這項資產目前無法在此分類購買。',ephemeral:true});
+    const categoryKey=session.categoryKey,sectionKey=categoryKey==='armory'?session.sectionKey:null,page=assetShopPageInfo(session.categoryKey,Number(pageText),sectionKey).page;
+    if(!asset||!assetIsForSale(asset)||!assetShopEntries(categoryKey,sectionKey).some(([id])=>id===assetId)) return i.reply({content:'⚠️ 這項資產目前無法在此分類購買，可能已經結束限時販售。',ephemeral:true});
     session.page=page;
     session.assetId=assetId;
     const purchaseToken=Math.random().toString(36).slice(2,10);
@@ -2519,14 +4760,34 @@ client.on('interactionCreate', async i => {
       const embed=new EmbedBuilder().setColor(0x5865F2).setTitle('🔑 選擇 24 小時日租套房').setDescription(`${options}\n\n請使用房型下拉選單選擇；房型圖片會立即顯示，確認後才會扣款。`);
       return i.update({...assetMediaPayload(embed,assetId,asset),components:[assetShopCategoryRow(token,categoryKey),rentalSuiteSelectRow(purchaseToken)],attachments:[]});
     }
-    assetPurchaseOffers.set(purchaseToken,{guildId:i.guildId,userId:i.user.id,assetId,quantity:1,processing:false});
+    assetPurchaseOffers.set(purchaseToken,{guildId:i.guildId,userId:i.user.id,assetId,quantity:1,ammoBoxes:asset.category==='武器'?1:0,shopToken:token,categoryKey,sectionKey,page,processing:false});
     setTimeout(()=>assetPurchaseOffers.delete(purchaseToken),5*60*1000);
-    const owned=db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(i.guildId,i.user.id,assetId)?.quantity||0;
-    const buffId=owned?ensureAssetBuff(i.guildId,i.user.id,assetId):asset.buff||null;
-    const buffPreview=buffId?`**${assetBuffLabel(assetId,buffId)}**\n${assetBuffDescription(assetId,buffId)}`:'購買完成後隨機抽取一項永久增益。';
-    const hasImage=Boolean(asset.image||asset.images?.length);
-    const embed=new EmbedBuilder().setColor(0xF5B942).setTitle(`🔑 ${asset.name}`).setDescription(`分類：**${assetShopCategoryLabel(categoryKey)}**\n稀有度：**${asset.rarity||'一般'}**\n單價：**${fmt(asset.price)}**\n數量：**1**\n總價：**${fmt(asset.price)}**\n目前金庫：**${fmt(balance(i.guildId,i.user.id))}**\n\n${asset.description}\n\n🎲 資產增益\n${buffPreview}\n\n${hasImage?'圖片已即時顯示於下方。':'🖼️ 此資產尚未配置圖片素材。'}確認後才會扣款；本次確認於 **5 分鐘**後失效。`);
-    return i.update({...assetMediaPayload(embed,assetId,asset),components:assetShopComponents(token,categoryKey,page,assetId,purchaseToken),attachments:[]});
+    const embed=assetPurchasePreviewEmbed(i.guildId,i.user.id,assetId,categoryKey,1);
+    return i.update({...assetMediaPayload(embed,assetId,asset),components:assetShopComponents(token,categoryKey,page,assetId,purchaseToken,sectionKey),attachments:[]});
+  }
+  if(i.isStringSelectMenu() && i.customId.startsWith('asset_purchase_ammo:') && i.guildId) {
+    const purchaseToken=i.customId.split(':')[1],offer=assetPurchaseOffers.get(purchaseToken);
+    if(!offer||offer.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產購買確認已失效，請重新使用 `/購買資產`。',ephemeral:true});
+    if(i.user.id!==offer.userId) return i.reply({content:'⚠️ 只有發起購買的玩家可以選擇彈藥數量。',ephemeral:true});
+    const asset=assetCatalog[offer.assetId],ammoBoxes=Number(i.values[0]);
+    if(asset?.category!=='武器'||![1,5,10,20,50].includes(ammoBoxes)) return i.reply({content:'⚠️ 無效的彈藥箱數量。',ephemeral:true});
+    offer.ammoBoxes=ammoBoxes;
+    const embed=assetPurchasePreviewEmbed(i.guildId,i.user.id,offer.assetId,offer.categoryKey,ammoBoxes);
+    const existingImage=i.message.embeds[0]?.data?.image?.url;
+    if(existingImage) embed.setImage(existingImage);
+    return i.update({embeds:[embed],components:assetShopComponents(offer.shopToken,offer.categoryKey,offer.page,offer.assetId,purchaseToken,offer.sectionKey)});
+  }
+  if(i.isStringSelectMenu() && i.customId.startsWith('asset_purchase_quantity:') && i.guildId) {
+    const purchaseToken=i.customId.split(':')[1],offer=assetPurchaseOffers.get(purchaseToken);
+    if(!offer||offer.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產購買確認已失效，請重新使用 `/購買資產`。',ephemeral:true});
+    if(i.user.id!==offer.userId) return i.reply({content:'⚠️ 只有發起購買的玩家可以選擇購買數量。',ephemeral:true});
+    const asset=assetCatalog[offer.assetId],quantity=Number(i.values[0]);
+    if(asset?.category!=='彈藥'||![1,5,10,20,50].includes(quantity)) return i.reply({content:'⚠️ 無效的彈藥箱數量。',ephemeral:true});
+    offer.quantity=quantity;
+    const embed=assetPurchasePreviewEmbed(i.guildId,i.user.id,offer.assetId,offer.categoryKey,1,quantity);
+    const existingImage=i.message.embeds[0]?.data?.image?.url;
+    if(existingImage) embed.setImage(existingImage);
+    return i.update({embeds:[embed],components:assetShopComponents(offer.shopToken,offer.categoryKey,offer.page,offer.assetId,purchaseToken,offer.sectionKey)});
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('rental_suite_select:') && i.guildId) {
     const token=i.customId.split(':')[1],offer=assetPurchaseOffers.get(token);
@@ -2562,11 +4823,17 @@ client.on('interactionCreate', async i => {
     if(offer.processing) return i.reply({content:'⏳ 這筆購買正在處理中。',ephemeral:true});
     offer.processing=true;
     try {
-      const result=buyAsset(i.guildId,i.user.id,offer.assetId,offer.quantity),buff=assetBuffs[result.buffId];
+      const result=buyAsset(i.guildId,i.user.id,offer.assetId,offer.quantity,offer.ammoBoxes||1),buff=assetBuffs[result.buffId];
       assetPurchaseOffers.delete(token);
+      const includedAmmo=result.includedAmmoId?assetCatalog[result.includedAmmoId]:null;
+      const includedAmmoText=includedAmmo
+        ? `\n🎁 隨槍彈藥：**${includedAmmo.name} × ${result.includedAmmoQuantity}**\n首箱免費｜額外加購：**${result.extraAmmoQuantity} 箱（${fmt(result.ammoCost)}）**\n目前彈藥庫存：**${assetQuantity(i.guildId,i.user.id,result.includedAmmoId)}**`
+        : '';
       const ownership=result.temporary
         ? `🎲 本次入住效果：**${assetBuffLabel(offer.assetId,result.buffId)}**\n${assetBuffDescription(offer.assetId,result.buffId)}\n\n⏳ 使用期限：<t:${Math.floor(result.expiresAt/1000)}:F>（<t:${Math.floor(result.expiresAt/1000)}:R>）\n此為 **24 小時租用**，到期後自動失效，不會成為永久房產。`
-        : `🎲 永久增益：**${assetBuffLabel(offer.assetId,result.buffId)}**\n${assetBuffDescription(offer.assetId,result.buffId)}\n\n資產已登記在你的名下。`;
+        : asset.combatItem
+          ? `🔫 **${assetBuffs.combat.name}**\n${asset.category==='武器'?'武器已永久登記在你的軍械庫中，不會因行動而消失。':'彈藥已加入庫存，搶劫行動時會自動消耗對應彈藥箱。'}\n目前持有：**${assetQuantity(i.guildId,i.user.id,offer.assetId)}**${includedAmmoText}`
+          : `🎲 永久增益：**${assetBuffLabel(offer.assetId,result.buffId)}**\n${assetBuffDescription(offer.assetId,result.buffId)}\n\n資產已登記在你的名下。`;
       const embed=new EmbedBuilder().setColor(0x35C46A).setTitle(result.temporary?'🔑 房產租用完成':'🔑 資產購買完成').setDescription(`${displayName} × **${offer.quantity}**\n分類：${asset.category}\n稀有度：${asset.rarity||'一般'}\n支付：**${fmt(result.total)}**\n金庫：${fmt(result.next)}\n\n${ownership}\n\n⏳ 此訊息將在 **1 分鐘後**自動刪除。`);
       await i.update({embeds:[embed],components:[],attachments:[],files:[]});
       setTimeout(()=>i.message.delete().catch(()=>{}),60*1000);
@@ -2574,6 +4841,29 @@ client.on('interactionCreate', async i => {
     } catch(error) {
       offer.processing=false;
       return i.reply({content:`⚠️ 購買失敗：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton() && i.customId.startsWith('vehicle_recycle_') && i.guildId) {
+    const [action,token]=i.customId.split(':'),offer=vehicleRecycleOffers.get(token);
+    if(!offer||offer.guildId!==i.guildId) return i.reply({content:'⚠️ 這次回收確認已失效，請重新使用 `/回收廠`。',ephemeral:true});
+    if(i.user.id!==offer.userId) return i.reply({content:'⚠️ 只有發起回收的玩家可以操作。',ephemeral:true});
+    const asset=assetCatalog[offer.assetId];
+    if(action==='vehicle_recycle_cancel') {
+      vehicleRecycleOffers.delete(token);
+      return i.update({embeds:[new EmbedBuilder().setColor(0x607D8B).setTitle('♻️ 已取消載具回收').setDescription(`${asset.name} × **${offer.quantity}**\n載具與增益均未變動。`)],components:[],attachments:[],files:[]});
+    }
+    if(offer.processing) return i.reply({content:'⏳ 這輛載具正在回收處理中。',ephemeral:true});
+    offer.processing=true;
+    try {
+      const result=recycleVehicleAsset(i.guildId,i.user.id,offer.assetId,offer.quantity);
+      vehicleRecycleOffers.delete(token);
+      const embed=new EmbedBuilder().setColor(0x35C46A).setTitle('🏭 載具已壓成廢鐵').setDescription(`回收載具：**${asset.name} × ${result.quantity}**\n返還比例：**原價 30%**\n獲得金幣：**${fmt(result.reward)}**\n剩餘數量：**${result.remaining}**\n金庫：**${fmt(result.next)}**\n\n若已回收最後一輛，同款載具的永久增益與改裝資料也已移除。`);
+      await i.update({embeds:[embed],components:[],attachments:[],files:[]});
+      scheduleDiscordMessageDeletion(i.message);
+      return;
+    } catch(error) {
+      offer.processing=false;
+      return i.reply({content:`⚠️ 回收失敗：${error.message}`,ephemeral:true});
     }
   }
   if(i.isButton() && i.customId.startsWith('asset_trade_') && i.guildId) {
@@ -2623,7 +4913,7 @@ client.on('interactionCreate', async i => {
       return i.update({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🚪 射龍門｜選擇不射').setDescription(`門牌：**${cardText(game.a)}｜${cardText(game.b)}**\n你判斷風險太高，本局退回 ${fmt(game.bet)}。\n金庫：${fmt(balance(i.guildId,i.user.id))}`)],components:[]});
     }
     const shot=drawCard(),inside=shot.rank>game.a.rank&&shot.rank<game.b.rank,post=shot.rank===game.a.rank||shot.rank===game.b.rank;
-    const payout=inside?game.bet*2:0,settlement=settleGamePayout(i.guildId,i.user.id,game.bet,payout,'射龍門');
+    const payout=inside?game.bet*2:0,settlement=settleGamePayout(i.guildId,i.user.id,game.bet,payout,'射龍門',{allIn:game.allIn});
     const awarded=inside;
     const text=inside?'🎯 射中龍門！':post?'💥 撞柱！下注全失。':'❌ 沒有射中。';
     return i.update({embeds:[new EmbedBuilder().setColor(awarded?0x35C46A:0xD94A4A).setTitle('🚪 射龍門｜開出射牌').setDescription(`門牌：**${cardText(game.a)}｜${cardText(game.b)}**\n射牌：**${cardText(shot)}**\n\n${text}\n結算：${awarded?`獲得 ${fmt(settlement.credited)}`:`損失 ${fmt(game.bet)}`}${titleLuckNotice(settlement)}\n金庫：${fmt(balance(i.guildId,i.user.id))}`)],components:[]});
@@ -2647,9 +4937,43 @@ client.on('interactionCreate', async i => {
     for(const id of members) db.prepare('UPDATE jail SET release_at=release_at+120000 WHERE guild_id=? AND user_id=?').run(i.guildId,id);
     return i.update({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🚨 小黑屋暴動失敗！').setDescription(`迷子帶著猛博美鎮壓現場，參與者刑期全部增加 **2 分鐘**。\n\n成功率：${chance}%\n參與人數：${members.length}`).setImage(jailRiotImageUrl)],components:[riotRow(token,true)]});
   }
+  if(i.isStringSelectMenu() && i.customId.startsWith('mahjong_discard:') && i.guildId) {
+    const token=i.customId.split(':')[1],game=mahjongRooms.get(token);
+    if(!game||!['discard','claim'].includes(game.state)) return i.reply({content:'⚠️ 這局麻將已經結束或失效。',ephemeral:true});
+    const currentId=game.players[game.turnIndex];
+    if(game.state!=='discard') return i.reply({content:'⚠️ 現在正在等待其他玩家決定是否吃、碰、槓或胡。',ephemeral:true});
+    if(i.user.id!==currentId) return i.reply({content:`⚠️ 現在輪到 ${mahjongPlayerLabel(currentId)} 出牌。`,ephemeral:true});
+    const index=Number(i.values[0]);
+    try { mahjongDiscard(game,currentId,index); }
+    catch(error) { return i.reply({content:`⚠️ ${error.message}`,ephemeral:true}); }
+    return i.update({embeds:[mahjongGameEmbed(game,`✅ ${mahjongPlayerLabel(currentId)} 打出 **${game.lastDiscard.tile}**。`)],components:mahjongGameRows(token,game)});
+  }
+  if(i.isButton() && (i.customId.startsWith('mahjong_claim:')||i.customId.startsWith('mahjong_self_hu:')) && i.guildId) {
+    const [kind,gameToken,claimAction]=i.customId.split(':'),action=kind==='mahjong_self_hu'?'self_hu':claimAction,game=mahjongRooms.get(gameToken);
+    if(!game||!['discard','claim'].includes(game.state)) return i.reply({content:'⚠️ 這局麻將已經結束或失效。',ephemeral:true});
+    const finish=(winnerId,method)=>{const embed=settleMahjongGame(game,winnerId,method);mahjongRooms.delete(gameToken);return i.update({embeds:[embed],components:mahjongGameRows(gameToken,game,true)});};
+    if(action==='self_hu') {
+      const currentId=game.players[game.turnIndex];
+      if(game.state!=='discard'||i.user.id!==currentId) return i.reply({content:'⚠️ 只有輪到自己出牌且已湊成牌型時，才能自摸。',ephemeral:true});
+      if(!taiwanMahjongWin(game.hands.get(currentId),game.melds.get(currentId))) return i.reply({content:'⚠️ 目前尚未構成台式 16 張胡牌牌型。',ephemeral:true});
+      return finish(currentId,'自摸');
+    }
+    if(game.state!=='claim') return i.reply({content:'⚠️ 現在沒有可叫的牌。',ephemeral:true});
+    if(action==='pass') {
+      const next=advanceMahjongTurn(game);
+      if(next.finished) return finish(next.winnerId||null,next.method||'流局');
+      return i.update({embeds:[mahjongGameEmbed(game,'⏭️ 全員過，進入下一家回合。')],components:mahjongGameRows(gameToken,game)});
+    }
+    try {
+      const result=applyMahjongClaim(game,i.user.id,action);
+      if(result.winnerId) return finish(result.winnerId,result.method);
+      if(result.finished) return finish(null,'流局');
+      return i.update({embeds:[mahjongGameEmbed(game,`✅ ${mahjongPlayerLabel(i.user.id)} ${action==='pong'?'碰牌':action==='kong'?'槓牌':'吃牌'}，請繼續出牌。`)],components:mahjongGameRows(gameToken,game)});
+    } catch(error) { return i.reply({content:`⚠️ ${error.message}`,ephemeral:true}); }
+  }
   if(i.isButton() && i.customId.startsWith('mahjong_') && i.guildId) {
     const [action,token]=i.customId.split(':'),room=mahjongRooms.get(token);
-    if(!room) return i.reply({content:'⚠️ 這張麻將桌已經關閉。',ephemeral:true});
+    if(!room||room.state!=='lobby') return i.reply({content:'⚠️ 這張麻將桌已經開始或關閉。',ephemeral:true});
     if(action==='mahjong_join') {
       if(room.players.includes(i.user.id)) return i.reply({content:'⚠️ 你已經在牌桌上。',ephemeral:true});
       if(room.players.length>=4) return i.reply({content:'⚠️ 牌桌已滿。',ephemeral:true});
@@ -2658,16 +4982,16 @@ client.on('interactionCreate', async i => {
       room.players.push(i.user.id);
       return i.reply({content:`🪑 你已入座（${room.players.length}/4）。`,ephemeral:true});
     }
+    if(action!=='mahjong_start') return i.reply({content:'⚠️ 找不到這個麻將操作。',ephemeral:true});
     if(i.user.id!==room.ownerId) return i.reply({content:'⚠️ 只有開桌玩家能開始對局。',ephemeral:true});
     if(room.players.length<2) return i.reply({content:'⚠️ 至少需要 2 位玩家才能開始。',ephemeral:true});
     for(const id of room.players) {
-      if(balance(i.guildId,id)<room.bet||stamina(i.guildId,id)<staminaCost(i.guildId,id,10)||jailRemaining(i.guildId,id)) return i.reply({content:`⚠️ <@${id}> 的狀態、金幣或體力不符合開局條件。`,ephemeral:true});
+      if(balance(i.guildId,id)<room.bet||stamina(i.guildId,id)<staminaCost(i.guildId,id,10)||jailRemaining(i.guildId,id)||hospitalRemaining(i.guildId,id)) return i.reply({content:`⚠️ <@${id}> 的狀態、金幣或體力不符合開局條件。`,ephemeral:true});
     }
-    mahjongRooms.delete(token);
     room.players.forEach(id=>{consumeStamina(i.guildId,id,10);changeBalance(i.guildId,id,-room.bet,'bet',id,'多人麻將下注');});
-    const results=room.players.map(id=>{const hand=drawMahjongHand();return {id,hand,score:mahjongScore(hand)};}).sort((a,b)=>b.score-a.score);
-    const winner=results[0],pot=Math.floor(room.bet*room.players.length*weeklyMahjongMultiplier()),before=balance(i.guildId,winner.id),after=changeBalance(i.guildId,winner.id,pot,'payout',winner.id,'多人麻將獲勝');
-    return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🀄 多人麻將｜開獎').setDescription(`${results.map((r,n)=>`${n===0?'👑':'　'} <@${r.id}>｜牌力 **${r.score}**\n${r.hand.join('')}`).join('\n\n')}\n\n獲勝者：<@${winner.id}>\n獎池入帳：**${fmt(after-before)}**${taipeiWeekday()===6?'（週六 ×1.5）':''}`)],components:[mahjongRoomRow(token,true)]});
+    Object.assign(room,createMahjongGame(i.guildId,room.ownerId,room.players,room.bet,'multi'));
+    setTimeout(()=>{if(mahjongRooms.get(token)===room&&['discard','claim'].includes(room.state)) mahjongRooms.delete(token);},30*60*1000);
+    return i.update({embeds:[mahjongGameEmbed(room,'莊家 17 張先出牌；其他座位（不足四人由電腦補位）摸 1 打 1。')],components:mahjongGameRows(token,room)});
   }
   if(i.isButton() && (i.customId.startsWith('team_join:')||i.customId.startsWith('team_decline:')) && i.guildId) {
     const [action,token]=i.customId.split(':'), invite=teamInvites.get(token);
@@ -2696,15 +5020,35 @@ client.on('interactionCreate', async i => {
     const name=selectedHeistVehicleName(heist),bonus=selectedHeistVehicleBonus(heist);
     return i.reply({content:`✅ 本次逃跑載具已設定為 **${name}**，實際搶劫成功率加成 **+${bonus}%**。${heist.vehicleId?'載具必須保留到任務執行時；若先行出售，將自動改用預設接應車。':'本次不套用私人載具增益。'}`,ephemeral:true});
   }
+  if(i.isStringSelectMenu() && i.customId.startsWith('heist_weapon_category:') && i.guildId) {
+    const token=i.customId.split(':')[1],heist=activeHeists.get(token),sectionKey=i.values[0],section=heistWeaponSections[sectionKey];
+    if(!heist||heist.lobbyClosed) return i.reply({content:'⚠️ 這次搶劫的裝備階段已結束。',ephemeral:true});
+    if(!heist.members.includes(i.user.id)&&!heist.police.has(i.user.id)) return i.reply({content:'⚠️ 你尚未加入本次劫匪或警方陣營。',ephemeral:true});
+    if(!section) return i.reply({content:'⚠️ 找不到這個武器分類。',ephemeral:true});
+    const weaponRow=heistWeaponSelectionRow(token,sectionKey,i.guildId,i.user.id);
+    if(!weaponRow) return i.reply({
+      content:`⚠️ 你的軍械庫目前沒有 **${section.label}**。\n請先使用 \`/購買資產\`，到「武器與彈藥」分類購買槍枝。`,
+      ephemeral:true
+    });
+    return i.reply({
+      content:`${section.emoji} 以下只顯示你已擁有的 **${section.label}**；沒有彈藥的槍枝仍會顯示，但必須補充彈藥後才能裝備：`,
+      components:[weaponRow],
+      ephemeral:true
+    });
+  }
   if(i.isStringSelectMenu() && i.customId.startsWith('heist_weapon:') && i.guildId) {
     const token=i.customId.split(':')[1],heist=activeHeists.get(token),weapon=i.values[0];
     if(!heist||heist.lobbyClosed) return i.reply({content:'⚠️ 這次搶劫的裝備階段已結束。',ephemeral:true});
-    if(!heistWeapons[weapon]) return i.reply({content:'⚠️ 找不到這項槍枝。',ephemeral:true});
+    const definition=heistWeapons[weapon];
+    if(!definition) return i.reply({content:'⚠️ 找不到這項槍枝。',ephemeral:true});
+    if(assetQuantity(i.guildId,i.user.id,definition.assetId)<1) return i.reply({content:`⚠️ 你尚未持有 ${definition.name}。請先使用 \`/購買資產\`，到「武器與彈藥」分類購買。`,ephemeral:true});
+    const ammo=assetQuantity(i.guildId,i.user.id,definition.ammoId);
+    if(ammo<1) return i.reply({content:`⚠️ 你沒有 ${assetCatalog[definition.ammoId].name}。請先到資產商城補充彈藥。`,ephemeral:true});
     if(heist.members.includes(i.user.id)) heist.weapons.set(i.user.id,weapon);
     else if(heist.police.has(i.user.id)) heist.policeWeapons.set(i.user.id,weapon);
     else return i.reply({content:'⚠️ 你尚未加入本次劫匪或警方陣營。',ephemeral:true});
     const side=heist.members.includes(i.user.id)?'劫匪':'警方';
-    return i.reply({content:`✅ 你以 **${side}**身分選擇 ${heistWeapons[weapon].name}。行動開始時將收取 **${fmt(heistWeapons[weapon].price)}** 槍枝費並直接銷毀；準備結束前可重新選擇。`,ephemeral:true});
+    return i.reply({content:`✅ 你以 **${side}**身分裝備 ${definition.name}。\n對應彈藥庫存：**${ammo} 箱**｜行動開始時消耗 **1 箱**；武器本身不會消失。準備結束前可重新選擇。`,ephemeral:true});
   }
   if(i.isButton() && i.customId.startsWith('heist_informant:') && i.guildId) {
     const [,token,choice]=i.customId.split(':'),heist=activeHeists.get(token);
@@ -2718,7 +5062,7 @@ client.on('interactionCreate', async i => {
     const accepted=choice==='yes';
     heist.informantChoices.set(i.user.id,accepted);
     if(accepted) heist.informants.add(i.user.id); else heist.informants.delete(i.user.id);
-    return i.reply({content:accepted?'🕵️ 你已秘密答應成為警方線人。你的身分不會在行動前公開，若警方成功阻止搶劫可獲秘密獎金。':'🤐 你拒絕了警方招募，決定忠於劫匪隊伍。',ephemeral:true});
+    return i.reply({content:accepted?`🕵️ 你已秘密答應成為警方線人。你的身分不會在行動前公開；若警方成功阻止搶劫，你不會入獄，並可獲得 **${fmt(TEAM_HEIST_INFORMANT_REWARD)}** 警方秘密獎金。`:'🤐 你拒絕了警方招募，決定忠於劫匪隊伍。',ephemeral:true});
   }
   if(i.isButton() && i.customId.startsWith('heist_scout:') && i.guildId) {
     const token=i.customId.split(':')[1],heist=activeHeists.get(token);
@@ -2736,7 +5080,7 @@ client.on('interactionCreate', async i => {
       {name:'📦 預估總獎池',value:fmt(estimate),inline:true},
       {name:'🗺️ 目標',value:`${bank.name}\n${map.name}`,inline:false}
     );
-    return i.reply({...heistScenePayload(embed,vault.scene),ephemeral:alreadyScouted});
+    return i.reply({...heistScenePayload(embed,heist.bankId==='central_museum'?heist.museumScene:vault.scene),ephemeral:alreadyScouted});
   }
   if(i.isButton() && i.customId.startsWith('heist_status:') && i.guildId) {
     const token=i.customId.split(':')[1],heist=activeHeists.get(token);
@@ -2748,12 +5092,25 @@ client.on('interactionCreate', async i => {
     const token=i.customId.split(':')[1],heist=activeHeists.get(token);
     if(!heist||heist.lobbyClosed) return i.reply({content:'⚠️ 本次警方招募已結束。',ephemeral:true});
     if(heist.members.includes(i.user.id)) return i.reply({content:'⚠️ 劫匪隊伍成員只能選擇是否成為秘密線人，不能公開加入警方。',ephemeral:true});
-    if(heist.police.has(i.user.id)) return i.reply({content:'⚠️ 你已加入本次警方陣營，請使用槍枝選單挑選裝備。',ephemeral:true});
+    if(heist.police.has(i.user.id)) return i.reply({content:'⚠️ 你已加入本次警方陣營，請完成槍枝、行動、戰術與追捕載具選擇。',ephemeral:true});
     if(heist.police.size>=8) return i.reply({content:'⚠️ 警方陣營已滿（最多 8 人）。',ephemeral:true});
     if(jailRemaining(i.guildId,i.user.id)||hospitalRemaining(i.guildId,i.user.id)) return i.reply({content:'⚠️ 你目前無法參與警方行動。',ephemeral:true});
     if(stamina(i.guildId,i.user.id)<staminaCost(i.guildId,i.user.id,10)) return i.reply({content:'⚠️ 加入警方需要至少 10 點體力。',ephemeral:true});
     heist.police.add(i.user.id);
-    return i.reply({content:'🚓 你已加入警方陣營！請在上方選擇槍枝，再選擇「正面對抗劫匪」或「呼叫增援」確認參戰。你的行動會提高警方阻止搶劫的機率。',ephemeral:true});
+    return i.reply({content:'🚓 你已加入警方陣營！請選擇槍枝、警方行動、秘密部署戰術與追捕載具。四項都完成後才算準備完成。',ephemeral:true});
+  }
+  if(i.isButton() && i.customId.startsWith('heist_police_tactic_menu:') && i.guildId) {
+    const token=i.customId.split(':')[1],heist=activeHeists.get(token);
+    if(!heist||heist.lobbyClosed) return i.reply({content:'⚠️ 本次警方戰術部署已結束。',ephemeral:true});
+    if(!heist.police.has(i.user.id)) return i.reply({content:'⚠️ 請先加入警方陣營，才能部署警方戰術。',ephemeral:true});
+    return i.reply({
+      content:'🗺️ 請秘密選擇本次警方戰術與追捕載具。劫匪在鎖定逃跑路線前不會知道你的部署。',
+      components:[
+        heistPoliceTacticRow(token,heist.policeTactics.get(i.user.id)),
+        heistPoliceVehicleRow(token,heist.policeVehicles.get(i.user.id))
+      ],
+      ephemeral:true
+    });
   }
   if(i.isButton() && i.customId.startsWith('heist_police_action:') && i.guildId) {
     const [,token,action]=i.customId.split(':'),heist=activeHeists.get(token);
@@ -2761,7 +5118,37 @@ client.on('interactionCreate', async i => {
     if(!heist.police.has(i.user.id)) return i.reply({content:'⚠️ 請先點擊「加入警方阻止搶劫」，才能選擇警方行動。',ephemeral:true});
     if(!['confront','reinforce'].includes(action)) return i.reply({content:'⚠️ 找不到這個警方行動。',ephemeral:true});
     heist.policeActions.set(i.user.id,action);
-    return i.reply({content:action==='confront'?'🛡️ 你決定在搶劫發生時正面對抗劫匪！本次行動提供 2% 警方壓制力，若成功阻止搶劫可平分警方獎金。':'📢 你已呼叫增援！增援警力會在交鋒時包圍歹徒，本次行動提供 3% 警方壓制力，若成功阻止搶劫可平分警方獎金。',ephemeral:true});
+    return i.reply({content:action==='confront'?'🛡️ 你決定正面對抗劫匪！本次行動提供 4% 警方壓制力，若成功阻止搶劫可獲得警方獎金。':'📢 你已呼叫增援！本次行動提供 5% 警方壓制力，若成功阻止搶劫可獲得警方獎金。',ephemeral:true});
+  }
+  if(i.isStringSelectMenu() && i.customId.startsWith('heist_police_tactic:') && i.guildId) {
+    const token=i.customId.split(':')[1],heist=activeHeists.get(token),tacticId=i.values[0];
+    if(!heist||heist.lobbyClosed) return i.reply({content:'⚠️ 本次警方戰術部署已結束。',ephemeral:true});
+    if(!heist.police.has(i.user.id)) return i.reply({content:'⚠️ 你尚未加入警方陣營。',ephemeral:true});
+    const tactic=heistPoliceTactics[tacticId];
+    if(!tactic) return i.reply({content:'⚠️ 找不到這項警方戰術。',ephemeral:true});
+    heist.policeTactics.set(i.user.id,tacticId);
+    return i.update({
+      content:`✅ 已秘密部署 **${tactic.name}**\n${tactic.description}\n\n請繼續選擇追捕載具。`,
+      components:[
+        heistPoliceTacticRow(token,tacticId),
+        heistPoliceVehicleRow(token,heist.policeVehicles.get(i.user.id))
+      ]
+    });
+  }
+  if(i.isStringSelectMenu() && i.customId.startsWith('heist_police_vehicle:') && i.guildId) {
+    const token=i.customId.split(':')[1],heist=activeHeists.get(token),vehicleId=i.values[0];
+    if(!heist||heist.lobbyClosed) return i.reply({content:'⚠️ 本次警方載具部署已結束。',ephemeral:true});
+    if(!heist.police.has(i.user.id)) return i.reply({content:'⚠️ 你尚未加入警方陣營。',ephemeral:true});
+    const vehicle=heistPoliceVehicles[vehicleId];
+    if(!vehicle) return i.reply({content:'⚠️ 找不到這輛警方載具。',ephemeral:true});
+    heist.policeVehicles.set(i.user.id,vehicleId);
+    return i.update({
+      content:`✅ 已調派 **${vehicle.name}**\n${vehicle.description}${heist.policeTactics.has(i.user.id)?'':'\n\n請繼續選擇警方戰術。'}`,
+      components:[
+        heistPoliceTacticRow(token,heist.policeTactics.get(i.user.id)),
+        heistPoliceVehicleRow(token,vehicleId)
+      ]
+    });
   }
   if(i.isButton() && i.customId.startsWith('heist_prep:') && i.guildId) {
     const token=i.customId.split(':')[1], heist=activeHeists.get(token);
@@ -2769,9 +5156,9 @@ client.on('interactionCreate', async i => {
     if(!heist.members.includes(i.user.id)) return i.reply({content:'⚠️ 你不是這支隊伍的成員。',ephemeral:true});
     heist.ready.add(i.user.id);
     if(heist.ready.size<heist.members.length) return i.reply({content:`🧰 你已完成事前準備（${heist.ready.size}/${heist.members.length}）。`,ephemeral:true});
-    const {missingFaction:missingChoices,missingWeapons,missingPoliceWeapons,missingPoliceActions}=heistReadiness(heist);
-    if(missingChoices.length||missingWeapons.length||missingPoliceWeapons.length||missingPoliceActions.length) {
-      return i.reply({content:`⚠️ 尚不能結束準備：\n• 未回覆線人邀請：${missingChoices.length} 人\n• 劫匪未選槍枝：${missingWeapons.length} 人\n• 警方未選槍枝：${missingPoliceWeapons.length} 人\n• 警方未選擇行動：${missingPoliceActions.length} 人\n\n完成後任一劫匪再按一次「完成事前準備」。`,ephemeral:true});
+    const {missingFaction:missingChoices,missingWeapons,missingPoliceWeapons,missingPoliceActions,missingPoliceTactics,missingPoliceVehicles}=heistReadiness(heist);
+    if(missingChoices.length||missingWeapons.length||missingPoliceWeapons.length||missingPoliceActions.length||missingPoliceTactics.length||missingPoliceVehicles.length) {
+      return i.reply({content:`⚠️ 尚不能結束準備：\n• 未回覆線人邀請：${missingChoices.length} 人\n• 劫匪未選槍枝：${missingWeapons.length} 人\n• 警方未選槍枝：${missingPoliceWeapons.length} 人\n• 警方未選擇行動：${missingPoliceActions.length} 人\n• 警方未部署戰術：${missingPoliceTactics.length} 人\n• 警方未選擇載具：${missingPoliceVehicles.length} 人\n\n完成後任一劫匪再按一次「完成事前準備」。`,ephemeral:true});
     }
     heist.lobbyClosed=true;
     const schemeRow=new ActionRowBuilder().addComponents(
@@ -2779,7 +5166,8 @@ client.on('interactionCreate', async i => {
       new ButtonBuilder().setCustomId(`heist_scheme:${token}:force`).setLabel('勇猛強闖').setEmoji('💥').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId(`heist_scheme:${token}:clever`).setLabel('機智智取').setEmoji('🧠').setStyle(ButtonStyle.Success)
     );
-    return i.update({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('✅ 警匪雙方準備完成').setDescription(`目標：**${heistBanks[heist.bankId].name}**\n地圖：**${heistMaps[heist.mapId].name}**\n金庫情報：**${heist.vaultScouted?heistVaultContents[heist.vaultId].name:'尚未偵查'}**\n劫匪：**${heist.members.length}/8**｜警方：**${heist.police.size}/8**\n\n隊長 <@${heist.leaderId}> 請選擇搶劫方案：\n🎭 **瞞天過海**：成功率 +5%，收益 ×0.9\n💥 **勇猛強闖**：成功率 -3%，收益 ×1.4\n🧠 **機智智取**：成功率 +2%，收益 ×1.1`).setImage(heistSceneUrl('planning'))],components:[heistPrepRow(token,true),schemeRow]});
+    const schemeEmbed=new EmbedBuilder().setColor(0xF5B942).setTitle('✅ 警匪雙方準備完成').setDescription(`目標：**${heistBanks[heist.bankId].name}**\n地圖：**${heistMaps[heist.mapId].name}**\n金庫情報：**${heist.vaultScouted?heistVaultContents[heist.vaultId].name:'尚未偵查'}**\n劫匪：**${heist.members.length}/8**｜警方：**${heist.police.size}/8**\n\n隊長 <@${heist.leaderId}> 請選擇搶劫方案：\n🎭 **瞞天過海**：成功率 +5%，收益 ×0.9\n💥 **勇猛強闖**：成功率 -3%，收益 ×1.4\n🧠 **機智智取**：成功率 +2%，收益 ×1.1`);
+    return i.update({...heistScenePayload(schemeEmbed,heist.museumScene||'planning'),components:[heistPrepRow(token,true),schemeRow]});
   }
   if(i.isButton() && i.customId.startsWith('heist_scheme:') && i.guildId) {
     const [,token,scheme]=i.customId.split(':'), heist=activeHeists.get(token);
@@ -2792,7 +5180,11 @@ client.on('interactionCreate', async i => {
       new ButtonBuilder().setCustomId(`heist_plan:${token}:sewer`).setLabel('下水道撤離').setEmoji('🕳️').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`heist_plan:${token}:helicopter`).setLabel('直升機撤離').setEmoji('🚁').setStyle(ButtonStyle.Danger)
     );
-    return i.update({embeds:[new EmbedBuilder().setColor(0x607D8B).setTitle('📋 搶劫方案已確定').setDescription(`方案：**${schemeNames[scheme]}**\n\n接下來請選擇逃跑計畫：\n🚗 接應車輛：穩定，無加成\n🕳️ 下水道：成功率 +3%\n🚁 直升機：成功率 +5%`).setImage(heistSceneUrl('planning'))],components:[planRow]});
+    const planEmbed=new EmbedBuilder().setColor(0x607D8B).setTitle('📋 搶劫方案已確定').setDescription(`方案：**${schemeNames[scheme]}**\n\n接下來請選擇逃跑計畫：\n🚗 接應車輛：穩定，無加成\n🕳️ 下水道：成功率 +3%\n🚁 直升機：成功率 +5%`);
+    const planScene=heist.bankId==='central_museum'
+      ? (scheme==='clever'?'museum_clever':heist.museumScene)
+      : (scheme==='deception'?'deception_uniform':'planning');
+    return i.update({...heistScenePayload(planEmbed,planScene),components:[planRow]});
   }
   if(i.isButton() && i.customId.startsWith('heist_plan:') && i.guildId) {
     const [,token,plan]=i.customId.split(':'), heist=activeHeists.get(token);
@@ -2802,28 +5194,68 @@ client.on('interactionCreate', async i => {
     heist.plan=plan;
     const planNames={car:'🚗 接應車輛',sewer:'🕳️ 下水道撤離',helicopter:'🚁 直升機撤離'}, planBonus={car:0,sewer:3,helicopter:5};
     const schemeNames={deception:'🎭 瞞天過海',force:'💥 勇猛強闖',clever:'🧠 機智智取'},schemeBonus={deception:5,force:-3,clever:2};
-    const vehicleBonus=selectedHeistVehicleBonus(heist),vehicleName=selectedHeistVehicleName(heist);
+    const vehicleBonus=selectedHeistVehicleBonus(heist),vehicleName=selectedHeistVehicleName(heist),petHeistBonus=teamPetHeistBonus(heist),hideoutBonus=hideoutHeistChanceBonus(heist.guildId,heist.leaderId);
     const combat=heistCombatModifiers(heist),map=heistMaps[heist.mapId];
-    const chance=Math.min(45+weeklyHeistBonus()+vehicleBonus+combat.robberFirepower,Math.max(1,heistBanks[heist.bankId].baseChance+(heist.members.length-1)*8+planBonus[plan]+schemeBonus[heist.scheme]+weeklyHeistBonus()+vehicleBonus+map.chance+combat.robberFirepower-combat.policePressure));
+    const effectiveVehicleBonus=Math.max(0,vehicleBonus-combat.vehicleSuppression);
+    const effectiveHideoutBonus=Math.max(0,hideoutBonus-combat.hideoutSuppression);
+    const chance=Math.min(45+weeklyHeistBonus()+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+combat.robberFirepower,Math.max(1,heistBanks[heist.bankId].baseChance+(heist.members.length-1)*5+planBonus[plan]+schemeBonus[heist.scheme]+weeklyHeistBonus()+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+map.chance+combat.robberFirepower-combat.policePressure));
     const responseRow=new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`heist_police:${token}:counter`).setLabel('反擊警察').setEmoji('🔫').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId(`heist_police:${token}:evade`).setLabel('專心逃跑').setEmoji('🏃').setStyle(ButtonStyle.Success)
     );
-    return i.update({embeds:[new EmbedBuilder().setColor(0xE53935).setTitle('🚓 遭遇警方時如何應對？').setDescription(`目標：**${heistBanks[heist.bankId].name}**\n地圖：**${map.name}**（${map.chance>=0?'+':''}${map.chance}%）\n搶劫方案：**${schemeNames[heist.scheme]}**\n逃跑路線：**${planNames[plan]}**\n逃跑載具：**${vehicleName}**\n載具增益：**+${vehicleBonus}%**\n劫匪槍枝火力：**+${combat.robberFirepower}%**\n警方正面對抗：**${combat.confrontingPolice} 人**（額外壓制 -${combat.confrontationPressure}%）\n警方呼叫增援：**${combat.reinforcingPolice} 人**（增援壓制 -${combat.reinforcementPressure}%）\n警方與線人總壓力：**-${combat.policePressure}%**\n目前成功率：**${chance}%**\n\n🔫 **反擊警察**：成功率 +8%，但有 20% 機率引來特勤增援\n🏃 **專心逃跑**：沒有額外風險`).setImage(heistSceneUrl('planning'))],components:[responseRow]});
+    const responseEmbed=new EmbedBuilder().setColor(0xE53935).setTitle('🚓 遭遇警方時如何應對？').setDescription(`目標：**${heistBanks[heist.bankId].name}**\n地圖：**${map.name}**（${map.chance>=0?'+':''}${map.chance}%）\n搶劫方案：**${schemeNames[heist.scheme]}**\n逃跑路線：**${planNames[plan]}**\n逃跑載具：**${vehicleName}**\n載具增益：**+${effectiveVehicleBonus}%**${combat.vehicleSuppression?`（追蹤器壓制 ${combat.vehicleSuppression}%）`:''}\n同行寵物增益：**+${petHeistBonus.toFixed(1)}%**\n隊長藏身處增益：**+${effectiveHideoutBonus}%**${combat.hideoutSuppression?`（追蹤器壓制 ${combat.hideoutSuppression}%）`:''}\n劫匪槍枝火力：**+${combat.robberFirepower}%**\n警方正面對抗：**${combat.confrontingPolice} 人**（壓制 -${combat.confrontationPressure}%）\n警方呼叫增援：**${combat.reinforcingPolice} 人**（壓制 -${combat.reinforcementPressure}%）\n警方武器壓制：**-${combat.policeWeaponPressure}%**\n警方戰術：**${heistPoliceTacticSummary(heist)}**（壓制 -${combat.tacticalPressure}%）\n警方載具：**${heistPoliceVehicleSummary(heist)}**（壓制 -${combat.policeVehiclePressure}%）\nNPC 基礎警力：**${combat.npcPolicePressure}%**\n警方與線人總壓力：**-${combat.policePressure}%**\n目前成功率：**${chance}%**\n\n🔫 **反擊警察**：成功率 +8%，但有 20% 機率引來特勤增援\n🏃 **專心逃跑**：沒有額外風險`);
+    return i.update({...heistScenePayload(responseEmbed,heist.museumScene||'planning'),components:[responseRow]});
   }
   if(i.isButton() && i.customId.startsWith('heist_police:') && i.guildId) {
     const [,token,strategy]=i.customId.split(':'),heist=activeHeists.get(token);
     if(!heist) return i.reply({content:'⚠️ 這次搶劫計畫已失效。',ephemeral:true});
     if(i.user.id!==heist.leaderId) return i.reply({content:'⚠️ 只有隊長能決定如何應對警察。',ephemeral:true});
     heist.policeStrategy=strategy;
+    if(heist.casinoSecurityRequired&&!heist.securityDefeated) {
+      if(heist.securityHp===null) heist.securityHp=casinoSecurityMaxHp(heist);
+      const securityRow=new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`heist_security:${token}`).setLabel('使用武器擊倒保全').setEmoji('🔫').setStyle(ButtonStyle.Danger)
+      );
+      const securityEmbed=new EmbedBuilder().setColor(0xD94A4A).setTitle('🛡️ 週日賭場保全攔截！').setDescription(`隊伍抵達賭場中央寶庫入口，重裝保全封鎖了通道。\n\n保全耐久：**${heist.securityHp}/${casinoSecurityMaxHp(heist)}**\n全隊已攜帶武器：**${heist.members.length} 把**\n\n⚠️ 必須使用事前選擇的武器將保全擊倒，才能進入下一階段。首次開火時會消耗每位參戰者的對應彈藥箱 ×1，武器會永久保留。`);
+      return i.update({...heistScenePayload(securityEmbed,'assault'),components:[securityRow]});
+    }
     const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`heist_execute:${token}`).setLabel('執行搶劫').setEmoji('💰').setStyle(ButtonStyle.Danger));
-    return i.update({embeds:[new EmbedBuilder().setColor(strategy==='counter'?0xD94A4A:0x35C46A).setTitle('✅ 最終行動計畫完成').setDescription(`警方應對：**${strategy==='counter'?'🔫 反擊警察':'🏃 專心逃跑'}**\n逃跑載具：**${selectedHeistVehicleName(heist)}**（成功率 +${selectedHeistVehicleBonus(heist)}%）\n\n隊長可以開始行動。`).setImage(heistSceneUrl('planning'))],components:[row]});
+    const finalPlanEmbed=new EmbedBuilder().setColor(strategy==='counter'?0xD94A4A:0x35C46A).setTitle('✅ 最終行動計畫完成').setDescription(`警方應對：**${strategy==='counter'?'🔫 反擊警察':'🏃 專心逃跑'}**\n逃跑載具：**${selectedHeistVehicleName(heist)}**（成功率 +${selectedHeistVehicleBonus(heist)}%）\n\n隊長可以開始行動。`);
+    return i.update({...heistScenePayload(finalPlanEmbed,heist.museumScene||'planning'),components:[row]});
+  }
+  if(i.isButton() && i.customId.startsWith('heist_security:') && i.guildId) {
+    const token=i.customId.split(':')[1],heist=activeHeists.get(token);
+    if(!heist) return i.reply({content:'⚠️ 這次搶劫計畫已失效。',ephemeral:true});
+    if(i.user.id!==heist.leaderId) return i.reply({content:'⚠️ 只有隊長能指揮隊伍攻擊賭場保全。',ephemeral:true});
+    if(!heist.casinoSecurityRequired) return i.reply({content:'⚠️ 本次行動沒有賭場保全關卡。',ephemeral:true});
+    if(!heist.policeStrategy) return i.reply({content:'⚠️ 請先完成警方應對計畫。',ephemeral:true});
+    if(heist.securityDefeated) return i.reply({content:'✅ 賭場保全已經被擊倒，可以執行搶劫。',ephemeral:true});
+    if(heist.members.some(memberId=>!heistWeapons[heist.weapons.get(memberId)])) return i.reply({content:'⚠️ 全隊必須攜帶有效武器，才能突破賭場保全。',ephemeral:true});
+    if(!heist.ammunitionConsumed) {
+      heist.ammoConsumed=consumeHeistAmmunition(i.guildId,heist);
+      heist.ammunitionConsumed=true;
+    }
+    if(heist.securityHp===null) heist.securityHp=casinoSecurityMaxHp(heist);
+    const attack=casinoSecurityAttack(heist);
+    heist.securityRounds+=1;
+    heist.securityHp=Math.max(0,heist.securityHp-attack.damage);
+    heist.securityDefeated=heist.securityHp<=0;
+    const rows=heist.securityDefeated
+      ? [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`heist_execute:${token}`).setLabel('保全已擊倒｜執行搶劫').setEmoji('💰').setStyle(ButtonStyle.Success))]
+      : [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`heist_security:${token}`).setLabel('繼續使用武器攻擊').setEmoji('🔫').setStyle(ButtonStyle.Danger))];
+    const weaponSummary=[...new Set(attack.weapons.map(weapon=>weapon.name))].join('、');
+    const embed=new EmbedBuilder()
+      .setColor(heist.securityDefeated?0x35C46A:0xE53935)
+      .setTitle(heist.securityDefeated?'✅ 賭場保全已擊倒！':'🛡️ 賭場保全仍在阻擋！')
+      .setDescription(`使用武器：${weaponSummary}\n全隊武器火力：**${attack.firepower}**\n本輪傷害：**${attack.damage}**${attack.critical?'｜💥 弱點重擊！':''}\n保全耐久：**${heist.securityHp}/${casinoSecurityMaxHp(heist)}**\n交戰輪數：**${heist.securityRounds}**\n\n${heist.securityDefeated?'通往賭場中央寶庫的道路已經打開，現在可以進行下一步。':'保全尚未倒下，下一步仍被鎖定；必須繼續使用武器壓制。'}`);
+    return i.update({...heistScenePayload(embed,'assault'),components:rows});
   }
   if(i.isButton() && i.customId.startsWith('heist_execute:') && i.guildId) {
     const token=i.customId.split(':')[1], heist=activeHeists.get(token);
     if(!heist) return i.reply({content:'⚠️ 這次搶劫計畫已失效。',ephemeral:true});
     if(i.user.id!==heist.leaderId) return i.reply({content:'⚠️ 只有隊長能執行搶劫。',ephemeral:true});
     if(!heist.scheme||!heist.plan||!heist.policeStrategy) return i.reply({content:'⚠️ 搶劫方案、逃跑計畫或警方應對尚未完成。',ephemeral:true});
+    if(heist.casinoSecurityRequired&&!heist.securityDefeated) return i.reply({content:'🛡️ 賭場保全仍在阻擋寶庫入口，必須先使用武器將保全擊倒。',ephemeral:true});
     for(const memberId of heist.members) {
       if(jailRemaining(i.guildId,memberId)||hospitalRemaining(i.guildId,memberId)) return i.reply({content:`⚠️ <@${memberId}> 目前無法行動，計畫取消。`,ephemeral:true});
       if(stamina(i.guildId,memberId)<staminaCost(i.guildId,memberId,20)) return i.reply({content:`⚠️ <@${memberId}> 體力不足 ${staminaCost(i.guildId,memberId,20)}，計畫取消。`,ephemeral:true});
@@ -2832,9 +5264,9 @@ client.on('interactionCreate', async i => {
       if(jailRemaining(i.guildId,policeId)||hospitalRemaining(i.guildId,policeId)) return i.reply({content:`⚠️ 警方成員 <@${policeId}> 目前無法行動，請重新發起計畫。`,ephemeral:true});
       if(stamina(i.guildId,policeId)<staminaCost(i.guildId,policeId,10)) return i.reply({content:`⚠️ 警方成員 <@${policeId}> 體力不足，請重新發起計畫。`,ephemeral:true});
     }
-    if(!heist.weaponFeesCharged) {
-      heist.weaponFeeTotal=chargeHeistWeapons(i.guildId,heist);
-      heist.weaponFeesCharged=true;
+    if(!heist.ammunitionConsumed) {
+      heist.ammoConsumed=consumeHeistAmmunition(i.guildId,heist);
+      heist.ammunitionConsumed=true;
     }
     heist.members.forEach(memberId=>consumeStamina(i.guildId,memberId,20));
     heist.police.forEach(policeId=>consumeStamina(i.guildId,policeId,10));
@@ -2842,36 +5274,51 @@ client.on('interactionCreate', async i => {
     const schemeMultiplier={deception:0.9,force:1.4,clever:1.1}[heist.scheme];
     const counterBonus=heist.policeStrategy==='counter'?8:0;
     const policeReinforcements=heist.policeStrategy==='counter'&&Math.random()<0.20;
-    const vehicleBonus=selectedHeistVehicleBonus(heist),vehicleName=selectedHeistVehicleName(heist);
+    const vehicleBonus=selectedHeistVehicleBonus(heist),vehicleName=selectedHeistVehicleName(heist),petHeistBonus=teamPetHeistBonus(heist),hideoutBonus=hideoutHeistChanceBonus(heist.guildId,heist.leaderId);
     const combat=heistCombatModifiers(heist),map=heistMaps[heist.mapId],vault=heistVaultContents[heist.vaultId];
-    const chance=Math.min(45+weeklyHeistBonus()+counterBonus+vehicleBonus+combat.robberFirepower,Math.max(1,heistBanks[heist.bankId].baseChance+(heist.members.length-1)*8+planBonus+schemeBonus+counterBonus+weeklyHeistBonus()+vehicleBonus+map.chance+combat.robberFirepower-combat.policePressure));
-    const schemeScenes={
+    const effectiveVehicleBonus=Math.max(0,vehicleBonus-combat.vehicleSuppression);
+    const effectiveHideoutBonus=Math.max(0,hideoutBonus-combat.hideoutSuppression);
+    const isMuseumTarget=heist.bankId==='central_museum';
+    const museumInteriorScenes=new Set(['approach','assault','deception_uniform',null]);
+    const heistStagePayload=(embed,scene)=>heistScenePayload(embed,isMuseumTarget&&museumInteriorScenes.has(scene)?heist.museumScene:scene);
+    const chance=Math.min(45+weeklyHeistBonus()+counterBonus+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+combat.robberFirepower,Math.max(1,heistBanks[heist.bankId].baseChance+(heist.members.length-1)*5+planBonus+schemeBonus+counterBonus+weeklyHeistBonus()+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+map.chance+combat.robberFirepower-combat.policePressure));
+    const schemeScenes=isMuseumTarget?{
+      deception:['🎭 全隊換上策展與維修人員制服，偽造的閉館工作證順利通過第一道門。','📦 仿製展品被送入館藏區，保全暫時沒有察覺真正的作品已遭調包。'],
+      force:['💥 隊伍正面突破美術館側門，警報聲瞬間響徹整棟建築！','🛡️ 隊員壓制保全、強行切開展櫃與典藏庫，時間正在快速流逝。'],
+      clever:['🧠 隊員入侵美術館監控系統，攝影機畫面被替換成預先錄製的影像。','🔐 偽造典藏授權碼通過驗證，館藏區防盜門正在安靜地開啟。']
+    }:{
       deception:['🎭 全隊換上運鈔人員制服，偽造的通行文件順利通過第一道門。','📦 假運鈔箱被送進金庫區，警衛暫時沒有察覺異狀。'],
       force:['💥 隊伍正面突破銀行大門，警報聲瞬間響徹整棟建築！','🛡️ 隊員壓制保全、強行切開金庫，時間正在快速流逝。'],
       clever:['🧠 隊員入侵監控系統，攝影機畫面被替換成預先錄製的影像。','🔐 偽造授權碼通過驗證，金庫大門正在安靜地開啟。']
     };
     const escapeScene={car:`🚗 金幣裝上 **${vehicleName}**，全隊衝向預定道路。`,sewer:`🕳️ 全隊鑽入下水道，**${vehicleName}** 已在出口等待接應。`,helicopter:`🚁 全隊撤向屋頂，**${vehicleName}** 負責最後一段接應。`}[heist.plan];
-    const approachEmbed=new EmbedBuilder().setColor(0xE53935).setTitle('🏦 搶銀行行動開始').setDescription(`**地圖｜${map.name}**\n${map.scene}\n\n**第一幕｜滲透銀行**\n${schemeScenes[heist.scheme][0]}\n\n行動進度：▰▱▱▱`);
-    const approachScene=heist.scheme==='deception'?'deception_uniform':'approach';
-    await i.update({...heistScenePayload(approachEmbed,approachScene),components:[]});
+    const approachEmbed=new EmbedBuilder().setColor(0xE53935).setTitle(isMuseumTarget?'🏛️ 中央美術館行動開始':'🏦 搶銀行行動開始').setDescription(`**地圖｜${map.name}**\n${map.scene}\n\n**第一幕｜${isMuseumTarget?'潛入美術館':'滲透銀行'}**\n${schemeScenes[heist.scheme][0]}\n\n行動進度：▰▱▱▱`);
+    const approachScene=isMuseumTarget&&heist.scheme==='clever'
+      ? 'museum_clever'
+      : (heist.scheme==='deception'?'deception_uniform':'approach');
+    await i.update({...heistStagePayload(approachEmbed,approachScene),components:[]});
     await sleep(2200);
-    const assaultEmbed=new EmbedBuilder().setColor(0xF5B942).setTitle('🔓 金庫突破中…').setDescription(`**第二幕｜取得戰利品**\n${schemeScenes[heist.scheme][1]}\n\n**${vault.name}**\n${vault.description}\n${heistVaultRewardLabel(vault)}\n\n行動進度：▰▰▱▱`);
-    await i.editReply(heistScenePayload(assaultEmbed,vault.scene));
+    const assaultEmbed=new EmbedBuilder().setColor(0xF5B942).setTitle(isMuseumTarget?'🖼️ 搬運館藏中…':'🔓 金庫突破中…').setDescription(`**第二幕｜取得戰利品**\n${schemeScenes[heist.scheme][1]}\n\n**${vault.name}**\n${vault.description}\n${heistVaultRewardLabel(vault)}\n\n行動進度：▰▰▱▱`);
+    await i.editReply(heistStagePayload(assaultEmbed,vault.scene));
     await sleep(2200);
     let escapeImage=heist.plan==='sewer'?'sewer':heist.plan==='helicopter'?'helicopter':'chase';
-    const escapeEmbed=new EmbedBuilder().setColor(0x5865F2).setTitle('🚨 警方開始追捕！').setDescription(`**第三幕｜警匪交鋒**\n警方投入 **${heist.police.size}/8** 人，其中 **${combat.confrontingPolice} 人**選擇正面對抗、**${combat.reinforcingPolice} 人**呼叫增援。\n警員架起防線持槍壓制，增援警車從各路口包圍歹徒，雙方槍枝與裝備開始影響戰局。\n\n**逃跑計畫**\n${escapeScene}\n載具增益：**+${vehicleBonus}%**\n\n行動進度：▰▰▰▱\n成功判定中……`);
-    await i.editReply(heistScenePayload(escapeEmbed,escapeImage));
+    const escapeEmbed=new EmbedBuilder().setColor(0x5865F2).setTitle('🚨 警方開始追捕！').setDescription(`**第三幕｜警匪交鋒**\n警方投入 **${heist.police.size}/8** 人，其中 **${combat.confrontingPolice} 人**選擇正面對抗、**${combat.reinforcingPolice} 人**呼叫增援。\n警方戰術：**${heistPoliceTacticSummary(heist)}**\n警方載具：**${heistPoliceVehicleSummary(heist)}**\n戰術壓制：**-${combat.tacticalPressure}%**｜載具壓制：**-${combat.policeVehiclePressure}%**｜武器壓制：**-${combat.policeWeaponPressure}%**\n警員架起防線持槍壓制，增援警車與警用航空隊從各路線包圍歹徒，雙方槍枝與裝備開始影響戰局。\n\n**逃跑計畫**\n${escapeScene}\n載具增益：**+${effectiveVehicleBonus}%**\n藏身處增益：**+${effectiveHideoutBonus}%**\n\n行動進度：▰▰▰▱\n成功判定中……`);
+    await i.editReply(heistStagePayload(escapeEmbed,escapeImage));
     await sleep(2400);
     const escapeEvent=rollEscapeEvent('heist');
-    const finalChance=Math.min(45+weeklyHeistBonus()+counterBonus+vehicleBonus+combat.robberFirepower,Math.max(1,chance+escapeEvent.modifier));
+    const finalChance=Math.min(45+weeklyHeistBonus()+counterBonus+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+combat.robberFirepower,Math.max(1,chance+escapeEvent.modifier));
     const escapeEventScene=escapeEvent.scene||escapeImage;
-    await i.editReply(heistScenePayload(new EmbedBuilder().setColor(escapeEvent.forceFail?0xD94A4A:0xF5B942).setTitle(escapeEvent.title).setDescription(`${escapeEvent.text}\n\n事件影響：${escapeEvent.forceFail?'**遭警犬撲倒，逃脫直接失敗**':`${escapeEvent.modifier>=0?'+':''}${escapeEvent.modifier}%`}\n最終逃脫率：**${finalChance}%**\n\n行動進度：▰▰▰▰`),escapeEventScene));
+    await i.editReply(heistStagePayload(new EmbedBuilder().setColor(escapeEvent.forceFail?0xD94A4A:0xF5B942).setTitle(escapeEvent.title).setDescription(`${escapeEvent.text}\n\n事件影響：${escapeEvent.forceFail?'**遭警犬撲倒，逃脫直接失敗**':`${escapeEvent.modifier>=0?'+':''}${escapeEvent.modifier}%`}\n最終逃脫率：**${finalChance}%**\n\n行動進度：▰▰▰▰`),escapeEventScene));
     await sleep(2400);
     activeHeists.delete(token);
     if(policeReinforcements||escapeEvent.forceFail||Math.random()*100>=finalChance) {
       escapeImage=escapeEvent.scene||(escapeEvent.forceFail?'arrested':'surrounded');
-      const releaseAt=Date.now()+8*60*1000;
-      for(const memberId of heist.members) {
+      const jailDurationMs=Math.max(3*60_000,8*60_000-hideoutJailReductionMs(heist.guildId,heist.leaderId));
+      const releaseAt=Date.now()+jailDurationMs;
+      const jailMinutes=Math.floor(jailDurationMs/60_000),jailSeconds=Math.floor((jailDurationMs%60_000)/1000);
+      const jailDurationText=`${jailMinutes} 分鐘${jailSeconds?` ${jailSeconds} 秒`:''}`;
+      const jailedRobbers=heist.members.filter(memberId=>!heist.informants.has(memberId));
+      for(const memberId of jailedRobbers) {
         db.prepare('INSERT INTO jail(guild_id,user_id,release_at,reason) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET release_at=excluded.release_at,reason=excluded.reason').run(i.guildId,memberId,releaseAt,'團隊搶銀行失敗');
         db.prepare('DELETE FROM jail_training WHERE guild_id=? AND user_id=?').run(i.guildId,memberId);
         db.prepare('DELETE FROM jail_escape WHERE guild_id=? AND user_id=?').run(i.guildId,memberId);
@@ -2879,21 +5326,33 @@ client.on('interactionCreate', async i => {
       const failedBank=heistBanks[heist.bankId];
       const hot=!failedBank.sundayOnly&&hotBankFor(0).id===heist.bankId;
       const policePool=failedBank.sundayOnly
-        ? Math.floor(heistBasePool(i.guildId,heist.bankId)*0.25)
-        : Math.floor(failedBank.reward*(hot?2:1)*vault.rewardMultiplier*0.25);
-      const policeShare=heist.police.size?Math.max(1000,Math.floor(policePool/heist.police.size)):0;
+        ? Math.floor(heistBasePool(i.guildId,heist.bankId)*TEAM_HEIST_POLICE_POOL_RATE)
+        : Math.floor(failedBank.reward*(hot?2:1)*vault.rewardMultiplier*TEAM_HEIST_POLICE_POOL_RATE);
+      const policeShare=heist.police.size?TEAM_HEIST_POLICE_BASE_REWARD+Math.floor(policePool/heist.police.size):0;
       const policePayouts=[...heist.police].map(policeId=>{const before=balance(i.guildId,policeId),after=changeBalance(i.guildId,policeId,policeShare,'job',policeId,'阻止團隊搶銀行');return `<@${policeId}>：${fmt(after-before)}`;});
-      for(const informantId of heist.informants) changeBalance(i.guildId,informantId,5000,'job',informantId,'警方線人秘密獎金');
-      const payload={...heistScenePayload(new EmbedBuilder().setColor(0xD94A4A).setTitle('🚔 警方成功阻止搶劫！').setDescription(`${policeReinforcements?'🚨 反擊驚動特勤隊，大批警力從四面包圍！':escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美死死咬住隊員的褲管並將人撲倒，整隊當場被逮捕。`:'警方掌握線報並封鎖所有出口，隊伍在最後關頭遭到包圍。'}\n全隊被關進迷子的小黑屋 **8 分鐘**。\n\n金庫：${vault.name}（${heistVaultRewardLabel(vault)}）\n地圖：${map.name}\n逃跑載具：${vehicleName}（+${vehicleBonus}%）\n警方人數：${heist.police.size}/8\n線人情報：${heist.informants.size?'已發揮作用並秘密發放獎金':'本次沒有線人'}\n警方應對：${heist.policeStrategy==='counter'?'反擊警察':'專心逃跑'}\n逃脫事件：${escapeEvent.title}\n最終成功率：${finalChance}%\n劫匪體力消耗：20｜警察體力消耗：10\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜槍枝費銷毀：${fmt(heist.weaponFeeTotal)}（均不退還）${policePayouts.length?`\n\n**警方實際入帳**\n${policePayouts.join('\n')}`:''}`),escapeImage),components:[]};
+      const informantPayouts=[...heist.informants].map(informantId=>{
+        const before=balance(i.guildId,informantId);
+        const after=changeBalance(i.guildId,informantId,TEAM_HEIST_INFORMANT_REWARD,'job',informantId,'警方線人秘密獎金');
+        return after-before;
+      });
+      const informantTotal=informantPayouts.reduce((sum,amount)=>sum+amount,0);
+      const arrestText=jailedRobbers.length
+        ? `非線人劫匪被關進迷子的小黑屋 **${jailDurationText}**；警方線人受保護，**不會入獄**。`
+        : '所有劫匪皆為警方線人，受到警方保護，**無人入獄**。';
+      const informantText=heist.informants.size
+        ? `共有 **${heist.informants.size} 名**秘密線人提供情報；每人獲得警方獎勵 **${fmt(TEAM_HEIST_INFORMANT_REWARD)}**，合計 **${fmt(informantTotal)}** 已入帳（身分保密）。`
+        : '本次沒有線人。';
+      const payload={...heistStagePayload(new EmbedBuilder().setColor(0xD94A4A).setTitle('🚔 警方成功阻止搶劫！').setDescription(`${policeReinforcements?'🚨 反擊驚動特勤隊，大批警力從四面包圍！':escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美死死咬住隊員的褲管並將人撲倒，整隊當場被逮捕。`:'警方掌握線報並封鎖所有出口，隊伍在最後關頭遭到包圍。'}\n${arrestText}\n\n金庫：${vault.name}（${heistVaultRewardLabel(vault)}）\n地圖：${map.name}\n逃跑載具：${vehicleName}（有效加成 +${effectiveVehicleBonus}%）\n警方人數：${heist.police.size}/8\n警方戰術：${heistPoliceTacticSummary(heist)}\n警方載具：${heistPoliceVehicleSummary(heist)}（壓制 -${combat.policeVehiclePressure}%）\n警方總壓力：-${combat.policePressure}%\n線人情報：${informantText}\n警方應對：${heist.policeStrategy==='counter'?'反擊警察':'專心逃跑'}\n逃脫事件：${escapeEvent.title}\n最終成功率：${finalChance}%\n劫匪體力消耗：20｜警察體力消耗：10\n警方獎勵：每人保底 ${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}，另平分目標獎池 ${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜彈藥消耗：${heist.ammoConsumed} 箱${policePayouts.length?`\n\n**警方實際入帳**\n${policePayouts.join('\n')}`:''}`),escapeImage),components:[]};
       return publishLatestHeistResult(i,payload);
     }
     escapeImage='success';
     const successBank=heistBanks[heist.bankId];
     const hot=!successBank.sundayOnly&&hotBankFor(0).id===heist.bankId;
     const deedReward=successBank.sundayOnly?(vault.fixedReward||0):0;
-    const lootTotal=deedReward|| (successBank.sundayOnly
-      ? Math.floor(casinoVaultBalance(i.guildId)*0.8)
-      : Math.floor(successBank.reward*(hot?2:1)*schemeMultiplier*map.rewardMultiplier*vault.rewardMultiplier));
+    const hideoutLootBonus=hideoutLootMultiplier(heist.guildId,heist.leaderId);
+    const lootTotal=deedReward||Math.floor((successBank.sundayOnly
+      ? casinoVaultBalance(i.guildId)*0.8
+      : successBank.reward*(hot?2:1)*schemeMultiplier*map.rewardMultiplier*vault.rewardMultiplier)*hideoutLootBonus);
     const total=deedReward||teamHeistTotalPayout(lootTotal,heist.members.length);
     if(successBank.sundayOnly&&!deedReward) {
       if(lootTotal<=0) throw new Error('賭場中央寶庫已經被搬空');
@@ -2912,11 +5371,15 @@ client.on('interactionCreate', async i => {
       {name:deedReward?'📜 地契結算方式':'🤝 每人團隊獎勵',value:deedReward?`${fmt(deedReward)} 由 ${heist.members.length} 人均分`:fmt(teamHeistRewardPerMember(heist.members.length)),inline:true},
       {name:'🎯 最終成功率',value:`${finalChance}%`,inline:true},
       {name:'🚘 逃跑載具',value:`${vehicleName}（+${vehicleBonus}%）`,inline:true},
+      {name:'🐦 同行寵物加成',value:`+${petHeistBonus.toFixed(1)}%`,inline:true},
+      {name:'🏚️ 隊長藏身處',value:`成功率 +${hideoutBonus}%｜戰利品 +${((hideoutLootBonus-1)*100).toFixed(0)}%`,inline:true},
       {name:'👥 搶匪名單',value:heist.members.map(memberId=>`<@${memberId}>`).join('、').slice(0,1024)},
       {name:'💨 逃脫事件',value:`${escapeEvent.title}\n${escapeEvent.text}`.slice(0,1024)}
     ));
-    const payload={...heistScenePayload(new EmbedBuilder().setColor(0x35C46A).setTitle(deedReward?'📜 HAO 信義區地契得手！':'💰 團隊搶銀行成功！').setDescription(`隊伍成功突破警方封鎖，載滿戰利品返回藏身處！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n\n目標：**${heistBanks[heist.bankId].name}**${hot?'\n🔥 今日大量入金獎池加倍！':''}\n金庫：**${vault.name}**｜${heistVaultRewardLabel(vault)}\n地圖：**${map.name}**${deedReward?'（地契固定結算，不套用地圖倍率）':`｜收益 ×${map.rewardMultiplier}`}\n逃跑載具：**${vehicleName}**｜成功率 +${vehicleBonus}%\n${deedReward?'方案倍率：不套用於地契固定結算':`方案收益倍率：×${schemeMultiplier}`}\n警方人數：${heist.police.size}/8\n${deedReward?'地契變現總額':'銀行戰利品'}：**${fmt(lootTotal)}**\n${deedReward?`均分人數：**${heist.members.length} 人**`:`每人團隊獎勵：**${fmt(teamHeistRewardPerMember(heist.members.length))}**`}\n總收益：**${fmt(total)}**\n最終成功率：${finalChance}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜槍枝費銷毀：${fmt(heist.weaponFeeTotal)}（均不退還）\n\n**成員實際入帳**\n${payouts.join('\n')}${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),escapeImage),components:[]};
-    return publishLatestHeistResult(i,payload);
+    const payload={...heistStagePayload(new EmbedBuilder().setColor(0x35C46A).setTitle(deedReward?'📜 HAO 信義區地契得手！':isMuseumTarget?'🏛️ 中央美術館搶劫成功！':'💰 團隊搶銀行成功！').setDescription(`隊伍成功突破警方封鎖，載滿戰利品返回藏身處！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n\n目標：**${heistBanks[heist.bankId].name}**${hot?'\n🔥 今日大量入金獎池加倍！':''}\n${isMuseumTarget?'戰利品':'金庫'}：**${vault.name}**｜${heistVaultRewardLabel(vault)}\n地圖：**${map.name}**${deedReward?'（地契固定結算，不套用地圖倍率）':`｜收益 ×${map.rewardMultiplier}`}\n逃跑載具：**${vehicleName}**｜有效成功率 +${effectiveVehicleBonus}%\n藏身處：**有效成功率 +${effectiveHideoutBonus}%｜戰利品 +${deedReward?0:((hideoutLootBonus-1)*100).toFixed(0)}%**\n警方戰術：**${heistPoliceTacticSummary(heist)}**\n警方載具：**${heistPoliceVehicleSummary(heist)}**｜載具壓制 -${combat.policeVehiclePressure}%｜總壓力 -${combat.policePressure}%\n${deedReward?'方案倍率：不套用於地契固定結算':`方案收益倍率：×${schemeMultiplier}`}\n警方人數：${heist.police.size}/8\n${deedReward?'地契變現總額':isMuseumTarget?'館藏戰利品':'銀行戰利品'}：**${fmt(lootTotal)}**\n${deedReward?`均分人數：**${heist.members.length} 人**`:`每人團隊獎勵：**${fmt(teamHeistRewardPerMember(heist.members.length))}**`}\n總收益：**${fmt(total)}**\n最終成功率：${finalChance}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜彈藥消耗：${heist.ammoConsumed} 箱\n\n**成員實際入帳**\n${payouts.join('\n')}${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),escapeImage),components:[]};
+    const result=await publishLatestHeistResult(i,payload);
+    await maybeLaunchHideoutRaid(i.channel,heist);
+    return result;
   }
   if(i.isButton() && i.customId.startsWith('jail_training:') && i.guildId) {
     const ownerId=i.customId.split(':')[1];
@@ -3002,7 +5465,7 @@ client.on('interactionCreate', async i => {
       return i.update({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🪙 刮刮樂｜手動刮獎').setDescription(`已刮開 **${ticket.revealed.size}/3** 格，繼續選擇下一格！`)],components:[scratchRow(token,ticket)]});
     }
     scratchTickets.delete(token);
-    const settlement=settleGamePayout(i.guildId,i.user.id,ticket.bet,ticket.payout,'刮刮樂');
+    const settlement=settleGamePayout(i.guildId,i.user.id,ticket.bet,ticket.payout,'刮刮樂',{allIn:ticket.allIn});
     const won=ticket.payout>ticket.bet, reaction=dealerReaction(won);
     const result=ticket.payout?`🎉 中獎！獲得 ${fmt(settlement.credited)}`:`沒有中獎，損失 ${fmt(ticket.bet)}`;
     const dogEvent=settlement.dog?'\n\n🐕 **博美犬叼著你贏來的金幣跑了！本局收益歸 0。**':'';
@@ -3041,11 +5504,11 @@ client.on('interactionCreate', async i => {
     const [kind,id]=i.values[0].split(':'),product=kind==='pet'?petCatalog[id]:petItemCatalog[id];
     if(!product) return i.reply({content:'⚠️ 找不到這項商品。',ephemeral:true});
     const embed=new EmbedBuilder().setColor(0xE8A2C8).setTitle(`${product.emoji} ${product.name}`).setDescription(kind==='pet'
-      ? `領養價格：**${fmt(product.price)}**\n特殊功能：**${product.bonusText}**\n\n${product.description}\n\n心情達 20 以上且設為同行夥伴時，特殊功能才會啟用。`
-      : `用品價格：**${fmt(product.price)}**\n使用效果：**心情 +${product.mood}**\n\n${product.description}`);
-    const buyRow=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`pet_shop_buy:${ownerId}:${kind}:${id}`).setLabel(kind==='pet'?'確認領養':'選擇購買數量').setEmoji(kind==='pet'?'🐾':'🛒').setStyle(ButtonStyle.Success));
-    if(kind==='pet') return i.update({...petMediaPayload(embed,id),components:[petShopSelectRow(ownerId,i.values[0]),buyRow],attachments:[]});
-    return i.update({embeds:[embed],components:[petShopSelectRow(ownerId,i.values[0]),buyRow],attachments:[]});
+      ? `${product.rarity?`稀有度：**🌟 ${product.rarity}**\n`:''}領養價格：**${fmt(product.price)}**\n特殊功能：**${product.bonusText}**${product.hungerMultiplier>1?`\n食量：**一般鳥類的 ${product.hungerMultiplier} 倍**（每日心情 -${Math.round(10*product.hungerMultiplier)}）`:''}\n\n${product.description}\n\n心情達 20 以上且設為同行夥伴時，特殊功能才會啟用。`
+      : `商品價格：**${fmt(product.price)}**\n${product.permanent?`資產效果：**${petItemEffectLabel(product)}**\n購買限制：**每位玩家限購一座・自動生效**`:`使用效果：**${petItemEffectLabel(product)}**`}${petItemTargetLabel(product)?`\n適用對象：**${petItemTargetLabel(product)}**`:''}\n\n${product.description}`);
+    const buyRow=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`pet_shop_buy:${ownerId}:${kind}:${id}`).setLabel(kind==='pet'?'確認領養':product.permanent?'確認購買資產':'選擇購買數量').setEmoji(kind==='pet'?'🐾':'🛒').setStyle(ButtonStyle.Success));
+    if(kind==='pet') return i.update({...petMediaPayload(embed,id),components:[...petShopSelectRows(ownerId,i.values[0]),buyRow],attachments:[]});
+    return i.update({...petItemMediaPayload(embed,id),components:[...petShopSelectRows(ownerId,i.values[0]),buyRow],attachments:[]});
   }
   if(i.isButton()&&i.customId.startsWith('pet_shop_buy:')&&i.guildId) {
     const [,ownerId,kind,id]=i.customId.split(':');
@@ -3053,13 +5516,19 @@ client.on('interactionCreate', async i => {
     if(kind==='item') {
       const product=petItemCatalog[id];
       if(!product) return i.reply({content:'⚠️ 找不到這項商品。',ephemeral:true});
+      if(product.permanent) {
+        try {
+          const result=buyPetShopProduct(i.guildId,i.user.id,'item',id,1);
+          return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('✅ 永久寵物資產購入完成').setDescription(`你已購買 **${product.emoji} ${product.name}**。\n資產會自動替鳥類寵物提供：**${petItemEffectLabel(product)}**\n\n金庫：**${fmt(result.balance)}**`)],components:petShopSelectRows(ownerId),attachments:[]});
+        } catch(error) { return i.reply({content:`⚠️ ${error.message}`,ephemeral:true}); }
+      }
       const quantityInput=new TextInputBuilder().setCustomId('quantity').setLabel(`購買數量（單價 ${fmt(product.price)}）`).setPlaceholder('請輸入 1～99').setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(2).setRequired(true);
       return i.showModal(new ModalBuilder().setCustomId(`pet_shop_quantity:${ownerId}:${id}`).setTitle(`購買 ${product.name}`).addComponents(new ActionRowBuilder().addComponents(quantityInput)));
     }
     try {
       const result=buyPetShopProduct(i.guildId,i.user.id,kind,id),product=result.product;
       const text=`你已領養 **${product.emoji} ${product.name}**！使用 **/我的寵物** 查看與照顧。`;
-      return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('✅ 寵物店交易完成').setDescription(`${text}\n\n金庫：**${fmt(result.balance)}**`)],components:[petShopSelectRow(ownerId)],attachments:[]});
+      return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('✅ 寵物店交易完成').setDescription(`${text}\n\n金庫：**${fmt(result.balance)}**`)],components:petShopSelectRows(ownerId),attachments:[]});
     } catch(error) { return i.reply({content:`⚠️ ${error.message}`,ephemeral:true}); }
   }
   if(i.isModalSubmit()&&i.customId.startsWith('pet_shop_quantity:')&&i.guildId) {
@@ -3068,7 +5537,7 @@ client.on('interactionCreate', async i => {
     const quantity=Number(i.fields.getTextInputValue('quantity').trim());
     try {
       const result=buyPetShopProduct(i.guildId,i.user.id,'item',id,quantity),product=result.product;
-      return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('✅ 寵物店交易完成').setDescription(`你已購買 **${product.emoji} ${product.name} ×${result.quantity}**。\n總價：**${fmt(result.total)}**\n\n金庫：**${fmt(result.balance)}**`)],components:[petShopSelectRow(ownerId)],attachments:[]});
+      return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('✅ 寵物店交易完成').setDescription(`你已購買 **${product.emoji} ${product.name} ×${result.quantity}**。\n總價：**${fmt(result.total)}**\n\n金庫：**${fmt(result.balance)}**`)],components:petShopSelectRows(ownerId),attachments:[]});
     } catch(error) { return i.reply({content:`⚠️ ${error.message}`,ephemeral:true}); }
   }
   if(i.isStringSelectMenu()&&i.customId.startsWith('pet_companion:')&&i.guildId) {
@@ -3101,6 +5570,62 @@ client.on('interactionCreate', async i => {
     if(!owned) return i.reply({content:'⚠️ 你沒有這隻寵物。',ephemeral:true});
     db.prepare('UPDATE player_pets SET nickname=? WHERE guild_id=? AND user_id=? AND pet_id=?').run(nickname,i.guildId,ownerId,petId);
     return i.update({...petProfilePayload(i.guildId,ownerId),components:petProfileComponents(i.guildId,ownerId),attachments:[]});
+  }
+  if(i.isButton()&&i.customId.startsWith('airline_register:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有機場擁有者可以註冊航空公司。',ephemeral:true});
+    if(airlineCompany(i.guildId,ownerId)) return i.reply({content:'⚠️ 你已經註冊過航空公司。',ephemeral:true});
+    if(!ownedAirports(i.guildId,ownerId).length) return i.reply({content:'⚠️ 請先購買一座機場。',ephemeral:true});
+    const input=new TextInputBuilder().setCustomId('company_name').setLabel(`航空公司名稱｜手續費 ${fmt(AIRLINE_REGISTRATION_FEE)}`).setPlaceholder('例如：澳門星空航空').setStyle(TextInputStyle.Short).setMinLength(2).setMaxLength(30).setRequired(true);
+    return i.showModal(new ModalBuilder().setCustomId(`airline_register_modal:${ownerId}`).setTitle('🏢 註冊航空公司').addComponents(new ActionRowBuilder().addComponents(input)));
+  }
+  if(i.isModalSubmit()&&i.customId.startsWith('airline_register_modal:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有機場擁有者可以註冊航空公司。',ephemeral:true});
+    try {
+      const company=registerAirlineCompany(i.guildId,ownerId,i.fields.getTextInputValue('company_name'));
+      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,`✅ **${company.company_name}** 註冊完成，已支付 **${fmt(AIRLINE_REGISTRATION_FEE)}** 手續費。請選擇機場、客機與航線。`)],components:airlineDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ 註冊失敗：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isStringSelectMenu()&&['airline_airport:','airline_aircraft:','airline_route:'].some(prefix=>i.customId.startsWith(prefix))&&i.guildId) {
+    const [kind,ownerId]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以變更營運配置。',ephemeral:true});
+    const columns={airline_airport:'airport_id',airline_aircraft:'aircraft_id',airline_route:'route_id'};
+    try {
+      updateAirlineSelection(i.guildId,ownerId,columns[kind],i.values[0]);
+      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,'✅ 營運配置已更新；開始航線前不會扣款。')],components:airlineDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('airline_start:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以開啟航線。',ephemeral:true});
+    try {
+      const result=startAirlineFlight(i.guildId,ownerId);
+      const notice=`🛫 **${result.route.name} 已起飛！**\n客機：${result.aircraft.name}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n抵達時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ 無法開啟航線：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('airline_claim:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以領取營收。',ephemeral:true});
+    try {
+      const result=claimAirlineRevenue(i.guildId,ownerId);
+      const notice=`💰 **航線營收已入帳！**\n營收：**${fmt(result.flight.gross_revenue)}**｜本航班淨收益：**${fmt(result.profit)}**\n目前金庫：**${fmt(result.next)}**`;
+      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
+    } catch(error) {
+      return i.reply({content:`⚠️ 無法領取營收：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('airline_refresh:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以操作。',ephemeral:true});
+    return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId)],components:airlineDashboardComponents(i.guildId,ownerId)});
   }
   if(i.isButton()&&(i.customId.startsWith('pvp_race_accept:')||i.customId.startsWith('pvp_race_reject:'))&&i.guildId) {
     const token=i.customId.split(':')[1],session=pvpRaceSessions.get(token);
@@ -3140,6 +5665,91 @@ client.on('interactionCreate', async i => {
       session.status='done';pvpRaceSessions.delete(token);
       return i.editReply({content:`⚠️ ${error.message}${session.charged?'（下注已退回）':''}`,embeds:[],components:[],attachments:[]});
     }
+  }
+  if(i.isButton()&&(i.customId.startsWith('liar_dice_accept:')||i.customId.startsWith('liar_dice_reject:'))&&i.guildId) {
+    const token=i.customId.split(':')[1],session=liarDiceSessions.get(token);
+    if(!session||session.guildId!==i.guildId||session.status!=='pending'||session.expiresAt<Date.now()) return i.reply({content:'這項骰盅吹牛挑戰已失效。',ephemeral:true});
+    if(i.user.id!==session.opponentId) return i.reply({content:'只有被挑戰的玩家可以回應。',ephemeral:true});
+    if(i.customId.startsWith('liar_dice_reject:')) {
+      if(session.timer) clearTimeout(session.timer);
+      session.status='done';liarDiceSessions.delete(token);
+      return i.update({embeds:[new EmbedBuilder().setColor(0x607D8B).setTitle('🏳️ 骰盅吹牛挑戰已拒絕').setDescription(`**${session.names[session.opponentId]}** 拒絕了 **${session.names[session.challengerId]}** 的挑戰。`)],components:[liarDiceChallengeRow(token,true)]});
+    }
+    for(const id of liarDicePlayerIds(session)) {
+      if(liarDiceActiveForUser(session.guildId,id,token)) return i.reply({content:`${session.names[id]} 已經有另一場骰盅吹牛正在進行。`,ephemeral:true});
+      if(jailRemaining(session.guildId,id)||hospitalRemaining(session.guildId,id)) return i.reply({content:`${session.names[id]} 目前無法參加遊戲。`,ephemeral:true});
+      try { validBet(session.guildId,id,session.bet); }
+      catch(error) { return i.reply({content:`${session.names[id]}：${error.message}`,ephemeral:true}); }
+      const needed=staminaCost(session.guildId,id,5);
+      if(stamina(session.guildId,id)<needed) return i.reply({content:`${session.names[id]} 體力不足，需要 ${needed} 點。`,ephemeral:true});
+    }
+    try {
+      lockLiarDiceWagers(session);
+      session.charged=true;
+      for(const id of liarDicePlayerIds(session)) consumeStamina(session.guildId,id,5);
+    } catch(error) {
+      if(session.charged&&!session.settled) { settleLiarDiceWagers(session);session.settled=true; }
+      session.status='done';liarDiceSessions.delete(token);
+      return i.reply({content:`無法開始對局：${error.message}${session.charged?'（下注已退回）':''}`,ephemeral:true});
+    }
+    session.status='playing';
+    session.dice={[session.challengerId]:liarDiceRoll(),[session.opponentId]:liarDiceRoll()};
+    session.currentId=session.challengerId;
+    session.bid=null;
+    session.lastAction=null;
+    session.expiresAt=Date.now()+2*60*1000;
+    await i.update({content:'',embeds:[liarDiceGameEmbed(session)],components:[liarDiceActionRow(token)]});
+    scheduleLiarDiceExpiry(token);
+    return;
+  }
+  if(i.isButton()&&i.customId.startsWith('liar_dice_view:')&&i.guildId) {
+    const token=i.customId.split(':')[1],session=liarDiceSessions.get(token);
+    if(!session||session.guildId!==i.guildId||session.status!=='playing') return i.reply({content:'這場骰盅吹牛已經結束或失效。',ephemeral:true});
+    if(!liarDicePlayerIds(session).includes(i.user.id)) return i.reply({content:'你不是這場對局的玩家。',ephemeral:true});
+    return i.reply({content:liarDicePrivateText(session,i.user.id),ephemeral:true});
+  }
+  if(i.isButton()&&i.customId.startsWith('liar_dice_bid:')&&i.guildId) {
+    const token=i.customId.split(':')[1],session=liarDiceSessions.get(token);
+    if(!session||session.guildId!==i.guildId||session.status!=='playing'||session.expiresAt<Date.now()) return i.reply({content:'這場骰盅吹牛已經結束或失效。',ephemeral:true});
+    if(i.user.id!==session.currentId) return i.reply({content:'現在還沒輪到你喊骰。',ephemeral:true});
+    const quantityInput=new TextInputBuilder().setCustomId('quantity').setLabel('骰子數量（1～10）').setPlaceholder(session.bid?`必須高於目前 ${session.bid.quantity} 顆 ${session.bid.face} 點`:'例如：3').setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(2).setRequired(true);
+    const faceInput=new TextInputBuilder().setCustomId('face').setLabel('骰子點數（只能輸入 2～6）').setPlaceholder('例如：4').setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(1).setRequired(true);
+    return i.showModal(new ModalBuilder().setCustomId(`liar_dice_bid_modal:${token}`).setTitle('📣 喊骰').addComponents(new ActionRowBuilder().addComponents(quantityInput),new ActionRowBuilder().addComponents(faceInput)));
+  }
+  if(i.isModalSubmit()&&i.customId.startsWith('liar_dice_bid_modal:')&&i.guildId) {
+    const token=i.customId.split(':')[1],session=liarDiceSessions.get(token);
+    if(!session||session.guildId!==i.guildId||session.status!=='playing'||session.expiresAt<Date.now()) return i.reply({content:'這場骰盅吹牛已經結束或失效。',ephemeral:true});
+    if(i.user.id!==session.currentId) return i.reply({content:'現在還沒輪到你喊骰。',ephemeral:true});
+    const quantity=Number(i.fields.getTextInputValue('quantity')),face=Number(i.fields.getTextInputValue('face'));
+    if(!Number.isInteger(quantity)||quantity<1||quantity>10) return i.reply({content:'骰子數量必須是 1～10 的整數。',ephemeral:true});
+    if(!Number.isInteger(face)||face<2||face>6) return i.reply({content:'骰子點數只能輸入 2～6；1 點是百搭，不單獨喊。',ephemeral:true});
+    if(session.bid&&!(quantity>session.bid.quantity||(quantity===session.bid.quantity&&face>session.bid.face))) return i.reply({content:`喊注必須高於目前的 ${session.bid.quantity} 顆 ${session.bid.face} 點。請增加數量，或在相同數量提高點數。`,ephemeral:true});
+    session.bid={quantity,face,bidderId:i.user.id};
+    session.lastAction=`**${session.names[i.user.id]}** 喊 **${quantity} 顆 ${face} 點**`;
+    session.currentId=liarDiceOtherPlayer(session,i.user.id);
+    session.expiresAt=Date.now()+2*60*1000;
+    await i.update({embeds:[liarDiceGameEmbed(session)],components:[liarDiceActionRow(token)]});
+    scheduleLiarDiceExpiry(token);
+    return;
+  }
+  if(i.isButton()&&i.customId.startsWith('liar_dice_call:')&&i.guildId) {
+    const token=i.customId.split(':')[1],session=liarDiceSessions.get(token);
+    if(!session||session.guildId!==i.guildId||session.status!=='playing'||session.expiresAt<Date.now()) return i.reply({content:'這場骰盅吹牛已經結束或失效。',ephemeral:true});
+    if(i.user.id!==session.currentId) return i.reply({content:'現在還沒輪到你抓吹牛。',ephemeral:true});
+    if(!session.bid) return i.reply({content:'目前還沒有人喊骰，不能抓吹牛。',ephemeral:true});
+    const callerId=i.user.id,bidderId=session.bid.bidderId;
+    const allDice=liarDicePlayerIds(session).flatMap(id=>session.dice[id]);
+    const actual=allDice.filter(value=>value===1||value===session.bid.face).length;
+    const bidTrue=actual>=session.bid.quantity;
+    const winnerId=bidTrue?bidderId:callerId,loserId=liarDiceOtherPlayer(session,winnerId);
+    session.status='done';
+    if(session.timer) clearTimeout(session.timer);
+    settleLiarDiceWagers(session,winnerId);
+    session.settled=true;
+    liarDiceSessions.delete(token);
+    const diceLines=liarDicePlayerIds(session).map(id=>`**${session.names[id]}**：${session.dice[id].map(value=>liarDiceFaces[value-1]).join(' ')}　（${session.dice[id].join('、')}）`).join('\n');
+    const resultText=`${diceLines}\n\n最後喊注：**${session.bid.quantity} 顆 ${session.bid.face} 點**\n實際符合：**${actual} 顆**（包含百搭 1 點）\n\n${bidTrue?`✅ 喊注成立，抓吹牛失敗！`:`🫵 喊注不足，成功抓到吹牛！`}\n🏆 **${session.names[winnerId]}** 擊敗 **${session.names[loserId]}**，取得 **${fmt(session.bet*2)}** 獎池。\n\n${liarDicePlayerIds(session).map(id=>`${session.names[id]} 金庫：**${fmt(balance(session.guildId,id))}**`).join('\n')}`;
+    return i.update({embeds:[liarDiceGameEmbed(session,resultText)],components:[]});
   }
   if(i.isStringSelectMenu()&&i.customId.startsWith('race_select:')&&i.guildId) {
     const token=i.customId.split(':')[1],session=raceSessions.get(token);
@@ -3224,12 +5834,141 @@ client.on('interactionCreate', async i => {
     }
     return i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🚨 多人闖空門失敗！').setDescription(`警報大響，全隊 ${members.map(id=>`<@${id}>`).join('、')} 都被逮捕，關進迷子的小黑屋 **2 分鐘**。`)],components:[]});
   }
+  if(i.isButton()&&i.customId.startsWith('jenga_')&&i.guildId) {
+    const [action,token,indexText]=i.customId.split(':'),session=jengaGames.get(token);
+    if(!session||session.expiresAt<Date.now()) {
+      if(session&&!session.settled) settleGamePayout(session.guildId,session.userId,session.bet,0,'抽積木',{allIn:session.allIn});
+      jengaGames.delete(token);
+      return i.reply({content:'⚠️ 這場抽積木已逾時，下注視為放棄。',ephemeral:true});
+    }
+    if(i.user.id!==session.userId) return i.reply({content:'⚠️ 只有本局玩家可以抽積木。',ephemeral:true});
+    if(action==='jenga_cash') {
+      if(session.pulls<1) return i.reply({content:'⚠️ 至少成功抽出一塊積木才能收手。',ephemeral:true});
+      const payout=Math.floor(session.bet*jengaCurrentMultiplier(session));
+      const settlement=settleGamePayout(session.guildId,session.userId,session.bet,payout,'抽積木',{allIn:session.allIn});
+      session.settled=true;
+      jengaGames.delete(token);
+      return i.update({embeds:[jengaSettlementEmbed(session,settlement)],components:settlement.dog?[dogChaseRow(session.userId,settlement.stolen)]:[]});
+    }
+    if(action!=='jenga_pull') return;
+    const blockIndex=Number(indexText),block=session.blocks[blockIndex];
+    if(!block) return i.reply({content:'⚠️ 找不到這塊積木。',ephemeral:true});
+    if(Math.random()<block.risk) {
+      const settlement=settleGamePayout(session.guildId,session.userId,session.bet,0,'抽積木',{allIn:session.allIn});
+      session.settled=true;
+      jengaGames.delete(token);
+      return i.update({embeds:[jengaSettlementEmbed(session,settlement,{collapsed:true})],components:[]});
+    }
+    session.pulls+=1;
+    session.riskBonus=Number((session.riskBonus+block.bonus).toFixed(2));
+    if(session.pulls>=jengaPayoutMultipliers.length) {
+      const payout=Math.floor(session.bet*jengaCurrentMultiplier(session));
+      const settlement=settleGamePayout(session.guildId,session.userId,session.bet,payout,'抽積木',{allIn:session.allIn});
+      session.settled=true;
+      jengaGames.delete(token);
+      return i.update({embeds:[jengaSettlementEmbed(session,settlement,{completed:true})],components:settlement.dog?[dogChaseRow(session.userId,settlement.stolen)]:[]});
+    }
+    session.blocks=jengaRoundBlocks(session.pulls);
+    session.expiresAt=Date.now()+5*60*1000;
+    setTimeout(()=>{
+      const current=jengaGames.get(token);
+      if(current&&!current.settled&&current.expiresAt<=Date.now()) {
+        settleGamePayout(current.guildId,current.userId,current.bet,0,'抽積木',{allIn:current.allIn});
+        jengaGames.delete(token);
+      }
+    },5*60*1000+1000);
+    return i.update({embeds:[jengaGameEmbed(session,`✅ 成功抽出**${['左側','中間','右側'][blockIndex]}的${block.name}積木**！高塔開始搖晃，現在要收手，還是繼續？`)],components:jengaGameRows(token,session)});
+  }
+  if(i.isButton()&&i.customId.startsWith('transfer_mizi_')&&i.guildId) {
+    const [operation,transferIdText,senderId]=i.customId.split(':');
+    if(i.user.id!==senderId) return i.reply({content:'⚠️ 只有原轉帳玩家可以決定是否追擊迷子。',ephemeral:true});
+    const transferId=Number(transferIdText),action=operation==='transfer_mizi_chase'?'chase':operation==='transfer_mizi_abandon'?'abandon':null;
+    if(!Number.isSafeInteger(transferId)||!action) return i.reply({content:'⚠️ 這個轉帳事件按鈕無效。',ephemeral:true});
+    try {
+      const result=resolveMiziTransfer(i.guildId,transferId,senderId,action);
+      const chased=action==='chase';
+      return i.update({
+        content:`<@${result.sender_id}> <@${result.recipient_id}>`,
+        embeds:[new EmbedBuilder()
+          .setColor(chased?0x2ECC71:0x6C757D)
+          .setTitle(chased?'🏃 追擊成功｜已從迷子手中取回款項':'🏳️ 已放棄追擊迷子')
+          .setDescription(chased
+            ? `<@${result.sender_id}> 已取回遭盜領的 **${fmt(result.senderRecovered)}** 金幣。\n這筆轉帳已取消，<@${result.recipient_id}> 未收到款項；原先支付的 **${fmt(result.fee)}** 手續費不退還。`
+            : `<@${result.sender_id}> 決定放棄追擊，遭盜領的 **${fmt(result.amount)}** 金幣已永久損失。\n<@${result.recipient_id}> 未收到款項；原先支付的 **${fmt(result.fee)}** 手續費不退還。`)
+          .addFields({name:'轉帳玩家目前金庫',value:fmt(result.senderBalance),inline:true})
+          .setFooter({text:`轉帳事件編號 #${transferId}`})
+          .setTimestamp()],
+        components:[miziTransferRow(transferId,senderId,true)]
+      });
+    } catch(error) {
+      return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
+    }
+  }
   if (!i.isChatInputCommand() || !i.guildId) return;
   const g=i.guildId, u=i.user.id;
   try {
     if (i.commandName==='金庫') {
       const target=i.options.getUser('玩家') || i.user;
       return i.reply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🏦 玩家金庫').setDescription(`${target} 目前擁有 **${fmt(balance(g,target.id))}**`)]});
+    }
+    if(i.commandName==='轉帳') {
+      const recipient=i.options.getUser('收款人',true),amount=i.options.getInteger('金額',true);
+      if(recipient.bot) throw new Error('不能轉帳給機器人帳號');
+      if(recipient.id===u) throw new Error('不能轉帳給自己');
+      const result=createPlayerTransfer(g,u,recipient.id,amount);
+      if(result.event==='mizi_theft') {
+        return i.reply({
+          content:`${recipient}`,
+          embeds:[new EmbedBuilder()
+            .setColor(0xD35400)
+            .setTitle('🕶️ 隨機事件｜迷子盜領款項')
+            .setDescription(`轉帳途中，迷子盜領了 **${fmt(result.amount)}** 金幣！\n${recipient} 目前尚未收到款項。原轉帳玩家可選擇追擊並取回本金，或放棄追擊。`)
+            .addFields(
+              {name:'原始轉帳金額',value:fmt(result.amount),inline:true},
+              {name:'2% 手續費',value:fmt(result.fee),inline:true},
+              {name:'本次已扣款',value:fmt(result.totalCharged),inline:true},
+              {name:'轉帳玩家剩餘金幣',value:fmt(result.senderBalance),inline:true}
+            )
+            .setFooter({text:`只有原轉帳玩家可以操作｜轉帳事件編號 #${result.transferId}`})
+            .setTimestamp()],
+          components:[miziTransferRow(result.transferId,u)]
+        });
+      }
+      if(result.event==='extra_zero') {
+        return i.reply({
+          content:`${recipient}`,
+          embeds:[new EmbedBuilder()
+            .setColor(0x9B59B6)
+            .setTitle('⌨️ 隨機事件｜多按了一個 0！')
+            .setDescription(`原始轉帳 **${fmt(result.amount)}** 後面多出一個 0，${recipient} 實際收到 **${fmt(result.recipientReceived)}**！\n額外的 **${fmt(result.extraFromVault)}** 已由賭場中央寶庫支付，轉帳玩家仍只負擔原始本金與 2% 手續費。`)
+            .addFields(
+              {name:'轉帳玩家實付',value:fmt(result.totalCharged),inline:true},
+              {name:'2% 手續費',value:fmt(result.fee),inline:true},
+              {name:'收款人入帳',value:fmt(result.recipientReceived),inline:true},
+              {name:'轉帳玩家剩餘',value:fmt(result.senderBalance),inline:true},
+              {name:'收款人目前金庫',value:fmt(result.recipientBalance),inline:true},
+              {name:'賭場寶庫餘額',value:fmt(result.vaultBalance),inline:true}
+            )
+            .setFooter({text:`轉帳編號 #${result.transferId}`})
+            .setTimestamp()]
+        });
+      }
+      return i.reply({
+        content:`${recipient}`,
+        embeds:[new EmbedBuilder()
+          .setColor(0x2ECC71)
+          .setTitle('💸 玩家轉帳完成')
+          .setDescription(`${i.user} 已轉帳 **${fmt(result.amount)}** 金幣給 ${recipient}。`)
+          .addFields(
+            {name:'轉帳本金',value:fmt(result.amount),inline:true},
+            {name:'2% 手續費',value:fmt(result.fee),inline:true},
+            {name:'合計扣款',value:fmt(result.totalCharged),inline:true},
+            {name:'轉帳玩家剩餘',value:fmt(result.senderBalance),inline:true},
+            {name:'收款人目前金庫',value:fmt(result.recipientBalance),inline:true}
+          )
+          .setFooter({text:`手續費已存入賭場中央寶庫｜轉帳編號 #${result.transferId}`})
+          .setTimestamp()]
+      });
     }
     if(i.commandName==='成就') {
       const target=i.options.getUser('玩家')||i.user,state=syncAchievements(g,target.id),lines=achievementLines(g,target.id);
@@ -3274,17 +6013,21 @@ client.on('interactionCreate', async i => {
     if (i.commandName==='銀行') {
       const action=i.options.getSubcommand();
       if(action==='查詢') {
-        const currentDebt=debt(g,u), available=Math.max(0,LOAN_LIMIT-currentDebt),interestPercent=(LOAN_DAILY_INTEREST_RATE*100).toFixed(2).replace(/\.00$/,'');
-        return i.reply({embeds:[new EmbedBuilder().setColor(0x1565C0).setTitle('🏛️ 虛擬金幣銀行').setDescription(`金庫餘額：**${fmt(balance(g,u))}**\n目前負債：**${fmt(currentDebt)}**\n可借額度：**${fmt(available)}**\n每日利率：**${interestPercent}% 複利**\n\n利息於台北時間跨日時累計；無負債時不計息。`)]});
+        const currentDebt=debt(g,u),credit=loanCreditProfile(g,u,currentDebt),available=Math.max(0,credit.limit-currentDebt),interestPercent=(LOAN_DAILY_INTEREST_RATE*100).toFixed(2).replace(/\.00$/,'');
+        return i.reply({embeds:[new EmbedBuilder().setColor(0x1565C0).setTitle('🏛️ 虛擬金幣銀行').setDescription(`信用評等：**${credit.rating}**\n個人核貸上限：**${fmt(credit.limit)}**／最高 ${fmt(LOAN_LIMIT)}\n目前負債：**${fmt(currentDebt)}**\n目前可借：**${fmt(available)}**\n金庫餘額：**${fmt(balance(g,u))}**\n每日利率：**${interestPercent}% 複利**\n\n**額度評估明細**\n基本額度：${fmt(LOAN_BASE_LIMIT)}\n淨金庫貢獻：+${fmt(credit.walletCredit)}\n資產抵押價值：+${fmt(credit.assetCredit)}\n遊戲收入紀錄：+${fmt(credit.activityCredit)}\n良好還款紀錄：+${fmt(credit.repaymentCredit)}\n\n額度會隨淨資產、永久資產、非借款收入及還款紀錄調整；借入的金幣不會再次墊高額度。利息於台北時間跨日時累計。`)]});
       }
       const amount=i.options.getInteger('金額',true);
       const result=bankTransfer(g,u,amount,action==='借款'?'borrow':'repay');
       const interestPercent=(LOAN_DAILY_INTEREST_RATE*100).toFixed(2).replace(/\.00$/,'');
-      return i.reply({embeds:[new EmbedBuilder().setColor(action==='借款'?0x35C46A:0xF5B942).setTitle(action==='借款'?'💵 借款成功':'✅ 還款成功').setDescription(`${action==='借款'?'已存入金庫':'已償還'}：**${fmt(amount)}**\n金庫餘額：${fmt(result.balance)}\n剩餘負債：${fmt(result.debt)}\n每日利率：**${interestPercent}% 複利**`)]});
+      return i.reply({embeds:[new EmbedBuilder().setColor(action==='借款'?0x35C46A:0xF5B942).setTitle(action==='借款'?'💵 借款成功':'✅ 還款成功').setDescription(`${action==='借款'?'已存入金庫':'已償還'}：**${fmt(amount)}**\n金庫餘額：${fmt(result.balance)}\n剩餘負債：${fmt(result.debt)}\n信用評等：**${result.rating}**\n個人核貸上限：**${fmt(result.limit)}**\n目前可借：**${fmt(Math.max(0,result.limit-result.debt))}**\n每日利率：**${interestPercent}% 複利**`)]});
     }
     if (i.commandName==='體力') {
-      const current=stamina(g,u), max=staminaMax(g,u), bars=Math.round(current/max*10);
-      return i.reply({embeds:[new EmbedBuilder().setColor(current>=max/2?0x35C46A:0xD94A4A).setTitle('⚡ 玩家體力').setDescription(`**${current}/${max}**\n${'🟩'.repeat(bars)}${'⬛'.repeat(10-bars)}\n\n每天台北時間 00:00 重置；拍立得加成僅限當日。`)]});
+      const current=stamina(g,u), max=staminaMax(g,u), bars=Math.round(current/max*10),claimed=dailyStaminaRestoreClaimed(g,u);
+      return i.reply({embeds:[new EmbedBuilder().setColor(current>=max/2?0x35C46A:0xD94A4A).setTitle('⚡ 玩家體力').setDescription(`**${current}/${max}**\n${'🟩'.repeat(bars)}${'⬛'.repeat(10-bars)}\n\n每日免費回體力：**${claimed?'今日已使用':'可以使用 `/每日回體力`'}**\n每天台北時間 00:00 重置；拍立得加成僅限當日。`)]});
+    }
+    if(i.commandName==='每日回體力') {
+      const result=claimDailyStaminaRestore(g,u);
+      return i.reply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('⚡ 每日免費體力恢復完成').setDescription(`本次免費恢復：**${result.restored} 點**\n恢復前：**${result.before}/${result.max}**\n目前體力：**${result.stamina}/${result.max}**\n\n今天的免費次數已使用；台北時間 00:00 後可再次使用。`).setTimestamp()]});
     }
     if (i.commandName==='商城') {
       const list=Object.values(shopItems).map(item=>`${item.name}｜**${fmt(item.price)}**｜${item.fullRestore?'回滿全部體力':item.maxBonus?`當日體力上限 **+${item.maxBonus}**`:`恢復 **${item.stamina}** 體力`}`).join('\n');
@@ -3295,35 +6038,41 @@ client.on('interactionCreate', async i => {
       const list=rows.length?rows.map(row=>`${shopItems[row.item_id]?.name||row.item_id} × **${row.quantity}**`).join('\n'):'背包目前是空的。';
       return i.reply({embeds:[new EmbedBuilder().setColor(0x795548).setTitle('🎒 我的背包').setDescription(`${list}\n\n目前體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)]});
     }
-    if(i.commandName==='寵物店') return i.reply({embeds:[petShopOverviewEmbed()],components:[petShopSelectRow(u)]});
+    if(i.commandName==='寵物店') return i.reply({embeds:[petShopOverviewEmbed()],components:petShopSelectRows(u)});
     if(i.commandName==='我的寵物') return i.reply({...petProfilePayload(g,u),components:petProfileComponents(g,u)});
     if(i.commandName==='資產商城') {
       const category=i.options.getString('分類'),assetId=i.options.getString('商品');
       if(assetId) {
         const asset=assetCatalog[assetId];
         if(!asset) throw new Error('找不到這項資產，請從搜尋建議中選擇');
-        if(asset.forSale===false) throw new Error('這是幸運輪盤限定資產，無法直接從商城查看或購買');
-        const embed=new EmbedBuilder().setColor(asset.rarity==='限定'?0xFF2D95:asset.rarity==='神話'?0x9C27B0:asset.rarity==='傳說'?0xF5B942:0x1565C0).setTitle(asset.name).setDescription(`分類：**${asset.category}**\n稀有度：**${asset.rarity||'一般'}**\n${asset.temporaryHours?'租金':'價格'}：**${fmt(asset.price)}**${asset.temporaryHours?`\n使用期限：**${asset.temporaryHours} 小時**`:''}\n\n${asset.description}\n\n使用 \`/購買資產 資產:${asset.name}\` 完成${asset.temporaryHours?'租用':'購買'}。`);
+        if(!assetIsForSale(asset)) throw new Error('這項資產目前沒有開放販售，或限時販售已經結束');
+        const embed=new EmbedBuilder().setColor(asset.rarity?.includes('限時')?0xFF2D95:asset.rarity==='限定'?0xFF2D95:asset.rarity==='神話'?0x9C27B0:asset.rarity==='傳說'?0xF5B942:0x1565C0).setTitle(asset.name).setDescription(`分類：**${asset.category}**\n稀有度：**${asset.rarity||'一般'}**\n${asset.temporaryHours?'租金':'價格'}：**${fmt(asset.price)}**${asset.temporaryHours?`\n使用期限：**${asset.temporaryHours} 小時**`:''}${assetSaleWindowText(asset)}\n\n${asset.description}\n\n使用 \`/購買資產 資產:${asset.name}\` 完成${asset.temporaryHours?'租用':'購買'}。`);
         return i.reply(assetMediaPayload(embed,assetId,asset));
       }
       const groups=assetCategories.filter(c=>!category||c===category).map(c=>{
-        const items=Object.values(assetCatalog).filter(asset=>asset.category===c&&asset.forSale!==false).map(asset=>`${asset.name}｜**${fmt(asset.price)}**${asset.rarity?`｜${asset.rarity}`:''}\n└ ${asset.description}`).join('\n');
+        const items=Object.values(assetCatalog).filter(asset=>asset.category===c&&assetIsForSale(asset)).map(asset=>`${asset.name}｜**${fmt(asset.price)}**${asset.rarity?`｜${asset.rarity}`:''}${asset.saleEndsAt?`｜⏳ <t:${Math.floor(asset.saleEndsAt/1000)}:R>`:''}\n└ ${asset.description}`).join('\n');
         return `**${c}**\n${items}`;
       }).join('\n\n');
-      return i.reply({embeds:[new EmbedBuilder().setColor(0xD4AF37).setTitle('🏛️ 豪華資產商城').setDescription(`${groups}\n\n🎁 **汽車盲盒｜每盒 10,000 金幣**\n使用 \`/汽車盲盒\` 選擇「綜合車包」或含 8 台限定車款的「福特車包」。綜合車包另有 **2%** 隱藏車總機率：龍貓公車 **0.5%**、Corolla AE86 **1.5%**。\n\n使用 \`/資產商城 商品:\` 查看大圖，再用 \`/購買資產\` 購買；永久持有的資產可透過 \`/資產交易\` 出售。`)]});
+      return i.reply({embeds:[new EmbedBuilder().setColor(0xD4AF37).setTitle('🏛️ 豪華資產商城').setDescription(`${groups}\n\n🎁 **汽車盲盒｜共 7 種主題車包**\n使用 \`/汽車盲盒\` 可選擇綜合、福特、都會通勤、街頭競速、JDM 經典、豪華旗艦與神話超跑汽車盲盒；各車包有獨立售價、體力消耗、車款與機率。\n使用 \`/汽車盲盒內容\` 可先查看公開獎池與圖片。\n\n使用 \`/資產商城 商品:\` 查看大圖，再用 \`/購買資產\` 購買；永久持有的資產可透過 \`/資產交易\` 出售。`)]});
     }
     if(i.commandName==='汽車盲盒內容') {
       const packId=i.options.getString('車包')||'standard',pack=blindBoxPacks[packId]||blindBoxPacks.standard;
-      if(packId==='ford') {
-        const list=pack.ids.map(assetId=>{const asset=assetCatalog[assetId];return `• ${asset.name}｜**${asset.rarity}**｜**${blindBoxChanceLabel(assetId,packId)}**｜${assetBuffs[asset.buff].name}`;}).join('\n');
-        const imageName='ford_pack_preview.jpg',attachment=new AttachmentBuilder(assetPath(pack.preview),{name:imageName});
-        const embed=new EmbedBuilder().setColor(0x1565C0).setTitle('🔵 福特車包｜8 台限定車款').setDescription(`每盒售價：**${fmt(pack.price)}**｜消耗：**${pack.stamina} 體力**\n\n${list}\n\n八台車的機率合計為 **100%**。請使用下方選單查看個別圖片、說明與增益。`).setImage(`attachment://${imageName}`);
-        return i.reply({embeds:[embed],components:[carBlindBoxCatalogRow(packId)],files:[attachment]});
+      const publicIds=blindBoxPackPublicIds(packId),hiddenIds=blindBoxPackHiddenIds(packId);
+      const list=publicIds.map(assetId=>{const asset=assetCatalog[assetId];return `• ${asset.name}｜**${asset.rarity}**｜**${blindBoxChanceLabel(assetId,packId)}**｜${assetBuffs[asset.buff].name}`;}).join('\n');
+      const hiddenRate=blindBoxPackHiddenRate(packId);
+      const hiddenText=hiddenIds.length
+        ? packId==='standard'
+          ? `\n\n**隱藏大獎｜總機率 ${hiddenRate}%**\n${hiddenIds.map(assetId=>{const asset=assetCatalog[assetId];return `• ${asset.name}｜**${blindBoxChanceLabel(assetId,packId)}**`;}).join('\n')}`
+          : `\n\n🎴 另有 **${hiddenIds.length} 台未公開隱藏車**，合計出現率 **${hiddenRate}%**。`
+        :'';
+      const embed=new EmbedBuilder().setColor(pack.color).setTitle(`🎁 ${pack.name}｜內容一覽`).setDescription(`每盒售價：**${fmt(pack.price)} 金幣**｜消耗：**${pack.stamina} 體力**\n${pack.description}\n\n**公開獎池**\n${list}${hiddenText}\n\n請使用下方選單查看公開車款的圖片、說明與增益。`);
+      const payload={embeds:[embed],components:[carBlindBoxCatalogRow(packId)]};
+      if(pack.preview&&existsSync(assetPath(pack.preview))) {
+        const imageName=`${packId}_pack_preview${extname(pack.preview)||'.jpg'}`;
+        payload.files=[new AttachmentBuilder(assetPath(pack.preview),{name:imageName})];
+        embed.setImage(`attachment://${imageName}`);
       }
-      const regular=blindBoxRegularIds.map(assetId=>{const asset=assetCatalog[assetId];return `• ${asset.name}｜**${asset.rarity}**｜${assetBuffs[asset.buff].name}`;}).join('\n');
-      const hidden=blindBoxHiddenIds.map(assetId=>{const asset=assetCatalog[assetId];return `• ${asset.name}｜**${asset.rarity}**｜${blindBoxChanceLabel(assetId)}｜${assetBuffs[asset.buff].name}`;}).join('\n');
-      const embed=new EmbedBuilder().setColor(0x7E57C2).setTitle('🎁 汽車盲盒內容一覽').setDescription(`每盒售價：**10,000 金幣**｜消耗：**3 體力**\n\n**一般獎池｜隨機抽取**\n${regular}\n\n**隱藏大獎｜總計每盒 2%**\n${hidden}\n\n請使用下方選單查看每輛車的圖片、說明與增益。`);
-      return i.reply({embeds:[embed],components:[carBlindBoxCatalogRow('standard')]});
+      return i.reply(payload);
     }
     if(i.commandName==='購買資產') {
       const token=Math.random().toString(36).slice(2,10);
@@ -3334,11 +6083,22 @@ client.on('interactionCreate', async i => {
     if(i.commandName==='我的資產') {
       const target=i.options.getUser('玩家')||i.user,rows=assetBonusRows(g,target.id);
       const totalValue=rows.filter(row=>!row.temporary).reduce((sum,row)=>sum+(assetCatalog[row.asset_id]?.price||0)*row.quantity,0);
+      const activeHideout=hideoutRecord(g,target.id),hideoutLabel=activeHideout?assetCatalog[activeHideout.property_id]?.name:null;
       const list=rows.length?assetCategories.map(category=>{
         const owned=rows.filter(row=>assetCatalog[row.asset_id]?.category===category);
         return owned.length?`**${category}**\n${owned.map(row=>`${assetCatalog[row.asset_id].name} × **${row.quantity}**｜${assetBuffLabel(row.asset_id,row.buff_id)}${row.temporary?`｜⏳ <t:${Math.floor(row.expires_at/1000)}:R>`:''}`).join('\n')}`:null;
       }).filter(Boolean).join('\n\n'):'目前沒有任何房地產或載具。';
-      return i.reply({embeds:[new EmbedBuilder().setColor(0x1565C0).setAuthor({name:`${target.username} 的資產`,iconURL:target.displayAvatarURL()}).setDescription(`${list}\n\n資產原價總值：**${fmt(totalValue)}**`)]});
+      return i.reply({embeds:[new EmbedBuilder().setColor(0x1565C0).setAuthor({name:`${target.username} 的資產`,iconURL:target.displayAvatarURL()}).setDescription(`${list}\n\n🏚️ 目前藏身處：**${hideoutLabel||'尚未設定'}**\n資產原價總值：**${fmt(totalValue)}**`)]});
+    }
+    if(i.commandName==='藏身處') {
+      const properties=ownedHideoutProperties(g,u);
+      if(!properties.length) {
+        return i.reply({embeds:[hideoutEmbed(g,u,'⚠️ 你目前沒有可設為藏身處的永久房地產，請先到資產商城購買。')],components:[]});
+      }
+      return i.reply({embeds:[hideoutEmbed(g,u)],components:hideoutComponents(g,u)});
+    }
+    if(i.commandName==='機場') {
+      return i.reply({embeds:[airlineDashboardEmbed(g,u)],components:airlineDashboardComponents(g,u),ephemeral:true});
     }
     if(i.commandName==='改裝') {
       let assetId=i.options.getString('車輛');
@@ -3349,16 +6109,18 @@ client.on('interactionCreate', async i => {
         const token=Math.random().toString(36).slice(2,10),session={guildId:g,userId:u,assetId:null,category:null,pending:null};
         vehicleModSessions.set(token,session); setTimeout(()=>vehicleModSessions.delete(token),10*60*1000);
         const embed=new EmbedBuilder().setColor(0x7C4DFF).setTitle('🔧 車庫改裝工坊').setDescription('請從下方選單選擇車輛。選定後會立即顯示車輛圖片、烤漆、輪框、寬體、引擎與懸吊選項。');
-        return i.reply({embeds:[embed],components:[vehicleModVehicleRow(token,g,u)]});
+        const tutorial=takeVehicleModTutorial(g,u);
+        return i.reply({embeds:tutorial?[tutorial,embed]:[embed],components:[vehicleModVehicleRow(token,g,u)]});
       }
       const asset=assetCatalog[assetId];
       if(!asset||!modifiableVehicleCategories.has(asset.category)||!vehicleHasVisualMods(assetId)) throw new Error('這輛車尚未完成圖片改裝素材');
-      const owned=db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,u,assetId)?.quantity||0;
+      const owned=assetQuantity(g,u,assetId);
       if(!owned) throw new Error('你目前沒有這輛車');
       const token=Math.random().toString(36).slice(2,10),session={guildId:g,userId:u,assetId,category:null,pending:null};
       vehicleModSessions.set(token,session); setTimeout(()=>vehicleModSessions.delete(token),10*60*1000);
       await i.deferReply();
-      return i.editReply({...await vehicleModPayload(g,u,assetId),components:vehicleModComponents(token,session)});
+      const payload=includeVehicleModTutorial(await vehicleModPayload(g,u,assetId),g,u);
+      return i.editReply({...payload,components:vehicleModComponents(token,session)});
     }
     if(['車庫','停機坪','碼頭'].includes(i.commandName)) {
       const isHangar=i.commandName==='停機坪',isMarina=i.commandName==='碼頭',selected=i.options.getString('展示');
@@ -3394,7 +6156,7 @@ client.on('interactionCreate', async i => {
       const buyer=i.options.getUser('買家',true),assetId=i.options.getString('資產',true),quantity=i.options.getInteger('數量',true),price=i.options.getInteger('價格',true);
       if(!assetCatalog[assetId]) throw new Error('找不到這項資產，請從搜尋建議中選擇');
       if(buyer.id===u||buyer.bot) throw new Error('請指定另一位真人玩家作為買家');
-      const owned=db.prepare('SELECT quantity FROM player_assets WHERE guild_id=? AND user_id=? AND asset_id=?').get(g,u,assetId)?.quantity||0;
+      const owned=assetQuantity(g,u,assetId);
       if(owned<quantity) throw new Error(`你持有的 ${assetCatalog[assetId].name} 數量不足，目前只有 ${owned}`);
       const token=Math.random().toString(36).slice(2,10),offer={guildId:g,sellerId:u,buyerId:buyer.id,assetId,quantity,price};
       assetTradeOffers.set(token,offer); setTimeout(()=>assetTradeOffers.delete(token),5*60*1000);
@@ -3409,6 +6171,21 @@ client.on('interactionCreate', async i => {
       if(!asset) throw new Error('找不到這項資產，請從搜尋建議中選擇');
       const listingId=createMarketListing(g,u,assetId,quantity,price);
       return i.reply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🏷️ 二手商品刊登完成').setDescription(`商品編號：**#${listingId}**\n賣家：${i.user}\n資產：**${asset.name} × ${quantity}**\n售價：**${fmt(price)}**\n\n刊登中的資產已由市場保管，不會被重複出售。使用 \`/二手市場 編號:${listingId}\` 可查看圖片、購買或取消刊登。`)]});
+    }
+    if(i.commandName==='回收廠') {
+      const assetId=i.options.getString('載具',true),quantity=i.options.getInteger('數量')??1,asset=assetCatalog[assetId];
+      if(!asset||!vehicleAssetCategories.has(asset.category)) throw new Error('請從搜尋建議中選擇自己持有的汽車、機車、飛行器或郵輪');
+      const owned=assetQuantity(g,u,assetId);
+      if(owned<quantity) throw new Error(`持有數量不足，目前只有 ${owned}`);
+      const token=Math.random().toString(36).slice(2,10),reward=vehicleRecycleValue(assetId,quantity);
+      vehicleRecycleOffers.set(token,{guildId:g,userId:u,assetId,quantity,processing:false});
+      setTimeout(()=>vehicleRecycleOffers.delete(token),5*60*1000);
+      const row=new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`vehicle_recycle_confirm:${token}`).setLabel('確認壓成廢鐵').setEmoji('🏭').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`vehicle_recycle_cancel:${token}`).setLabel('取消回收').setEmoji('❌').setStyle(ButtonStyle.Secondary)
+      );
+      const embed=new EmbedBuilder().setColor(0xF5B942).setTitle('♻️ 回收廠估價單').setDescription(`載具：**${asset.name}**\n分類：**${asset.category}**\n持有數量：**${owned}**\n本次回收：**${quantity}**\n商城原價：**${fmt(asset.price)}／輛**\n回收比例：**30%**\n預計返還：**${fmt(reward)}**\n\n⚠️ 確認後載具將永久移除且無法復原；改裝費不列入回收價。若回收最後一輛，同款載具增益與改裝資料也會一併移除。`);
+      return i.reply({...assetMediaPayload(embed,assetId,asset),components:[row]});
     }
     if(i.commandName==='二手市場') {
       const listingId=i.options.getInteger('編號');
@@ -3426,6 +6203,9 @@ client.on('interactionCreate', async i => {
       const listings=db.prepare("SELECT * FROM asset_market_listings WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 20").all(g);
       const list=listings.length?listings.map(row=>{const asset=assetCatalog[row.asset_id];return `**#${row.id}**｜${asset?.name||row.asset_id} × ${row.quantity}\n賣家：<@${row.seller_id}>｜售價：**${fmt(row.price)}**`;}).join('\n\n'):'目前沒有玩家刊登二手商品。';
       return i.reply({embeds:[new EmbedBuilder().setColor(0x795548).setTitle('🛍️ 玩家二手市場').setDescription(`${list}\n\n使用 \`/二手市場 編號:\` 查看商品圖片與完整資料。\n使用 \`/變賣資產\` 刊登自己的資產。`)]});
+    }
+    if(i.commandName==='小遊戲') {
+      return i.reply({embeds:[miniGameLauncherEmbed()],components:[miniGameMenuRow(u)]});
     }
     if (i.commandName==='玩法') {
       return i.reply({embeds:[commandHelpOverviewEmbed('casino')],components:commandHelpComponents('casino')});
@@ -3485,7 +6265,7 @@ client.on('interactionCreate', async i => {
       }
       const prepFeeTotal=chargeTeamHeistPreparation(g,team.members);
       db.prepare('INSERT INTO announcement_channels(guild_id,channel_id) VALUES(?,?) ON CONFLICT(guild_id) DO UPDATE SET channel_id=excluded.channel_id').run(g,i.channelId);
-      const token=Math.random().toString(36).slice(2,10),heist={guildId:g,channelId:i.channelId,teamId:team.id,teamName:teamDisplayName(team),leaderId:u,bankId,mapId,vaultId:randomHeistVaultId(bankId),vaultScouted:false,members:team.members,ready:new Set(),informantChoices:new Map(),informants:new Set(),weapons:new Map(),police:new Set(),policeWeapons:new Map(),policeActions:new Map(),factionDeadline:Date.now()+60_000,factionLocked:false,lobbyClosed:false,vehicleId:null,scheme:null,plan:null,policeStrategy:null,prepFeePerMember:TEAM_HEIST_PREP_FEE,prepFeeTotal,weaponFeesCharged:false,weaponFeeTotal:0};
+      const token=Math.random().toString(36).slice(2,10),heist={guildId:g,channelId:i.channelId,teamId:team.id,teamName:teamDisplayName(team),leaderId:u,bankId,mapId,vaultId:randomHeistVaultId(bankId,mapId),museumScene:bankId==='central_museum'?randomMuseumScene():null,vaultScouted:false,members:team.members,ready:new Set(),informantChoices:new Map(),informants:new Set(),weapons:new Map(),police:new Set(),policeWeapons:new Map(),policeActions:new Map(),policeTactics:new Map(),policeVehicles:new Map(),factionDeadline:Date.now()+60_000,factionLocked:false,lobbyClosed:false,vehicleId:null,scheme:null,plan:null,policeStrategy:null,casinoSecurityRequired:bankId==='casino_vault'&&taipeiWeekday()===0,securityHp:null,securityRounds:0,securityDefeated:false,prepFeePerMember:TEAM_HEIST_PREP_FEE,prepFeeTotal,ammunitionConsumed:false,ammoConsumed:0};
       activeHeists.set(token,heist); setTimeout(()=>activeHeists.delete(token),15*60*1000);
       setTimeout(async()=>{
         const current=activeHeists.get(token);
@@ -3499,23 +6279,25 @@ client.on('interactionCreate', async i => {
           if(channel?.isTextBased()) await channel.send({content:`⏰ **線人選擇時間已結束**\n以下成員超過一分鐘未選擇，已自動歸入搶匪陣營：${heistMentionList(defaulted)}\n\n完成槍枝與準備後，請再次點擊「完成事前準備」。`,allowedMentions:{parse:[]}});
         } catch(error) { console.error('發送搶劫陣營逾時通知失敗：',error); }
       },60_000);
-      const vehicleBonus=selectedHeistVehicleBonus(heist);
-      const initialChance=Math.min(45+weeklyHeistBonus()+vehicleBonus,Math.max(1,bank.baseChance+(team.members.length-1)*8+weeklyHeistBonus()+vehicleBonus+map.chance));
-      const projectedLoot=bank.sundayOnly?projectedPool:Math.floor(bank.reward*map.rewardMultiplier*(hotBankFor(0).id===bankId?2:1));
+      const vehicleBonus=selectedHeistVehicleBonus(heist),petHeistBonus=teamPetHeistBonus(heist),hideoutBonus=hideoutHeistChanceBonus(g,u),hideoutLootBonus=hideoutLootMultiplier(g,u);
+      const npcPolicePressure=heistNpcPolicePressure(heist);
+      const initialChance=Math.min(45+weeklyHeistBonus()+vehicleBonus+petHeistBonus+hideoutBonus,Math.max(1,bank.baseChance+(team.members.length-1)*5+weeklyHeistBonus()+vehicleBonus+petHeistBonus+hideoutBonus+map.chance-npcPolicePressure));
+      const projectedLoot=Math.floor((bank.sundayOnly?projectedPool:bank.reward*map.rewardMultiplier*(hotBankFor(0).id===bankId?2:1))*hideoutLootBonus);
       const projectedTotal=teamHeistTotalPayout(projectedLoot,team.members.length);
       const poolText=bank.sundayOnly
         ? `${fmt(projectedTotal)}（含寶庫 80% 與團隊獎勵；成功時依當下餘額結算）`
         : `${fmt(projectedTotal)}（已含團隊獎勵，金庫內容倍率尚待偵查）`;
-      const embed=new EmbedBuilder().setColor(0x607D8B).setTitle('🧰 8v8 警匪搶劫｜事前準備').setDescription(`目標：**${bank.name}**\n地圖：**${map.name}**\n${map.scene}\n預估基礎獎池：${poolText}\n金庫情報：**尚未偵查**\n劫匪人數：${team.members.length}/8\n警方人數：等待玩家加入（上限 8）\n逃跑載具：**${selectedHeistVehicleName(heist)}**\n載具增益：**+${vehicleBonus}%**\n地圖成功率：**${map.chance>=0?'+':''}${map.chance}%**\n目前成功率：**${initialChance}%**\n\n💸 入場準備費：每名劫匪 **${fmt(TEAM_HEIST_PREP_FEE)}**，合計 **${fmt(prepFeeTotal)}** 已直接銷毀。\n槍枝費於行動開始時另計；所有費用無論成功、失敗或取消都不退還。\n\n**劫匪必須完成三件事**\n1. 在一分鐘內回覆是否接受警方的秘密線人邀請；逾時會自動成為搶匪\n2. 從選單選擇攜帶槍枝\n3. 點擊「完成事前準備」\n\n🚘 隊長可用載具選單從自己的車庫指定逃跑載具；未選擇時使用預設接應車。\n🔎 可在行動開始前點擊「偵查金庫內容」，查看本次固定的戰利品與收益倍率。\n\n**警方玩法**\n1. 點擊「加入警方阻止搶劫」\n2. 從選單選擇攜帶槍枝\n3. 選擇「正面對抗劫匪」（+2% 壓制）或「呼叫增援」（+3% 壓制）確認參戰\n\n隊長可點擊「查看準備狀態」，確認雙方誰尚未完成選擇，但不會看見線人身分。\n劫匪消耗 20 體力，警方消耗 10 體力。`);
+      const embed=new EmbedBuilder().setColor(0x607D8B).setTitle('🧰 8v8 警匪搶劫｜事前準備').setDescription(`目標：**${bank.name}**\n地圖：**${map.name}**\n${map.scene}\n預估基礎獎池：${poolText}\n金庫情報：**尚未偵查**\n劫匪人數：${team.members.length}/8\n警方人數：等待玩家加入（上限 8）\nNPC 基礎警力：**-${npcPolicePressure}%**\n逃跑載具：**${selectedHeistVehicleName(heist)}**\n載具增益：**+${vehicleBonus}%**\n隊長藏身處：**成功率 +${hideoutBonus}%｜戰利品 +${((hideoutLootBonus-1)*100).toFixed(0)}%**\n地圖成功率：**${map.chance>=0?'+':''}${map.chance}%**\n目前成功率：**${initialChance}%**${heist.casinoSecurityRequired?'\n\n🛡️ **週日賭場保全啟用**：最終行動前會遭遇重裝保全，全隊必須用已選武器將其耐久降至 0，才能進入寶庫。':''}\n\n💸 入場準備費：每名劫匪 **${fmt(TEAM_HEIST_PREP_FEE)}**，合計 **${fmt(prepFeeTotal)}** 已直接銷毀。\n🔫 槍枝必須先在資產商城購買並永久持有；每次行動消耗對應彈藥箱 ×1，武器本身不會消失。\n\n**劫匪必須完成三件事**\n1. 在一分鐘內回覆是否接受警方的秘密線人邀請；逾時會自動成為搶匪\n2. 從選單選擇自己持有且備有彈藥的槍枝\n3. 點擊「完成事前準備」\n\n🚘 隊長可用載具選單從自己的車庫指定逃跑載具；未選擇時使用預設接應車。\n🔎 可在行動開始前點擊「偵查金庫內容」，查看本次固定的戰利品與收益倍率。\n\n**警方玩法**\n1. 點擊「加入警方阻止搶劫」\n2. 選擇自己持有且備有彈藥的槍枝\n3. 選擇「正面對抗劫匪」（+4%）或「呼叫增援」（+5%）\n4. 點擊「警方部署」，秘密選擇戰術與追捕載具\n5. 追捕載具會依逃跑路線提供不同壓制，團隊載具壓制最高 10%\n\n警方勝利時每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。\n隊長可查看誰尚未完成準備，但不會看見線人、警方戰術與載具部署內容。\n劫匪消耗 20 體力，警方消耗 10 體力。`);
       embed.setDescription(embed.data.description.replace('預估基礎獎池：','預估總獎池：'));
       embed.addFields(
         {name:'🤝 每人團隊獎勵',value:fmt(teamHeistRewardPerMember(team.members.length)),inline:true},
+        {name:'🐦 同行寵物加成',value:`+${petHeistBonus.toFixed(1)}%（全隊上限 10%）`,inline:true},
         {name:'👥 隊伍',value:teamDisplayName(team),inline:false}
       );
-      return i.reply({...heistScenePayload(embed,'planning'),components:heistLobbyRows(token,heist)});
+      return i.reply({...heistScenePayload(embed,heist.museumScene||'planning'),components:heistLobbyRows(token,heist)});
     }
     if (i.commandName==='決鬥') {
-      const opponent=i.options.getUser('對手',true), bet=i.options.getInteger('下注',true);
+      const opponent=i.options.getUser('對手',true),bet=resolveBet(i,g,u);
       if(opponent.id===u) throw new Error('不能向自己發起決鬥');
       if(opponent.bot) throw new Error('不能向機器人發起決鬥');
       validBet(g,u,bet);
@@ -3533,21 +6315,30 @@ client.on('interactionCreate', async i => {
       return i.reply({embeds:[new EmbedBuilder().setColor(0xD4AF37).setTitle('⚔️ 選擇決鬥武器').setDescription(`${i.user}，請使用圖片下方按鈕選擇本場模式。\n對手：${opponent}\n雙方下注：${fmt(bet)}\n\n選擇完成後才會通知對手。`).setImage('attachment://duel_mode.png')],files:[attachment],components:[row]});
     }
     if(i.commandName==='麻將') {
+      const url=ACTIVITY_PUBLIC_URL ? `${ACTIVITY_PUBLIC_URL}/mahjong` : '';
+      if(!url) return i.reply({content:'⚠️ 網頁麻將入口尚未設定，請稍後再試。',ephemeral:true});
+      const embed=new EmbedBuilder()
+        .setColor(0x2E7D32)
+        .setTitle('🀄 網頁版台式 16 張麻將')
+        .setDescription('採用 **8 台起胡** 規則。可單人對戰電腦，或建立多人房並分享房號。');
+      const row=new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setLabel('開啟麻將牌桌').setEmoji('🀄').setStyle(ButtonStyle.Link).setURL(url)
+      );
+      return i.reply({embeds:[embed],components:[row],ephemeral:true});
+
       if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法進行麻將');
       const mode=i.options.getString('模式',true),bet=i.options.getInteger('下注',true); validBet(g,u,bet);
       if(stamina(g,u)<staminaCost(g,u,10)) throw new Error(`麻將需要 ${staminaCost(g,u,10)} 點體力`);
       if(mode==='multi') {
-        const token=Math.random().toString(36).slice(2,10),room={ownerId:u,players:[u],bet};
-        mahjongRooms.set(token,room); setTimeout(()=>mahjongRooms.delete(token),10*60*1000);
-        return i.reply({embeds:[new EmbedBuilder().setColor(0x2E7D32).setTitle('🀄 多人麻將牌桌').setDescription(`${i.user} 已經開桌！\n每位下注：**${fmt(bet)}**\n人數：**1/4**\n\n其他玩家點擊「加入牌桌」，2～4 人即可由開桌玩家開始。`)],components:[mahjongRoomRow(token)]});
+        const token=Math.random().toString(36).slice(2,10),room={state:'lobby',ownerId:u,players:[u],bet};
+        mahjongRooms.set(token,room); setTimeout(()=>{if(mahjongRooms.get(token)===room&&room.state==='lobby') mahjongRooms.delete(token);},10*60*1000);
+        return i.reply({embeds:[new EmbedBuilder().setColor(0x2E7D32).setTitle('🀄 台式 16 張麻將牌桌').setDescription(`${i.user} 已經開桌！\n每位下注：**${fmt(bet)}**\n人數：**1/4**\n\n其他玩家點擊「加入牌桌」，2～4 人即可由開桌玩家開始；不足四個座位會補入電腦。採用莊家 17 張先出、其餘 16 張摸打一輪，並支援吃、碰、槓、胡與補花。`)],components:[mahjongRoomRow(token)]});
       }
       consumeStamina(g,u,10); changeBalance(g,u,-bet,'bet',u,'單人麻將下注');
-      const player={name:'你',hand:drawMahjongHand()},bots=[1,2,3].map(n=>({name:`電腦 ${n}`,hand:drawMahjongHand()}));
-      const results=[player,...bots].map(entry=>({...entry,score:mahjongScore(entry.hand)})).sort((a,b)=>b.score-a.score);
-      const won=results[0].name==='你',payout=won?Math.floor(bet*4*weeklyMahjongMultiplier()):0;
-      const settlement=settleGamePayout(g,u,bet,payout,'麻將');
-      const awarded=won;
-      return i.reply({embeds:[new EmbedBuilder().setColor(awarded?0x35C46A:0xD94A4A).setTitle('🀄 單人麻將｜牌局結果').setDescription(`${results.map((r,n)=>`${n===0?'👑':'　'} **${r.name}｜牌力 ${r.score}**\n${r.hand.join('')}`).join('\n\n')}\n\n${awarded?`🎉 你獲勝，入帳 **${fmt(settlement.credited)}**${taipeiWeekday()===6?'（週六 ×1.5）':''}`:`本局由 **${results[0].name}** 胡牌，你損失 ${fmt(bet)}。`}${titleLuckNotice(settlement)}\n金庫：${fmt(balance(g,u))}`)]});
+      const token=Math.random().toString(36).slice(2,10),game=createMahjongGame(g,u,[u],bet,'solo');
+      mahjongRooms.set(token,game);
+      setTimeout(()=>{if(mahjongRooms.get(token)===game&&['discard','claim'].includes(game.state)) mahjongRooms.delete(token);},30*60*1000);
+      return i.reply({embeds:[mahjongGameEmbed(game,'你是莊家，持 17 張牌先出。其餘三家由電腦補位；打出後可等待其他家吃、碰、槓、胡，或點「全員過」讓下一家摸牌。')],components:mahjongGameRows(token,game)});
     }
     if (i.commandName==='購買') {
       const itemId=i.options.getString('商品',true), quantity=i.options.getInteger('數量')??1, item=shopItems[itemId];
@@ -3621,6 +6412,18 @@ client.on('interactionCreate', async i => {
       const next=changeBalance(g,target.id,amount,'admin_adjust',u,reason);
       return i.reply(`✅ 已為 ${target} ${amount>0?'增加':'扣除'} ${fmt(Math.abs(amount))}；餘額 ${fmt(next)}\n原因：${reason}`);
     }
+    if(i.commandName==='管理員入金') {
+      if(!i.memberPermissions.has(PermissionFlagsBits.Administrator)) throw new Error('只有管理員可以使用');
+      const amount=i.options.getInteger('數量',true),reason=i.options.getString('原因',true).trim();
+      if(amount<=0) throw new Error('入金數量必須大於 0');
+      if(!reason) throw new Error('請填寫本次入金原因');
+      const before=casinoVaultBalance(g);
+      const next=changeCasinoVault(g,amount,'admin_deposit',u,reason);
+      const embed=new EmbedBuilder().setColor(0x35C46A).setTitle('🏦 管理員入金完成')
+        .setDescription(`已由管理員 <@${u}> 手動分配金幣至賭場中央寶庫。\n\n本次入金：**${fmt(amount)}**\n入金前餘額：**${fmt(before)}**\n入金後餘額：**${fmt(next)}**\n原因：${reason}\n\n此筆操作已寫入賭場寶庫帳務紀錄。`)
+        .setTimestamp();
+      return i.reply({embeds:[embed],ephemeral:true});
+    }
     if (i.commandName==='帳務紀錄') {
       if(!i.memberPermissions.has(PermissionFlagsBits.Administrator)) throw new Error('只有管理員可以使用');
       const target=i.options.getUser('玩家',true);
@@ -3666,12 +6469,16 @@ client.on('interactionCreate', async i => {
       await sleep(1800);
       if(!escapeEvent.forceFail&&Math.random()<escapeChance) {
         releaseFromJail(g,u);
-        return i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🏃 逃獄成功！').setDescription('你成功避開迷子的巡邏，刑期全部抵銷，恢復自由！')]});
+        await i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🏃 逃獄成功！').setDescription('你成功避開迷子的巡邏，刑期全部抵銷，恢復自由！')]});
+        scheduleInteractionReplyDeletion(i,JAIL_RESULT_DELETE_DELAY);
+        return;
       }
       const newRelease=Date.now()+remaining+60000;
       db.prepare('UPDATE jail SET release_at=? WHERE guild_id=? AND user_id=?').run(newRelease,g,u);
       const jailFailureEmbed=new EmbedBuilder().setColor(0xD94A4A).setTitle('🚨 逃獄失敗！').setDescription(`${escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美將你撲倒後大聲吠叫，迷子立刻趕到現場。`:'迷子在門口抓到你。'}\n剩餘刑期增加 **1 分鐘**。\n目前剩餘：${jailText(remaining+60000)}`);
-      return i.editReply(escapeEvent.scene?heistScenePayload(jailFailureEmbed,escapeEvent.scene):{embeds:[jailFailureEmbed]});
+      await i.editReply(escapeEvent.scene?heistScenePayload(jailFailureEmbed,escapeEvent.scene):{embeds:[jailFailureEmbed]});
+      scheduleInteractionReplyDeletion(i,JAIL_RESULT_DELETE_DELAY);
+      return;
     }
     if(i.commandName==='小黑屋暴動') {
       if(!jailRemaining(g,u)) throw new Error('只有正在迷子小黑屋服刑的玩家能發動暴動');
@@ -3694,7 +6501,9 @@ client.on('interactionCreate', async i => {
         db.prepare('UPDATE inventory SET quantity=quantity-1 WHERE guild_id=? AND user_id=? AND item_id=?').run(g,u,'hao_photo');
         await i.reply({embeds:[new EmbedBuilder().setColor(0x9C27B0).setTitle('📸 女僕照交換人質').setDescription('你把 Hao 的女僕拍立得遞給迷子……\n迷子盯著照片沉默了幾秒。')]});
         await sleep(1400); releaseFromJail(g,target.id);
-        return i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔓 交換成功！').setDescription(`迷子收下女僕照，放走了 ${target}。`)]});
+        await i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔓 交換成功！').setDescription(`迷子收下女僕照，放走了 ${target}。`)]});
+        scheduleInteractionReplyDeletion(i,JAIL_RESULT_DELETE_DELAY);
+        return;
       }
       if(stamina(g,u)<20) throw new Error('救援需要 20 點體力');
       consumeStamina(g,u,20);
@@ -3706,15 +6515,21 @@ client.on('interactionCreate', async i => {
       await sleep(1500);
       if(Math.random()<chance) {
         releaseFromJail(g,target.id);
-        return i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🎉 救援成功！').setDescription(`你成功突破迷子的防線，救出了 ${target}！`).setImage(rescueImage)]});
+        await i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🎉 救援成功！').setDescription(`你成功突破迷子的防線，救出了 ${target}！`).setImage(rescueImage)]});
+        scheduleInteractionReplyDeletion(i,JAIL_RESULT_DELETE_DELAY);
+        return;
       }
       if(method==='force') {
         const releaseAt=Date.now()+2*60*1000;
         db.prepare('INSERT INTO jail(guild_id,user_id,release_at,reason) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET release_at=excluded.release_at,reason=excluded.reason').run(g,u,releaseAt,'正面救援失敗');
         db.prepare('DELETE FROM jail_training WHERE guild_id=? AND user_id=?').run(g,u); db.prepare('DELETE FROM jail_escape WHERE guild_id=? AND user_id=?').run(g,u);
-        return i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('💥 救援失敗！').setDescription(`你被迷子反制，也被關進小黑屋 **2 分鐘**；${target} 仍未獲救。`).setImage(rescueImage)]});
+        await i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('💥 救援失敗！').setDescription(`你被迷子反制，也被關進小黑屋 **2 分鐘**；${target} 仍未獲救。`).setImage(rescueImage)]});
+        scheduleInteractionReplyDeletion(i,JAIL_RESULT_DELETE_DELAY);
+        return;
       }
-      return i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🙅 色誘失敗！').setDescription(`迷子完全不為所動，${target} 仍然被關著。你已消耗 20 體力。`).setImage(rescueImage)]});
+      await i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🙅 色誘失敗！').setDescription(`迷子完全不為所動，${target} 仍然被關著。你已消耗 20 體力。`).setImage(rescueImage)]});
+      scheduleInteractionReplyDeletion(i,JAIL_RESULT_DELETE_DELAY);
+      return;
     }
     if (i.commandName==='減刑') {
       const remaining=jailRemaining(g,u);
@@ -3747,7 +6562,9 @@ client.on('interactionCreate', async i => {
         return i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🙅 迷子拒絕賄絡！').setDescription(`迷子沒收了 **${fmt(500)}**，但沒有放你出去。\n剩餘服刑：${jailText(jailRemaining(g,u))}\n金庫：${fmt(next)}`)]});
       }
       releaseFromJail(g,u);
-      return i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔓 賄絡成功！').setDescription(`迷子收下金幣並偷偷打開小黑屋，你已經恢復自由！\n金庫：${fmt(next)}`)]});
+      await i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔓 賄絡成功！').setDescription(`迷子收下金幣並偷偷打開小黑屋，你已經恢復自由！\n金庫：${fmt(next)}`)]});
+      scheduleInteractionReplyDeletion(i);
+      return;
     }
     if (i.commandName==='賺錢') {
       const jailed=jailRemaining(g,u);
@@ -3776,8 +6593,8 @@ client.on('interactionCreate', async i => {
         const escapeEvent=rollEscapeEvent('heist');
         const counterBonus=policeStrategy==='counter'?8:0;
         const policeReinforcements=policeStrategy==='counter'&&Math.random()<0.20;
-        const vehicleBonus=assetHeistBonus(g,u);
-        const soloEscapeChance=Math.min(100,Math.max(1,soloHeistBaseChance(g)+weeklyHeistBonus()+counterBonus+vehicleBonus+escapeEvent.modifier));
+        const vehicleBonus=assetHeistBonus(g,u),petHeistBonus=petBonus(g,u,'heist');
+        const soloEscapeChance=Math.min(100,Math.max(1,soloHeistBaseChance(g)+weeklyHeistBonus()+counterBonus+vehicleBonus+petHeistBonus+escapeEvent.modifier));
         const escaped=!policeReinforcements&&!escapeEvent.forceFail&&Math.random()*100<soloEscapeChance;
         let next=balance(g,u);
         let robberyEarned=0;
@@ -3811,6 +6628,7 @@ client.on('interactionCreate', async i => {
           const announced=await announceHeistSuccess(g,new EmbedBuilder().setColor(0x35C46A).setTitle('🚨 搶劫成功公告').setDescription(`<@${u}> 成功甩開追兵，完成單人銀行搶劫！`).addFields(
             {name:'💰 實際收益',value:fmt(robberyEarned),inline:true},
             {name:'🎯 逃脫成功率',value:`${soloEscapeChance}%`,inline:true},
+            {name:'🐦 同行寵物加成',value:`+${petHeistBonus.toFixed(1)}%`,inline:true},
             {name:'💨 逃脫事件',value:`${escapeEvent.title}\n${escapeEvent.text}`.slice(0,1024)}
           ));
           const payload=heistScenePayload(new EmbedBuilder().setColor(0x35C46A).setTitle('🏦 搶銀行成功！').setDescription(`你成功甩開追兵，實際帶回 **${fmt(robberyEarned)}**！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n金庫：${fmt(next)}${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),'success');
@@ -3829,7 +6647,9 @@ client.on('interactionCreate', async i => {
         await sleep(1500);
         if(sold) {
           const before=balance(g,u), next=changeBalance(g,u,reward,'job',u,`成功把${item}賣出`), actual=next-before;
-          return i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle(`💰 ${item}成功賣出！`).setDescription(`你順利把${item}賣掉，獲得 **${fmt(actual)}**！\n金庫：${fmt(next)}`)]});
+          await i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle(`💰 ${item}成功賣出！`).setDescription(`你順利把${item}賣掉，獲得 **${fmt(actual)}**！\n金庫：${fmt(next)}`)]});
+          scheduleInteractionReplyDeletion(i);
+          return;
         }
         const medicalReason=isWire?'剪電線失敗，高壓電休克違法罰款':'偷鋼筋失敗，斷腿違法罰款';
         changeBalance(g,u,-2000,'fine',u,medicalReason);
@@ -3920,9 +6740,70 @@ client.on('interactionCreate', async i => {
     if(jailed) throw new Error(`你被關在迷子的小黑屋，還有 ${jailText(jailed)} 才能進行遊戲`);
     const hospitalized=hospitalRemaining(g,u);
     if(hospitalized) throw new Error(`你正在醫院休養，還有 ${jailText(hospitalized)} 才能進行遊戲`);
+    if(i.commandName==='抽積木') {
+      if(!ACTIVITY_PUBLIC_URL||!ACTIVITY_SIGNING_SECRET) throw new Error('網頁版堆積木入口尚未完成設定，請稍後再試');
+      const active=db.prepare("SELECT * FROM web_jenga_games WHERE guild_id=? AND user_id=? AND status='pending' AND expires_at>? ORDER BY created_at DESC LIMIT 1").get(g,u,Date.now());
+      if(active) {
+        const activeUrl=jengaActivityUrl(g,u,active.game_id,active.expires_at);
+        const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setURL(activeUrl).setLabel('繼續尚未完成的堆積木').setEmoji('🧱').setStyle(ButtonStyle.Link));
+        return i.reply({content:'你已經有一場尚未完成的堆積木，請先完成或等待票券逾時。',components:[row],ephemeral:true});
+      }
+      const allIn=i.options.getBoolean('歐印')===true,bet=resolveBet(i,g,u),needed=staminaCost(g,u,10);
+      if(stamina(g,u)<needed) throw new Error(`抽積木需要 ${needed} 點體力`);
+      const gameId=randomUUID(),expiresAt=Date.now()+20*60*1000,url=jengaActivityUrl(g,u,gameId,expiresAt);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        consumeStamina(g,u,10);
+        changeBalanceUnlocked(g,u,-bet,'bet',u,'網頁版抽積木');
+        db.prepare(`INSERT INTO web_jenga_games(
+          game_id,guild_id,user_id,bet,all_in,pulls,risk_bonus,blocks_json,status,expires_at,updated_at
+        ) VALUES(?,?,?,?,?,0,0,?,'pending',?,?)`).run(gameId,g,u,bet,allIn?1:0,JSON.stringify(webJengaBlocks(0)),expiresAt,Date.now());
+        db.exec('COMMIT');
+      } catch(error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+      scheduleRandomEvent(i,g,u);
+      const imageName='jenga-tower-stable.png',image=new AttachmentBuilder(assetPath('jenga/tower-stable.png'),{name:imageName});
+      const embed=new EmbedBuilder().setColor(0xC47A32).setTitle('🧱 網頁版堆積木｜高塔挑戰').setDescription(`專屬遊戲已建立，請使用下方按鈕開啟圖片版積木塔。\n\n下注：**${fmt(bet)} 金幣**\n體力消耗：**${needed}**\n有效時間：**20 分鐘**\n\n所有積木風險、倒塌結果與派彩都由 Oracle 伺服器判定；重新整理不會重抽或重複派彩。`).setImage(`attachment://${imageName}`);
+      const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setURL(url).setLabel('開啟圖片版堆積木').setEmoji('🧱').setStyle(ButtonStyle.Link));
+      return i.reply({embeds:[embed],files:[image],components:[row]});
+    }
+    if(i.commandName==='骰盅吹牛') {
+      const opponent=i.options.getUser('對手',true),bet=resolveBet(i,g,u);
+      if(opponent.id===u) throw new Error('不能向自己發起骰盅吹牛挑戰。');
+      if(opponent.bot) throw new Error('機器人不能參加骰盅吹牛 PVP。');
+      if(liarDiceActiveForUser(g,u)) throw new Error('你已經有一場等待回應或進行中的骰盅吹牛。');
+      if(liarDiceActiveForUser(g,opponent.id)) throw new Error('對手已經有一場等待回應或進行中的骰盅吹牛。');
+      if(jailRemaining(g,opponent.id)||hospitalRemaining(g,opponent.id)) throw new Error('對手目前無法參加遊戲。');
+      validBet(g,u,bet);
+      try { validBet(g,opponent.id,bet); }
+      catch(error) { throw new Error(`對手${error.message}`); }
+      const challengerCost=staminaCost(g,u,5),opponentCost=staminaCost(g,opponent.id,5);
+      if(stamina(g,u)<challengerCost) throw new Error(`骰盅吹牛需要 ${challengerCost} 點體力。`);
+      if(stamina(g,opponent.id)<opponentCost) throw new Error(`對手體力不足，需要 ${opponentCost} 點。`);
+      const token=Math.random().toString(36).slice(2,10),session={
+        guildId:g,channelId:i.channelId,messageId:null,bet,
+        challengerId:u,opponentId:opponent.id,
+        names:{[u]:i.user.globalName||i.user.username,[opponent.id]:opponent.globalName||opponent.username},
+        status:'pending',charged:false,settled:false,dice:{},bid:null,currentId:null,lastAction:null,
+        expiresAt:Date.now()+60*1000,timer:null
+      };
+      liarDiceSessions.set(token,session);
+      const reply=await i.reply({
+        content:`<@${opponent.id}>，你收到一場骰盅吹牛 PVP 挑戰！`,
+        embeds:[liarDiceChallengeEmbed(session)],
+        components:[liarDiceChallengeRow(token)],
+        allowedMentions:{users:[opponent.id]},
+        fetchReply:true
+      });
+      session.messageId=reply.id;
+      scheduleLiarDiceExpiry(token);
+      return;
+    }
     if(i.commandName==='競速pvp'||i.commandName==='寵物競速pvp') {
       const type=i.commandName==='競速pvp'?'vehicle':'pet';
-      const opponent=i.options.getUser('對手',true),bet=i.options.getInteger('下注',true);
+      const opponent=i.options.getUser('對手',true),bet=resolveBet(i,g,u);
       if(opponent.id===u) throw new Error('不能向自己發起 PVP 挑戰。');
       if(opponent.bot) throw new Error('機器人不能參加 PVP 競速。');
       if(activeRaceForUser(g,u)) throw new Error('你已經有一場進行中或等待回應的競賽。');
@@ -3951,12 +6832,11 @@ client.on('interactionCreate', async i => {
       if(activeRaceForUser(g,u)) throw new Error('你已經有一場進行中或等待回應的競賽。');
       const choices=raceChoices(g,u,type);
       if(!choices.length) throw new Error(type==='vehicle'?'你目前沒有可參賽的汽車或機車，請先到資產商城購買。':'你目前沒有可參賽的寵物，請先到寵物店領養。');
-      const bet=i.options.getInteger('下注',true);
-      validBet(g,u,bet);
+      const allIn=i.options.getBoolean('歐印')===true,bet=resolveBet(i,g,u);
       const needed=staminaCost(g,u,type==='vehicle'?10:8);
       if(stamina(g,u)<needed) throw new Error(`${i.commandName}需要 ${needed} 點體力`);
       const token=Math.random().toString(36).slice(2,10);
-      const session={guildId:g,userId:u,type,bet,selectedId:null,running:false,expiresAt:Date.now()+2*60*1000};
+      const session={guildId:g,userId:u,type,bet,allIn,selectedId:null,running:false,expiresAt:Date.now()+2*60*1000};
       raceSessions.set(token,session);
       setTimeout(()=>{const current=raceSessions.get(token);if(current&&!current.running) raceSessions.delete(token);},2*60*1000+1000);
       return i.reply(raceSelectionPayload(token,session));
@@ -3969,17 +6849,22 @@ client.on('interactionCreate', async i => {
       consumeStamina(g,u,pack.stamina*quantity);
       scheduleRandomEvent(i,g,u);
       changeBalance(g,u,-total,'asset_purchase',u,`購買${pack.name} x${quantity}`);
-      const openingEmbed=new EmbedBuilder().setColor(packId==='ford'?0x1565C0:0x7E57C2).setTitle(`🎁 ${pack.name}開箱中…`).setDescription(`購買數量：**${quantity}**\n支付：**${fmt(total)}**\n\n📦 📦 📦\n正在拆開包裝……`);
+      const openingEmbed=new EmbedBuilder().setColor(pack.color).setTitle(`🎁 ${pack.name}開箱中…`).setDescription(`購買數量：**${quantity}**\n支付：**${fmt(total)}**\n消耗體力：**${pack.stamina*quantity}**\n\n📦 📦 📦\n正在拆開包裝……`);
       const openingPayload={embeds:[openingEmbed]};
-      if(pack.preview) {
-        const previewName=`${packId}_pack_preview${extname(pack.preview)||'.jpg'}`;
-        openingPayload.files=[new AttachmentBuilder(assetPath(pack.preview),{name:previewName})];
-        openingEmbed.setImage(`attachment://${previewName}`);
+      const openingMedia=pack.openingAnimation||pack.preview;
+      if(openingMedia&&existsSync(assetPath(openingMedia))) {
+        const openingMediaName=`${packId}_pack_opening${extname(openingMedia)||'.jpg'}`;
+        openingPayload.files=[new AttachmentBuilder(assetPath(openingMedia),{name:openingMediaName})];
+        openingEmbed.setImage(`attachment://${openingMediaName}`);
       }
       await i.reply(openingPayload);
-      await sleep(900);
-      await i.editReply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('✨ 車庫鑰匙正在掉落…').setDescription(`🔑　❔　🔑　❔　🔑\n\n${packId==='ford'?'福特限定車款抽選中……':'隱藏車輛判定中……'}`) ]});
-      await sleep(1100);
+      if(pack.openingAnimation) {
+        await sleep(pack.openingDuration||3000);
+      } else {
+        await sleep(900);
+        await i.editReply({embeds:[new EmbedBuilder().setColor(pack.color).setTitle('✨ 車庫鑰匙正在掉落…').setDescription(`🔑　❔　🔑　❔　🔑\n\n${pack.shortName}車款抽選中……`) ]});
+        await sleep(1100);
+      }
       const pulls=[];
       for(let n=0;n<quantity;n++) {
         const assetId=drawBlindBoxAssetId(packId);
@@ -3988,48 +6873,54 @@ client.on('interactionCreate', async i => {
       }
       const counts=new Map();
       pulls.forEach(pull=>counts.set(pull.assetId,(counts.get(pull.assetId)||0)+1));
-      const hidden=packId==='standard'?pulls.find(pull=>blindBoxHiddenIds.includes(pull.assetId)):null,showcase=hidden||pulls[0],asset=assetCatalog[showcase.assetId];
+      const hiddenIds=blindBoxPackHiddenIds(packId);
+      const hidden=pulls.find(pull=>hiddenIds.includes(pull.assetId));
+      const showcase=hidden||pulls[0],asset=assetCatalog[showcase.assetId];
       const results=[...counts.entries()].map(([assetId,count])=>{const item=assetCatalog[assetId],buffId=ensureAssetBuff(g,u,assetId);return `${item.name} × **${count}**\n└ ${assetBuffs[buffId].name}`;}).join('\n\n');
       const imageName=`${showcase.assetId}${extname(asset.image)||'.jpg'}`,attachment=new AttachmentBuilder(assetPath(asset.image),{name:imageName});
-      const packFooter=packId==='ford'?`本次車包：**福特車包**｜展示車款機率：**${blindBoxChanceLabel(showcase.assetId,packId)}**`:'隱藏車總機率：**2%／每盒**（龍貓公車 0.5%、AE86 1.5%）';
-      const embed=new EmbedBuilder().setColor(hidden?0xFFD700:packId==='ford'?0x1565C0:0x35C46A).setTitle(hidden?'🎴 隱藏車輛出現！':`🚘 ${pack.name}開箱結果`).setDescription(`${hidden?`🎊 **${asset.name} 以 ${blindBoxChanceLabel(showcase.assetId)} 的機率現身！**\n\n`:''}${results}\n\n所有車輛已停入 \`/車庫\`。\n金庫：**${fmt(balance(g,u))}**\n${packFooter}`).setImage(`attachment://${imageName}`);
-      return i.editReply({embeds:[embed],files:[attachment],attachments:[]});
+      const hiddenRate=blindBoxPackHiddenRate(packId);
+      const packFooter=`本次汽車盲盒：**${pack.shortName}**｜展示車款機率：**${blindBoxChanceLabel(showcase.assetId,packId)}**${hiddenIds.length?`\n隱藏車總機率：**${hiddenRate}%／每盒**`:''}`;
+      const embed=new EmbedBuilder().setColor(hidden?0xFFD700:pack.color).setTitle(hidden?'🎴 隱藏車輛出現！':`🚘 ${pack.name}開箱結果`).setDescription(`${hidden?`🎊 **${asset.name} 以 ${blindBoxChanceLabel(showcase.assetId,packId)} 的機率現身！**\n\n`:''}${results}\n\n所有汽車已停入 \`/車庫\`。\n金庫：**${fmt(balance(g,u))}**\n${packFooter}`).setImage(`attachment://${imageName}`);
+      await i.editReply({embeds:[embed],files:[attachment],attachments:[]});
+      scheduleInteractionReplyDeletion(i);
+      return;
     }
     if(i.commandName==='幸運輪盤') {
       const spin=claimFreeWheelSpin(g,u),weekly=weeklyMysteryInfo(),mysteryId=weekly.assetId,mystery=weekly.asset;
+      const roll=Math.random()*100;
+      let reward=0,jackpot=false;
+      if(roll<5) jackpot=true;
+      else if(roll<6) reward=50000;
+      else if(roll<10.5) reward=20000;
+      else if(roll<20.5) reward=10000;
+      else if(roll<40.5) reward=5000;
+      else if(roll<64.5) reward=2000;
+      const wheelResult=jackpot?'car':reward>=20000?'diamond':reward?'gold':'blank';
       const extension=mystery.image.split('.').pop(),imageName=`weekly-mystery.${extension}`;
       const attachment=new AttachmentBuilder(assetPath(mystery.image),{name:imageName});
       const mysteryImage=`attachment://${imageName}`;
-      const wheelFrames=[
-        '🔴｜🟡｜🟢｜🔵｜🟣｜🎁',
-        '🎁｜🔴｜🟡｜🟢｜🔵｜🟣',
-        '🟣｜🎁｜🔴｜🟡｜🟢｜🔵',
-        '🔵｜🟣｜🎁｜🔴｜🟡｜🟢'
-      ];
-      await i.reply({embeds:[new EmbedBuilder().setColor(0x9C27B0).setTitle('🎡 免費幸運輪盤轉動中…').setDescription(`本次：**免費**｜不消耗體力\n今日剩餘：**${spin.remaining}／3 次**\n本週最大獎：**🎁 隱藏車輛**\n\n${wheelFrames[0]}\n　　　　　▲`).setImage(mysteryImage)],files:[attachment]});
-      for(let frame=1;frame<wheelFrames.length;frame++) {
-        await sleep(700);
-        await i.editReply({embeds:[new EmbedBuilder().setColor(frame%2?0xF5B942:0x9C27B0).setTitle('🎡 免費幸運輪盤轉動中…').setDescription(`${wheelFrames[frame]}\n　　　　　▲\n\n${'▰'.repeat(frame)}${'▱'.repeat(wheelFrames.length-1-frame)}`).setImage(mysteryImage)]});
-      }
-      await sleep(900);
-      const roll=Math.random()*100;
-      let reward=0,jackpot=false,resultText;
-      if(roll<0.5) {
-        jackpot=true;
+      const wheelAnimationName=`lucky-wheel-${wheelResult}.gif`;
+      const wheelAnimation=new AttachmentBuilder(luckyWheelSpinGifs[wheelResult],{name:wheelAnimationName});
+      await i.reply({
+        embeds:[new EmbedBuilder().setColor(0x9C27B0).setTitle('🎡 免費幸運輪盤轉動中…')
+          .setDescription(`本次：**免費**｜不消耗體力\n今日剩餘：**${spin.remaining}／3 次**\n本週最大獎：**🎁 隱藏車輛**\n\n✨ 輪盤正在加速、追光並逐步減速……`)
+          .setImage(`attachment://${wheelAnimationName}`)],
+        files:[attachment,wheelAnimation]
+      });
+      await sleep(5700);
+      let resultText;
+      if(jackpot) {
         const prize=grantAssetPrize(g,u,mysteryId,1,'幸運輪盤最大獎');
         resultText=`🎊 **最大獎！本週隱藏車輛正式揭曉！**\n\n${mystery.name} 已直接停入你的 \`/車庫\`。\n固定增益：**${assetBuffLabel(mysteryId,prize.buffId)}**\n${assetBuffDescription(mysteryId,prize.buffId)}`;
-      } else if(roll<1.5) reward=50000;
-      else if(roll<6) reward=20000;
-      else if(roll<16) reward=10000;
-      else if(roll<36) reward=5000;
-      else if(roll<60) reward=2000;
-      if(!jackpot) {
+      } else {
         if(reward) {
           const before=balance(g,u),after=changeBalance(g,u,reward,'payout',u,'幸運輪盤獎金'),credited=after-before;
-          resultText=`🎉 輪盤停在金幣獎格！\n獲得：**${fmt(credited)}**`;
+          resultText=wheelResult==='diamond'
+            ?`💎 輪盤停在鑽石大獎格！\n獲得：**${fmt(credited)} 金幣**`
+            :`🪙 輪盤停在金條獎格！\n獲得：**${fmt(credited)} 金幣**`;
         } else resultText='💨 輪盤停在空獎格，這次沒有獲得獎品。';
       }
-      const embed=new EmbedBuilder().setColor(jackpot?0xFFD700:reward?0x35C46A:0x607D8B).setTitle(jackpot?'🏆 幸運輪盤｜傳說大獎':'🎡 幸運輪盤｜開獎結果').setDescription(`${resultText}\n\n今日剩餘：**${spin.remaining}／3 次**\n金庫：**${fmt(balance(g,u))}**\n隱藏車機率：**0.5%**\n車池於每週日 00:00 更新`).setImage(mysteryImage);
+      const embed=new EmbedBuilder().setColor(jackpot?0xFFD700:wheelResult==='diamond'?0x4FC3F7:reward?0xF5B942:0x607D8B).setTitle(jackpot?'🏆 幸運輪盤｜傳說大獎':'🎡 幸運輪盤｜開獎結果').setDescription(`${resultText}\n\n今日剩餘：**${spin.remaining}／3 次**\n金庫：**${fmt(balance(g,u))}**\n隱藏車機率：**5%**\n車池於每週日 00:00 更新`).setImage(jackpot?mysteryImage:`attachment://${wheelAnimationName}`);
       return i.editReply({embeds:[embed]});
     }
     let bingoSelection=null;
@@ -4039,14 +6930,14 @@ client.on('interactionCreate', async i => {
         throw new Error('賓果必須輸入 9 個不重複的 1～25 數字，可用空格、英文逗號或中文逗號分隔，例如：1 3 5 7 9 11 13 15 17');
       }
     }
-    const bet=i.options.getInteger('下注',true); validBet(g,u,bet);
+    const allIn=i.options.getBoolean('歐印')===true,bet=resolveBet(i,g,u);
     consumeStamina(g,u,10);
     scheduleRandomEvent(i,g,u);
     changeBalance(g,u,-bet,'bet',u,i.commandName);
     if(i.commandName==='射龍門') {
       let a=drawCard(),b=drawCard(); while(b.rank===a.rank)b=drawCard(); if(a.rank>b.rank)[a,b]=[b,a];
       const token=Math.random().toString(36).slice(2,10);
-      dragonGateGames.set(token,{userId:u,bet,a,b}); setTimeout(()=>dragonGateGames.delete(token),5*60*1000);
+      dragonGateGames.set(token,{userId:u,bet,allIn,a,b}); setTimeout(()=>dragonGateGames.delete(token),5*60*1000);
       const gap=b.rank-a.rank-1,risk=gap<=2?'非常危險':gap<=5?'普通':'相當有利';
       const row=new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`dragon_gate:${token}:shoot`).setLabel('射牌').setEmoji('🎯').setStyle(ButtonStyle.Danger),
@@ -4059,8 +6950,25 @@ client.on('interactionCreate', async i => {
       const scratched=Array.from({length:3},()=>icons[Math.floor(Math.random()*icons.length)]);
       const counts=new Map(); scratched.forEach(symbol=>counts.set(symbol,(counts.get(symbol)||0)+1));
       const best=Math.max(...counts.values()), payout=best===3?bet*10:best===2?bet*2:0;
+      const ticketId=randomUUID(),expiresAt=Date.now()+20*60*1000;
+      const webUrl=scratchActivityUrl(g,u,ticketId,expiresAt);
+      if(webUrl) {
+        db.prepare(`INSERT INTO web_scratch_tickets(
+          ticket_id,guild_id,user_id,bet,icons_json,payout,all_in,status,expires_at
+        ) VALUES(?,?,?,?,?,?,?,'pending',?)`).run(ticketId,g,u,bet,JSON.stringify(scratched),payout,allIn?1:0,expiresAt);
+        const row=new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setURL(webUrl).setLabel('開啟實體刮刮卡').setEmoji('🪙').setStyle(ButtonStyle.Link)
+        );
+        return i.reply({
+          embeds:[new EmbedBuilder()
+            .setColor(0xF5B942)
+            .setTitle('🪙 刮刮樂｜你的實體刮刮卡')
+            .setDescription(`刮刮卡已印製完成！使用下方按鈕開啟專屬卡片，用手指或滑鼠完整刮除銀色塗層。\n\n必須刮開 **100%** 才會派獎。三個相同獲得 **10 倍**，兩個相同獲得 **2 倍**。\n下注：**${fmt(bet)}**｜卡片有效時間：**20 分鐘**\n\n結果已由伺服器封存，重新整理不會改變獎項或重複派彩。`)],
+          components:[row]
+        });
+      }
       const token=Math.random().toString(36).slice(2,10);
-      const ticket={userId:u,bet,icons:scratched,payout,revealed:new Set()};
+      const ticket={userId:u,bet,allIn,icons:scratched,payout,revealed:new Set()};
       scratchTickets.set(token,ticket);
       setTimeout(()=>scratchTickets.delete(token),10*60*1000);
       return i.reply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🪙 刮刮樂｜手動刮獎').setDescription('點擊下方三個格子，親手逐一刮開圖案！\n三格全部刮開後才會派彩。')],components:[scratchRow(token,ticket)]});
@@ -4070,7 +6978,7 @@ client.on('interactionCreate', async i => {
       let payout=0, result='莊家獲勝。', color=0xD94A4A;
       if(p.value>d.value){payout=bet*2;result='🎉 你贏了！';color=0x35C46A;}
       else if(p.value===d.value){payout=bet;result='🤝 平手，退回下注。';color=0xF5B942;}
-      const settlement=settleGamePayout(g,u,bet,payout,i.commandName);
+      const settlement=settleGamePayout(g,u,bet,payout,i.commandName,{allIn});
       await i.reply({embeds:[new EmbedBuilder().setColor(0x5865F2).setTitle('🃏 比大小｜準備開牌').setDescription(`**玩家**　　　　　　　　 **莊家**\n\`\`\`\n${hiddenCard()}\n\n${hiddenCard()}\n\`\`\``)]});
       await sleep(1400);
       const reaction=p.value===d.value?null:dealerReaction(p.value>d.value);
@@ -4092,7 +7000,7 @@ client.on('interactionCreate', async i => {
       }
       const winner=positions.indexOf(Math.max(...positions))+1;
       const payout=pick===winner?bet*4:0;
-      const settlement=settleGamePayout(g,u,bet,payout,i.commandName);
+      const settlement=settleGamePayout(g,u,bet,payout,i.commandName,{allIn});
       await i.reply({embeds:[new EmbedBuilder().setColor(0x5865F2).setTitle('🏇 賽馬開始').setDescription(`你支持 **${pick} 號馬**｜下注 ${fmt(bet)}\n\n${raceTrack([0,0,0,0],finish)}`)]});
       for(const frame of frames.slice(0,12)) {
         await sleep(900);
@@ -4154,7 +7062,7 @@ client.on('interactionCreate', async i => {
       if(win){payout=bet*2;text='五張最高牌通過本局門檻，你獲勝！';} else text='本局未通過門檻。';
       text=`手牌：${hand.map(cardText).join(' ')}\n最高五張：**${top.map(cardText).join(' ')}**\n${text}`;
     }
-    const settlement=settleGamePayout(g,u,bet,payout,i.commandName);
+    const settlement=settleGamePayout(g,u,bet,payout,i.commandName,{allIn});
     const now=balance(g,u);
     const isTie=payout===bet,isProfit=payout>bet,reaction=isTie?null:dealerReaction(isProfit);
     const dogEvent=settlement.dog?'\n\n🐕 **贏錢隨機事件：博美犬叼著你贏來的金幣跑了！本局收益歸 0。**':'';
@@ -4167,7 +7075,8 @@ client.on('interactionCreate', async i => {
     const finalPayload={embeds:[embed],components:gameComponents};
     return animatedGame?i.editReply(finalPayload):i.reply(finalPayload);
   } catch(e) { const msg=`⚠️ ${e.message}`; if(i.replied||i.deferred) await i.followUp({content:msg,ephemeral:true}); else await i.reply({content:msg,ephemeral:true}); }
-});
+}
+client.on('interactionCreate',handleInteraction);
 let lastBankAnnouncement='';
 const sundayVaultAnnouncementHours=new Set([12,14,16,18,20,22]);
 function taipeiClockParts() {
@@ -4216,7 +7125,728 @@ client.once('clientReady',()=>{
   console.log(`已登入：${client.user.tag}`);
   setInterval(announceTomorrowBank,60000);
   setInterval(announceSundayCasinoVault,60000);
+  setInterval(notifyCompletedAirlineFlights,60000);
+  setInterval(notifyPendingAllInHeroUnlocks,60000);
+  setInterval(expireWebJengaGames,60000);
   announceTomorrowBank();
   announceSundayCasinoVault();
+  notifyCompletedAirlineFlights();
+  notifyPendingAllInHeroUnlocks();
+  expireWebJengaGames();
 });
+function activitySignature(value) {
+  return createHmac('sha256',ACTIVITY_SIGNING_SECRET).update(value).digest('base64url');
+}
+function vehicleActivityToken(guildId,userId,assetId) {
+  if(!ACTIVITY_SIGNING_SECRET) return null;
+  const payload=Buffer.from(JSON.stringify({guildId,userId,assetId,exp:Date.now()+15*60*1000})).toString('base64url');
+  return `${payload}.${activitySignature(payload)}`;
+}
+function vehicleActivityUrl(guildId,userId,assetId) {
+  const token=vehicleActivityToken(guildId,userId,assetId);
+  return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/?session=${encodeURIComponent(token)}`:null;
+}
+function scratchActivityToken(guildId,userId,ticketId,expiresAt) {
+  if(!ACTIVITY_SIGNING_SECRET) return null;
+  const payload=Buffer.from(JSON.stringify({kind:'scratch',guildId,userId,ticketId,exp:expiresAt})).toString('base64url');
+  return `${payload}.${activitySignature(payload)}`;
+}
+function scratchActivityUrl(guildId,userId,ticketId,expiresAt) {
+  const token=scratchActivityToken(guildId,userId,ticketId,expiresAt);
+  return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/scratch?session=${encodeURIComponent(token)}`:null;
+}
+function jengaActivityToken(guildId,userId,gameId,expiresAt) {
+  if(!ACTIVITY_SIGNING_SECRET) return null;
+  const payload=Buffer.from(JSON.stringify({kind:'jenga',guildId,userId,gameId,exp:expiresAt})).toString('base64url');
+  return `${payload}.${activitySignature(payload)}`;
+}
+function jengaActivityUrl(guildId,userId,gameId,expiresAt) {
+  const token=jengaActivityToken(guildId,userId,gameId,expiresAt);
+  return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/jenga?session=${encodeURIComponent(token)}`:null;
+}
+function parseScratchActivityToken(token) {
+  if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('刮刮卡連結無效');
+  const [payload,signature,...extra]=token.split('.');
+  if(!payload||!signature||extra.length) throw new Error('刮刮卡連結格式錯誤');
+  const expected=Buffer.from(activitySignature(payload)),received=Buffer.from(signature);
+  if(expected.length!==received.length||!timingSafeEqual(expected,received)) throw new Error('刮刮卡連結驗證失敗');
+  const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
+  if(session.kind!=='scratch'||!session.guildId||!session.userId||!session.ticketId||!session.exp) throw new Error('刮刮卡資料不完整');
+  return session;
+}
+function parseJengaActivityToken(token) {
+  if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('堆積木連結無效');
+  const [payload,signature,...extra]=token.split('.');
+  if(!payload||!signature||extra.length) throw new Error('堆積木連結格式錯誤');
+  const expected=Buffer.from(activitySignature(payload)),received=Buffer.from(signature);
+  if(expected.length!==received.length||!timingSafeEqual(expected,received)) throw new Error('堆積木連結驗證失敗');
+  const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
+  if(session.kind!=='jenga'||!session.guildId||!session.userId||!session.gameId||!session.exp) throw new Error('堆積木資料不完整');
+  return session;
+}
+function parseVehicleActivityToken(token) {
+  if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('改裝連結無效');
+  const [payload,signature,...extra]=token.split('.');
+  if(!payload||!signature||extra.length) throw new Error('改裝連結格式錯誤');
+  const expected=Buffer.from(activitySignature(payload)),received=Buffer.from(signature);
+  if(expected.length!==received.length||!timingSafeEqual(expected,received)) throw new Error('改裝連結驗證失敗');
+  const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
+  if(!session.guildId||!session.userId||!session.assetId||!session.exp||session.exp<Date.now()) throw new Error('改裝連結已過期，請回到 Discord 重新使用 `/改裝`');
+  return session;
+}
+function activityCatalog(category,assetId) {
+  return Object.entries(vehicleModCatalog[category].options).map(([id,option])=>({id,name:vehicleModOptionName(assetId,category,id),price:option.price||0}));
+}
+function activityPayload(session) {
+  const {guildId,userId,assetId}=session,asset=assetCatalog[assetId];
+  if(!asset||!vehicleHasVisualMods(assetId)) throw new Error('這輛車尚未完成圖片改裝素材');
+  const owned=assetQuantity(guildId,userId,assetId);
+  if(!owned) throw new Error('這輛車已不在你的車庫');
+  const mods=vehicleMods(guildId,userId,assetId),selections=vehicleModSelections(guildId,userId,assetId);
+  return {
+    player:{userId,balance:ensureWallet(guildId,userId)},
+    vehicle:{assetId,name:asset.name,rarity:asset.rarity||'一般',current:selections,totalSpent:mods.total_spent||0},
+    catalog:{paint:activityCatalog('paint',assetId),widebody:activityCatalog('widebody',assetId),wheels:activityCatalog('wheels',assetId)},
+    expiresAt:session.exp
+  };
+}
+function activityJson(response,status,data) {
+  response.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+  response.end(JSON.stringify(data));
+}
+const ACTIVITY_STATIC_ROOT=resolve('activity/public');
+const activityStaticTypes={
+  '.html':'text/html; charset=utf-8',
+  '.css':'text/css; charset=utf-8',
+  '.js':'text/javascript; charset=utf-8',
+  '.json':'application/json; charset=utf-8',
+  '.jpg':'image/jpeg',
+  '.jpeg':'image/jpeg',
+  '.png':'image/png',
+  '.webp':'image/webp',
+  '.gif':'image/gif',
+  '.svg':'image/svg+xml',
+  '.ico':'image/x-icon'
+};
+function serveActivityStatic(request,response,url) {
+  if(!['GET','HEAD'].includes(request.method||'')) return false;
+  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html'};
+  const relative=routeFiles[url.pathname]||decodeURIComponent(url.pathname).replace(/^\/+/,'');
+  if(!relative||relative.startsWith('api/')||relative.startsWith('activity/')) return false;
+  const file=resolve(ACTIVITY_STATIC_ROOT,relative);
+  if(file!==ACTIVITY_STATIC_ROOT&&!file.startsWith(`${ACTIVITY_STATIC_ROOT}${sep}`)) return false;
+  if(!existsSync(file)||!statSync(file).isFile()) return false;
+  const type=activityStaticTypes[extname(file).toLowerCase()]||'application/octet-stream';
+  const cacheControl=type.startsWith('text/html')?'no-store':'public, max-age=3600';
+  response.writeHead(200,{
+    'content-type':type,
+    'content-length':statSync(file).size,
+    'cache-control':cacheControl,
+    'x-content-type-options':'nosniff',
+    'referrer-policy':'no-referrer'
+  });
+  if(request.method==='HEAD') response.end();
+  else createReadStream(file).pipe(response);
+  return true;
+}
+function webScratchTicket(session,{allowExpiredSettled=true}={}) {
+  const row=db.prepare('SELECT * FROM web_scratch_tickets WHERE ticket_id=? AND guild_id=? AND user_id=?').get(session.ticketId,session.guildId,session.userId);
+  if(!row) throw new Error('找不到這張刮刮卡，請回到 Discord 重新購買');
+  if(row.status!=='settled'&&row.expires_at<Date.now()) throw new Error('這張刮刮卡已經過期');
+  if(!allowExpiredSettled&&session.exp<Date.now()) throw new Error('這張刮刮卡連結已經過期');
+  return row;
+}
+function webScratchPublic(row) {
+  const settled=row.status==='settled';
+  return {
+    ticketId:row.ticket_id,
+    serial:row.ticket_id.replace(/-/g,'').slice(0,12).toUpperCase(),
+    bet:row.bet,
+    icons:JSON.parse(row.icons_json),
+    status:settled?'settled':'pending',
+    expiresAt:row.expires_at,
+    result:settled&&row.result_json?JSON.parse(row.result_json):null,
+    dogChaseAvailable:settled&&row.dog_chase_status==='available'
+  };
+}
+function webScratchState(token) {
+  const session=parseScratchActivityToken(token),row=webScratchTicket(session);
+  return webScratchPublic(row);
+}
+function webScratchSettle(token,scratchedPercent) {
+  if(Number(scratchedPercent)!==100) throw new Error('必須完整刮開 100% 才能派獎');
+  const session=parseScratchActivityToken(token);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row=webScratchTicket(session,{allowExpiredSettled:false});
+    if(row.status==='settled') {
+      db.exec('COMMIT');
+      return webScratchPublic(row);
+    }
+    const claimed=db.prepare("UPDATE web_scratch_tickets SET status='settling' WHERE ticket_id=? AND status='pending'").run(row.ticket_id);
+    if(claimed.changes!==1) throw new Error('這張刮刮卡正在結算，請稍後再試');
+    const settlement=settleGamePayout(row.guild_id,row.user_id,row.bet,row.payout,'刮刮樂',{balanceChanger:changeBalanceUnlocked,allIn:row.all_in===1});
+    const result={
+      won:row.payout>0,
+      basePayout:row.payout,
+      credited:settlement.credited,
+      balance:balance(row.guild_id,row.user_id),
+      dog:settlement.dog,
+      dogStolen:settlement.stolen||0,
+      titleNotice:titleLuckNotice(settlement).trim(),
+      message:row.payout
+        ? `🎉 中獎！實際獲得 ${fmt(settlement.credited)} 金幣`
+        : `這次沒有中獎，損失 ${fmt(row.bet)} 金幣`
+    };
+    db.prepare(`UPDATE web_scratch_tickets
+      SET status='settled',result_json=?,dog_stolen=?,dog_chase_status=?,settled_at=CURRENT_TIMESTAMP
+      WHERE ticket_id=?`).run(JSON.stringify(result),settlement.stolen||0,settlement.dog?'available':'none',row.ticket_id);
+    db.exec('COMMIT');
+    return webScratchPublic(db.prepare('SELECT * FROM web_scratch_tickets WHERE ticket_id=?').get(row.ticket_id));
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function webScratchChase(token) {
+  const session=parseScratchActivityToken(token);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row=webScratchTicket(session,{allowExpiredSettled:false});
+    if(row.status!=='settled'||row.dog_chase_status!=='available'||row.dog_stolen<=0) throw new Error('目前沒有可以追趕的博美犬');
+    db.prepare("UPDATE web_scratch_tickets SET dog_chase_status='processing' WHERE ticket_id=?").run(row.ticket_id);
+    const success=Math.random()<0.50;
+    let message,amount=0,hospitalText='';
+    if(success) {
+      const before=balance(row.guild_id,row.user_id),after=changeBalanceUnlocked(row.guild_id,row.user_id,row.dog_stolen,'payout',row.user_id,'刮刮樂：追上博美犬拿回金幣');
+      amount=after-before;
+      message=`追趕成功！拿回 ${fmt(amount)} 金幣`;
+    } else {
+      const medicalFee=Math.min(200,balance(row.guild_id,row.user_id));
+      if(medicalFee) changeBalanceUnlocked(row.guild_id,row.user_id,-medicalFee,'medical',row.user_id,'刮刮樂：追博美犬被咬傷醫療費');
+      const hospitalEvent=applyHospitalRandomEvent(row.guild_id,row.user_id,{balanceChanger:changeBalanceUnlocked});
+      amount=medicalFee;
+      hospitalText=hospitalEvent.text||'';
+      message=`追趕失敗，支付 ${fmt(medicalFee)} 金幣醫療費`;
+    }
+    const result=JSON.parse(row.result_json||'{}');
+    result.dogChase={success,amount,message,hospitalText,balance:balance(row.guild_id,row.user_id)};
+    result.balance=balance(row.guild_id,row.user_id);
+    db.prepare("UPDATE web_scratch_tickets SET dog_chase_status='done',result_json=? WHERE ticket_id=?").run(JSON.stringify(result),row.ticket_id);
+    db.exec('COMMIT');
+    return webScratchPublic(db.prepare('SELECT * FROM web_scratch_tickets WHERE ticket_id=?').get(row.ticket_id));
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function webJengaBlocks(pulls) {
+  return jengaRoundBlocks(pulls).map((block,index)=>({
+    index,
+    position:['左側','中間','右側'][index],
+    name:block.name,
+    emoji:block.emoji,
+    risk:Number((block.risk*100).toFixed(0)),
+    bonus:block.bonus
+  }));
+}
+function webJengaRow(session) {
+  const row=db.prepare('SELECT * FROM web_jenga_games WHERE game_id=? AND guild_id=? AND user_id=?').get(session.gameId,session.guildId,session.userId);
+  if(!row) throw new Error('找不到這場堆積木，請回到 Discord 重新開始');
+  return row;
+}
+function webJengaPublic(row) {
+  const result=row.result_json?JSON.parse(row.result_json):null;
+  return {
+    gameId:row.game_id,
+    serial:row.game_id.replace(/-/g,'').slice(0,12).toUpperCase(),
+    bet:row.bet,
+    pulls:row.pulls,
+    riskBonus:Number(row.risk_bonus||0),
+    multiplier:jengaCurrentMultiplier({pulls:row.pulls,riskBonus:Number(row.risk_bonus||0)}),
+    blocks:row.status==='pending'?JSON.parse(row.blocks_json):[],
+    status:row.status,
+    scene:result?.outcome==='collapsed'||result?.outcome==='expired'?'collapsed':row.pulls?'wobble':'stable',
+    expiresAt:row.expires_at,
+    balance:balance(row.guild_id,row.user_id),
+    result,
+    dogChaseAvailable:row.status==='settled'&&row.dog_chase_status==='available'
+  };
+}
+function webJengaFinalize(row,outcome) {
+  const won=['cash','completed'].includes(outcome);
+  const multiplier=jengaCurrentMultiplier({pulls:row.pulls,riskBonus:Number(row.risk_bonus||0)});
+  const payout=won?Math.floor(row.bet*multiplier):0;
+  const settlement=settleGamePayout(row.guild_id,row.user_id,row.bet,payout,'抽積木',{balanceChanger:changeBalanceUnlocked,allIn:row.all_in===1});
+  const result={
+    outcome,
+    won,
+    completed:outcome==='completed',
+    pulls:row.pulls,
+    multiplier,
+    basePayout:payout,
+    credited:settlement.credited,
+    balance:balance(row.guild_id,row.user_id),
+    dog:settlement.dog,
+    dogStolen:settlement.stolen||0,
+    titleNotice:titleLuckNotice(settlement).trim(),
+    message:outcome==='collapsed'
+      ? `高塔倒塌，本局損失 ${fmt(row.bet)} 金幣`
+      : outcome==='expired'
+        ? `遊戲逾時，本局下注 ${fmt(row.bet)} 金幣視為放棄`
+        : outcome==='completed'
+          ? `完成六次抽取！實際獲得 ${fmt(settlement.credited)} 金幣`
+          : `安全收手！實際獲得 ${fmt(settlement.credited)} 金幣`
+  };
+  db.prepare(`UPDATE web_jenga_games
+    SET pulls=?,risk_bonus=?,status='settled',result_json=?,dog_stolen=?,dog_chase_status=?,updated_at=?,settled_at=CURRENT_TIMESTAMP
+    WHERE game_id=?`).run(row.pulls,Number(row.risk_bonus||0),JSON.stringify(result),settlement.stolen||0,settlement.dog?'available':'none',Date.now(),row.game_id);
+  return db.prepare('SELECT * FROM web_jenga_games WHERE game_id=?').get(row.game_id);
+}
+function webJengaState(token) {
+  const session=parseJengaActivityToken(token);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    let row=webJengaRow(session);
+    if(row.status==='pending'&&(row.expires_at<Date.now()||session.exp<Date.now())) row=webJengaFinalize(row,'expired');
+    const result=webJengaPublic(row);
+    db.exec('COMMIT');
+    return result;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function webJengaPull(token,blockIndex,expectedPulls) {
+  const session=parseJengaActivityToken(token);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    let row=webJengaRow(session);
+    if(row.status!=='pending') {
+      const result=webJengaPublic(row);
+      db.exec('COMMIT');
+      return result;
+    }
+    if(row.expires_at<Date.now()||session.exp<Date.now()) {
+      row=webJengaFinalize(row,'expired');
+      const result=webJengaPublic(row);
+      db.exec('COMMIT');
+      return result;
+    }
+    if(Number(expectedPulls)!==row.pulls) throw new Error('遊戲狀態已更新，請重新整理後再選擇積木');
+    const blocks=JSON.parse(row.blocks_json),index=Number(blockIndex),block=blocks[index];
+    if(!Number.isInteger(index)||!block) throw new Error('找不到這塊積木');
+    if(Math.random()<block.risk/100) {
+      row=webJengaFinalize(row,'collapsed');
+    } else {
+      const pulls=row.pulls+1,riskBonus=Number((Number(row.risk_bonus||0)+Number(block.bonus||0)).toFixed(2));
+      row={...row,pulls,risk_bonus:riskBonus};
+      if(pulls>=jengaPayoutMultipliers.length) row=webJengaFinalize(row,'completed');
+      else {
+        db.prepare('UPDATE web_jenga_games SET pulls=?,risk_bonus=?,blocks_json=?,updated_at=? WHERE game_id=?')
+          .run(pulls,riskBonus,JSON.stringify(webJengaBlocks(pulls)),Date.now(),row.game_id);
+        row=db.prepare('SELECT * FROM web_jenga_games WHERE game_id=?').get(row.game_id);
+      }
+    }
+    const result=webJengaPublic(row);
+    db.exec('COMMIT');
+    return result;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function webJengaCash(token,expectedPulls) {
+  const session=parseJengaActivityToken(token);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    let row=webJengaRow(session);
+    if(row.status!=='pending') {
+      const result=webJengaPublic(row);
+      db.exec('COMMIT');
+      return result;
+    }
+    if(row.expires_at<Date.now()||session.exp<Date.now()) row=webJengaFinalize(row,'expired');
+    else {
+      if(Number(expectedPulls)!==row.pulls) throw new Error('遊戲狀態已更新，請重新整理後再收手');
+      if(row.pulls<1) throw new Error('至少成功抽出一塊積木才能收手');
+      row=webJengaFinalize(row,'cash');
+    }
+    const result=webJengaPublic(row);
+    db.exec('COMMIT');
+    return result;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function webJengaChase(token) {
+  const session=parseJengaActivityToken(token);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row=webJengaRow(session);
+    if(row.status!=='settled'||row.dog_chase_status!=='available'||row.dog_stolen<=0) throw new Error('目前沒有可以追趕的博美犬');
+    db.prepare("UPDATE web_jenga_games SET dog_chase_status='processing',updated_at=? WHERE game_id=?").run(Date.now(),row.game_id);
+    const success=Math.random()<0.50;
+    let message,amount=0,hospitalText='';
+    if(success) {
+      const before=balance(row.guild_id,row.user_id),after=changeBalanceUnlocked(row.guild_id,row.user_id,row.dog_stolen,'payout',row.user_id,'抽積木：追上博美犬拿回金幣');
+      amount=after-before;
+      message=`追趕成功！拿回 ${fmt(amount)} 金幣`;
+    } else {
+      const medicalFee=Math.min(200,balance(row.guild_id,row.user_id));
+      if(medicalFee) changeBalanceUnlocked(row.guild_id,row.user_id,-medicalFee,'medical',row.user_id,'抽積木：追博美犬被咬傷醫療費');
+      const hospitalEvent=applyHospitalRandomEvent(row.guild_id,row.user_id,{balanceChanger:changeBalanceUnlocked});
+      amount=medicalFee;
+      hospitalText=hospitalEvent.text||'';
+      message=`追趕失敗，支付 ${fmt(medicalFee)} 金幣醫療費`;
+    }
+    const result=JSON.parse(row.result_json||'{}');
+    result.dogChase={success,amount,message,hospitalText,balance:balance(row.guild_id,row.user_id)};
+    result.balance=balance(row.guild_id,row.user_id);
+    db.prepare("UPDATE web_jenga_games SET dog_chase_status='done',result_json=?,updated_at=? WHERE game_id=?").run(JSON.stringify(result),Date.now(),row.game_id);
+    const response=webJengaPublic(db.prepare('SELECT * FROM web_jenga_games WHERE game_id=?').get(row.game_id));
+    db.exec('COMMIT');
+    return response;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function expireWebJengaGames() {
+  const expired=db.prepare("SELECT * FROM web_jenga_games WHERE status='pending' AND expires_at<=? ORDER BY expires_at LIMIT 50").all(Date.now());
+  for(const candidate of expired) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const row=db.prepare("SELECT * FROM web_jenga_games WHERE game_id=? AND status='pending'").get(candidate.game_id);
+      if(row&&row.expires_at<=Date.now()) webJengaFinalize(row,'expired');
+      db.exec('COMMIT');
+    } catch(error) {
+      db.exec('ROLLBACK');
+      console.error(`堆積木逾時結算失敗 game=${candidate.game_id}: ${error.message}`);
+    }
+  }
+}
+const WEB_MAHJONG_TILES=['1萬','2萬','3萬','4萬','5萬','6萬','7萬','8萬','9萬','1筒','2筒','3筒','4筒','5筒','6筒','7筒','8筒','9筒','1條','2條','3條','4條','5條','6條','7條','8條','9條','東','南','西','北','中','發','白'];
+const webMahjongBots=['春風','夏雨','秋月'];
+const webMahjongShuffle=list=>{const result=[...list];for(let i=result.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[result[i],result[j]]=[result[j],result[i]];}return result;};
+function webMahjongCanMeld(counts,needed) {
+  const index=counts.findIndex(count=>count>0);
+  if(index<0) return needed===0;
+  if(needed<=0) return false;
+  if(counts[index]>=3) { counts[index]-=3; if(webMahjongCanMeld(counts,needed-1)) { counts[index]+=3; return true; } counts[index]+=3; }
+  const start=Math.floor(index/9)*9;
+  if(index<27&&index<=start+6&&counts[index+1]>0&&counts[index+2]>0) {
+    counts[index]--;counts[index+1]--;counts[index+2]--;
+    if(webMahjongCanMeld(counts,needed-1)) { counts[index]++;counts[index+1]++;counts[index+2]++; return true; }
+    counts[index]++;counts[index+1]++;counts[index+2]++;
+  }
+  return false;
+}
+function webMahjongWin(hand,melds=[]) {
+  const needed=5-melds.length;
+  if(needed<0||hand.length!==needed*3+2) return false;
+  const counts=WEB_MAHJONG_TILES.map(tile=>hand.filter(value=>value===tile).length);
+  for(let index=0;index<counts.length;index++) if(counts[index]>=2) {
+    counts[index]-=2;
+    if(webMahjongCanMeld(counts,needed)) { counts[index]+=2; return true; }
+    counts[index]+=2;
+  }
+  return false;
+}
+function webMahjongTai(game,playerId,method='self',winningTile='') {
+  const hand=[...(game.hands[playerId]||[]),...(winningTile?[winningTile]:[])],melds=game.melds?.[playerId]||[],all=[...hand,...melds.flat()];
+  const details=[],add=(name,value)=>{details.push({name,value});};
+  if(method==='self') add('自摸',1);
+  if(game.players?.[game.dealer??0]?.id===playerId) add('莊家',1);
+  if((game.flowers?.[playerId]||[]).length) add('花牌',game.flowers[playerId].length);
+  const suits=new Set(all.filter(tile=>WEB_MAHJONG_TILES.indexOf(tile)<27).map(tile=>Math.floor(WEB_MAHJONG_TILES.indexOf(tile)/9)));
+  const hasHonors=all.some(tile=>WEB_MAHJONG_TILES.indexOf(tile)>=27);
+  if(suits.size===1&&!hasHonors) add('清一色',8);
+  else if(suits.size===1&&hasHonors) add('混一色',4);
+  const counts=new Map();all.forEach(tile=>counts.set(tile,(counts.get(tile)||0)+1));
+  if([...counts.values()].filter(value=>value>=3).length>=5) add('碰碰胡',4);
+  if(!melds.length) add('門清',1);
+  const tai=details.reduce((total,item)=>total+item.value,0);
+  return {tai,details,eligible:tai>=8};
+}
+function webMahjongNewGame(players) {
+  const wall=webMahjongShuffle(WEB_MAHJONG_TILES.flatMap(tile=>[tile,tile,tile,tile]));
+  const hands={},discards={},melds={},flowers={};
+  for(const player of players) { hands[player.id]=wall.splice(0,16); discards[player.id]=[];melds[player.id]=[];flowers[player.id]=[]; }
+  hands[players[0].id].push(wall.shift());
+  return {players,wall,hands,discards,melds,flowers,turn:0,dealer:0,round:1,claim:null,message:'台式 16 張｜8 台起胡。莊家請先出牌。',winner:null};
+}
+function webMahjongChiOptions(hand,tile) {
+  const index=WEB_MAHJONG_TILES.indexOf(tile);
+  if(index<0||index>=27) return [];
+  const start=Math.floor(index/9)*9,options=[];
+  for(const offset of [-2,-1,0]) {
+    const first=index+offset;
+    if(first<start||first+2>=start+9) continue;
+    const needed=[first,first+1,first+2].filter(value=>value!==index).map(value=>WEB_MAHJONG_TILES[value]);
+    const copy=[...hand];
+    if(needed.every(value=>{const at=copy.indexOf(value);if(at<0)return false;copy.splice(at,1);return true;})) options.push(needed);
+  }
+  return options;
+}
+function webMahjongTingOptions(hand,melds=[]) {
+  const options=[];
+  for(const discard of [...new Set(hand)]) {
+    const copy=[...hand],at=copy.indexOf(discard);copy.splice(at,1);
+    const waits=WEB_MAHJONG_TILES.filter(tile=>webMahjongWin([...copy,tile],melds));
+    if(waits.length) options.push({discard,waits});
+  }
+  return options;
+}
+function webMahjongEnsureState(game) {
+  game.hands??={};game.discards??={};game.melds??={};game.flowers??={};game.players??=[];
+  for(const player of game.players) {
+    game.hands[player.id]??=[];
+    game.discards[player.id]??=[];
+    game.melds[player.id]??=[];
+    game.flowers[player.id]??=[];
+  }
+  return game;
+}
+function webMahjongOpenClaims(game,discarderId,tile) {
+  const discarderIndex=game.players.findIndex(player=>player.id===discarderId),options={};
+  for(let index=0;index<game.players.length;index++) {
+    const player=game.players[index];
+    if(player.id===discarderId||player.bot) continue;
+    const hand=game.hands[player.id]||[],actions=[];
+    const score=webMahjongTai(game,player.id,'discard',tile);
+    if(webMahjongWin([...hand,tile],game.melds?.[player.id]||[])&&score.eligible) actions.push('hu');
+    if(hand.filter(value=>value===tile).length>=2) actions.push('pong');
+    if(index===(discarderIndex+1)%game.players.length&&webMahjongChiOptions(hand,tile).length) actions.push('chi');
+    if(actions.length) options[player.id]=actions;
+  }
+  const ids=Object.keys(options);
+  return ids.length?{discarderId,tile,options}:null;
+}
+function webMahjongDrawNext(game) {
+  if(!game.wall.length) { game.ended=true;game.message='牌牆已摸完，本局流局。';return false; }
+  game.turn=(game.turn+1)%game.players.length;
+  const next=game.players[game.turn];
+  game.hands[next.id].push(game.wall.shift());
+  return true;
+}
+function webMahjongAfterDiscard(game,player,tile) {
+  const claim=webMahjongOpenClaims(game,player.id,tile);
+  if(claim) {
+    game.claim=claim;
+    game.message=`${player.name} 打出 ${tile}，等待玩家選擇吃、碰或胡。`;
+    return;
+  }
+  if(webMahjongDrawNext(game)) {
+    const next=game.players[game.turn];
+    game.message=`${player.name} 打出 ${tile}，輪到 ${next.name}。`;
+    webMahjongBotTurns(game);
+  }
+}
+function webMahjongLoad(roomId) {
+  const row=db.prepare('SELECT * FROM web_mahjong_rooms WHERE room_id=?').get(roomId);
+  if(!row) throw new Error('找不到此麻將房間，可能已結束或房號輸入錯誤。');
+  return {...row,state:JSON.parse(row.state_json||'{}')};
+}
+function webMahjongSave(room) {
+  db.prepare('UPDATE web_mahjong_rooms SET status=?,state_json=?,updated_at=? WHERE room_id=?').run(room.status,JSON.stringify(room.state),Date.now(),room.room_id);
+}
+function webMahjongPlayers(roomId) {
+  return db.prepare('SELECT player_id id,name,seat FROM web_mahjong_players WHERE room_id=? ORDER BY seat').all(roomId);
+}
+function webMahjongPublicState(room,playerId) {
+  const game=webMahjongEnsureState(room.state),players=game.players.length?game.players:webMahjongPlayers(room.room_id);
+  if(!players.some(player=>player.id===playerId)) throw new Error('你不在這個房間中。');
+  const current=players[game.turn||0];
+  const tai=webMahjongTai(game,playerId,'self'),claim=game.claim?.options?.[playerId]?{tile:game.claim.tile,fromId:game.claim.discarderId,actions:game.claim.options[playerId]}:null;
+  const isTurn=!game.claim&&current?.id===playerId;
+  return {roomId:room.room_id,status:room.status,ownerId:room.owner_id,players:players.map(player=>({id:player.id,name:player.name,seat:player.seat,isBot:player.bot||false,handCount:(game.hands?.[player.id]||[]).length,discards:game.discards?.[player.id]||[],melds:game.melds?.[player.id]||[],flowers:game.flowers?.[player.id]||[]})),turnPlayerId:game.claim?null:current?.id||null,wallCount:game.wall?.length||0,message:game.message||'',winner:game.winner||null,hand:game.hands?.[playerId]||[],selfHu:isTurn&&webMahjongWin(game.hands?.[playerId]||[],game.melds?.[playerId]||[]),tai,claim,claimPending:game.claim?{tile:game.claim.tile}:null,ting:isTurn?webMahjongTingOptions(game.hands?.[playerId]||[],game.melds?.[playerId]||[]):[]};
+}
+function webMahjongBotTurns(game) {
+  let safety=24;
+  while(safety-->0) {
+    const player=game.players[game.turn];
+    if(!player?.bot||!game.wall.length||game.winner) return;
+    const hand=game.hands[player.id],counts=new Map();
+    hand.forEach(tile=>counts.set(tile,(counts.get(tile)||0)+1));
+    const index=hand.findIndex(tile=>counts.get(tile)===1);
+    const tile=hand.splice(index<0?hand.length-1:index,1)[0];
+    game.discards[player.id].push(tile);
+    webMahjongAfterDiscard(game,player,tile);
+    if(game.claim||game.ended) return;
+  }
+}
+function webMahjongCreate(body) {
+  const playerId=String(body.playerId||'').slice(0,80),name=String(body.name||'玩家').trim().slice(0,20)||'玩家',mode=body.mode==='solo'?'solo':'multi';
+  if(!playerId) throw new Error('缺少玩家識別。請重新整理頁面後再試。');
+  const roomId=randomUUID().replace(/-/g,'').slice(0,6).toUpperCase();
+  db.prepare('INSERT INTO web_mahjong_rooms(room_id,owner_id,status,state_json,updated_at) VALUES(?,?,\'lobby\',\'{}\',?)').run(roomId,playerId,Date.now());
+  db.prepare('INSERT INTO web_mahjong_players(room_id,player_id,name,seat) VALUES(?,?,?,0)').run(roomId,playerId,name);
+  const room=webMahjongLoad(roomId);
+  if(mode==='solo') {
+    const players=[{id:playerId,name,seat:0},...webMahjongBots.map((bot,seat)=>({id:`bot:${roomId}:${seat}`,name:bot,seat:seat+1,bot:true}))];
+    room.status='playing';room.state=webMahjongNewGame(players);webMahjongSave(room);
+  }
+  return webMahjongPublicState(webMahjongLoad(roomId),playerId);
+}
+function webMahjongJoin(body) {
+  const roomId=String(body.roomId||'').trim().toUpperCase(),playerId=String(body.playerId||'').slice(0,80),name=String(body.name||'玩家').trim().slice(0,20)||'玩家';
+  const room=webMahjongLoad(roomId);
+  if(room.status!=='lobby') throw new Error('這個牌局已經開始，無法再加入。');
+  const existing=db.prepare('SELECT 1 FROM web_mahjong_players WHERE room_id=? AND player_id=?').get(roomId,playerId);
+  if(!existing) {
+    const count=webMahjongPlayers(roomId).length;
+    if(count>=4) throw new Error('房間已滿。');
+    db.prepare('INSERT INTO web_mahjong_players(room_id,player_id,name,seat) VALUES(?,?,?,?)').run(roomId,playerId,name,count);
+  }
+  return webMahjongPublicState(webMahjongLoad(roomId),playerId);
+}
+function webMahjongAction(body) {
+  const room=webMahjongLoad(String(body.roomId||'').toUpperCase()),playerId=String(body.playerId||'');
+  webMahjongEnsureState(room.state);
+  if(body.action==='start') {
+    if(room.owner_id!==playerId) throw new Error('只有房主能開始牌局。');
+    const humans=webMahjongPlayers(room.room_id);
+    if(humans.length<2) throw new Error('多人房至少要兩位玩家才能開始。');
+    const players=[...humans];
+    while(players.length<4) { const seat=players.length;players.push({id:`bot:${room.room_id}:${seat}`,name:webMahjongBots[seat-1]||'電腦',seat,bot:true}); }
+    room.status='playing';room.state=webMahjongNewGame(players);webMahjongSave(room);
+  } else if(body.action==='discard') {
+    if(room.status!=='playing') throw new Error('牌局尚未開始。');
+    const game=room.state,current=game.players[game.turn];
+    if(game.claim) throw new Error('請先處理吃、碰、胡的選擇。');
+    if(!current||current.id!==playerId) throw new Error('現在還不是你的回合。');
+    const index=Number(body.index),hand=game.hands[playerId];
+    if(!Number.isInteger(index)||index<0||index>=hand.length) throw new Error('指定的手牌不存在。');
+    const tile=hand.splice(index,1)[0];game.discards[playerId].push(tile);
+    webMahjongAfterDiscard(game,current,tile);
+    if(game.ended) room.status='finished';
+    webMahjongSave(room);
+  } else if(body.action==='claim') {
+    if(room.status!=='playing') throw new Error('牌局尚未開始。');
+    const game=room.state,claim=game.claim,action=String(body.claim||'');
+    if(!claim||!claim.options?.[playerId]) throw new Error('目前沒有可由你處理的吃、碰、胡。');
+    if(!claim.options[playerId].includes(action)&&action!=='pass') throw new Error('此牌無法執行該動作。');
+    const player=game.players.find(value=>value.id===playerId),hand=game.hands[playerId];
+    if(action==='pass') {
+      delete claim.options[playerId];
+      if(Object.keys(claim.options).length) game.message=`等待其他玩家對 ${claim.tile} 做出選擇。`;
+      else {
+        const discarder=game.players.find(value=>value.id===claim.discarderId);
+        game.claim=null;
+        if(webMahjongDrawNext(game)) { game.message=`所有玩家略過 ${claim.tile}，輪到 ${game.players[game.turn].name}。`;webMahjongBotTurns(game); }
+        else room.status='finished';
+      }
+    } else if(action==='hu') {
+      const score=webMahjongTai(game,playerId,'discard',claim.tile);
+      game.winner={playerId,name:player.name,method:'放槍胡',tai:score.tai,details:score.details};
+      game.message=`🎉 ${player.name} 胡 ${claim.tile}，${score.tai} 台（8 台起胡）。`;
+      game.claim=null;room.status='finished';
+    } else {
+      const remove=value=>{const at=hand.indexOf(value);if(at<0)throw new Error('手牌資料已變更，請重新整理。');hand.splice(at,1);};
+      let meld;
+      if(action==='pong') { remove(claim.tile);remove(claim.tile);meld=[claim.tile,claim.tile,claim.tile]; }
+      else { const needed=webMahjongChiOptions(hand,claim.tile)[0];if(!needed)throw new Error('目前無法用這張牌吃牌。');needed.forEach(remove);meld=[...needed,claim.tile]; }
+      game.discards[claim.discarderId].pop();
+      game.melds[playerId].push(meld);
+      game.turn=game.players.findIndex(value=>value.id===playerId);
+      game.claim=null;
+      game.message=`${player.name} ${action==='pong'?'碰':'吃'} ${claim.tile}，請打出一張牌。`;
+    }
+    if(game.ended) room.status='finished';
+    webMahjongSave(room);
+  } else if(body.action==='hu') {
+    if(room.status!=='playing') throw new Error('牌局尚未開始。');
+    const game=room.state,current=game.players[game.turn];
+    if(game.claim) throw new Error('請先處理其他玩家對棄牌的反應。');
+    if(!current||current.id!==playerId) throw new Error('只有輪到自己摸牌時才能自摸。');
+    if(!webMahjongWin(game.hands[playerId],game.melds[playerId])) throw new Error('你的手牌尚未構成合法胡牌牌型。');
+    const score=webMahjongTai(game,playerId,'self');
+    if(!score.eligible) throw new Error(`目前 ${score.tai} 台，未達 8 台起胡。`);
+    game.winner={playerId,name:current.name,method:'自摸',tai:score.tai,details:score.details};
+    game.message=`🎉 ${current.name} 自摸胡牌！${score.tai} 台（8 台起胡）。`;
+    room.status='finished';webMahjongSave(room);
+  } else throw new Error('不支援的麻將操作。');
+  return webMahjongPublicState(webMahjongLoad(room.room_id),playerId);
+}
+async function activityRequestBody(request) {
+  let raw='';
+  for await (const chunk of request) {
+    raw+=chunk;
+    if(raw.length>32768) throw new Error('請求內容過大');
+  }
+  return raw?JSON.parse(raw):{};
+}
+if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
+  createServer(async (request,response)=>{
+    try {
+      const url=new URL(request.url,'http://localhost');
+      if(serveActivityStatic(request,response,url)) return;
+      const directApi=url.pathname==='/api'||url.pathname.startsWith('/api/');
+      if(directApi) url.pathname=`/activity${url.pathname.slice(4)}`;
+      else {
+        const supplied=String(request.headers['x-activity-backend-secret']||'');
+        const expected=Buffer.from(ACTIVITY_BACKEND_SECRET),received=Buffer.from(supplied);
+        if(expected.length!==received.length||!timingSafeEqual(expected,received)) return activityJson(response,401,{ok:false,error:'Unauthorized'});
+      }
+      if(request.method==='GET'&&url.pathname==='/activity/garage') {
+        const session=parseVehicleActivityToken(url.searchParams.get('session'));
+        return activityJson(response,200,{ok:true,...activityPayload(session)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/garage/confirm') {
+        const body=await activityRequestBody(request),session=parseVehicleActivityToken(body.session);
+        if(body.assetId!==session.assetId) throw new Error('車輛資料不一致，請重新開啟改裝連結');
+        const result=purchaseVehicleModBundle(session.guildId,session.userId,session.assetId,body.selections||{});
+        return activityJson(response,200,{ok:true,message:`已完成 ${result.asset.name} 改裝`,price:result.price,balance:result.balance,current:result.selections,changes:result.changes});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/mahjong/create') {
+        return activityJson(response,200,{ok:true,game:webMahjongCreate(await activityRequestBody(request))});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/mahjong/join') {
+        return activityJson(response,200,{ok:true,game:webMahjongJoin(await activityRequestBody(request))});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/mahjong/action') {
+        return activityJson(response,200,{ok:true,game:webMahjongAction(await activityRequestBody(request))});
+      }
+      if(request.method==='GET'&&url.pathname==='/activity/mahjong/state') {
+        const room=webMahjongLoad(url.searchParams.get('roomId')||'');
+        return activityJson(response,200,{ok:true,game:webMahjongPublicState(room,url.searchParams.get('playerId')||'')});
+      }
+      if(request.method==='GET'&&url.pathname==='/activity/scratch') {
+        return activityJson(response,200,{ok:true,ticket:webScratchState(url.searchParams.get('session')||'')});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/scratch/settle') {
+        const body=await activityRequestBody(request);
+        return activityJson(response,200,{ok:true,ticket:webScratchSettle(body.session||'',body.scratchedPercent)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/scratch/chase') {
+        const body=await activityRequestBody(request);
+        return activityJson(response,200,{ok:true,ticket:webScratchChase(body.session||'')});
+      }
+      if(request.method==='GET'&&url.pathname==='/activity/jenga') {
+        return activityJson(response,200,{ok:true,game:webJengaState(url.searchParams.get('session')||'')});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/jenga/pull') {
+        const body=await activityRequestBody(request);
+        return activityJson(response,200,{ok:true,game:webJengaPull(body.session||'',body.blockIndex,body.pulls)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/jenga/cash') {
+        const body=await activityRequestBody(request);
+        return activityJson(response,200,{ok:true,game:webJengaCash(body.session||'',body.pulls)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/jenga/chase') {
+        const body=await activityRequestBody(request);
+        return activityJson(response,200,{ok:true,game:webJengaChase(body.session||'')});
+      }
+      if(request.method==='GET'&&url.pathname==='/activity/health') return activityJson(response,200,{ok:true});
+      return activityJson(response,404,{ok:false,error:'Not found'});
+    } catch(error) {
+      console.error('Vehicle activity API error:',error);
+      return activityJson(response,400,{ok:false,error:error.message||'改裝失敗'});
+    }
+  }).listen(ACTIVITY_API_PORT,'0.0.0.0',()=>console.log(`Vehicle activity API listening on ${ACTIVITY_API_PORT}`));
+} else {
+  console.warn('Vehicle activity API disabled: missing ACTIVITY_BACKEND_SECRET or ACTIVITY_SIGNING_SECRET');
+}
 client.login(TOKEN);

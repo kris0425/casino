@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>橫濱改裝工坊｜澳門最大賭場</title>
+  <meta name="description" content="Discord 賭場 Bot 的互動式車輛改裝工坊">
+  <link rel="stylesheet" href="./site.css">
+</head>
+<body>
+<main class="shell">
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">M</span><div><b>澳門最大賭場</b><small>YOKOHAMA MOD LAB</small></div></div>
+    <div class="top-actions"><span class="prototype" id="connection-status"><i></i> 展示模式</span><button class="wallet"><span>金幣餘額</span><b id="wallet-balance">—</b></button></div>
+  </header>
+  <section class="garage-layout">
+    <div class="stage-column">
+      <div class="vehicle-heading"><div><span class="eyebrow">LEGENDARY / JDM</span><h1 id="vehicle-title">白銀戰神 R34</h1></div><button class="car-picker">目前車輛 <b id="vehicle-model">Nissan Skyline GT-R</b><span>⌄</span></button></div>
+      <div class="car-stage">
+        <img id="car-image" src="./cars/r34/white_stock_stock_stock.jpg" alt="珍珠白原廠白銀戰神 R34">
+        <div class="live-pill"><i></i> 即時預覽</div>
+        <div class="car-caption"><div><span>目前外觀</span><b id="car-caption">珍珠白・原廠車身・原廠輪框</b></div><span class="image-count">多車款精準素材</span></div>
+      </div>
+      <div class="performance-card">
+        <div class="performance-copy"><span class="eyebrow">TUNING SCORE</span><b id="score">A</b><small>綜合改裝評級</small></div>
+        <div class="ratings" id="ratings"></div>
+        <div class="bonus"><span>搶劫逃脫</span><b id="heist-bonus">+2%</b><small>依目前套件估算</small></div>
+      </div>
+    </div>
+    <aside class="configurator">
+      <div class="config-head"><div><span class="eyebrow">CUSTOMIZE</span><h2>外觀改裝</h2></div><span class="step">01 / 03</span></div>
+      <nav class="tabs" aria-label="改裝分類"><button class="active" data-panel="paint"><span>●</span>烤漆</button><button data-panel="kit"><span>◆</span>寬體</button><button data-panel="wheel"><span>✦</span>輪框</button></nav>
+      <div class="options-scroll" id="options"></div>
+      <div class="checkout"><div><span>本次改裝預估</span><b><span id="total">0</span> <small>金幣</small></b></div><button class="confirm-button" id="confirm"><span>確認改裝</span><i>→</i></button><p id="checkout-note">請從 Discord 的改裝按鈕開啟，以連結正式車庫。</p></div>
+    </aside>
+  </section>
+  <div class="modal-backdrop" id="modal" hidden>
+    <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><button class="close" id="close">×</button><span class="modal-icon">✓</span><span class="eyebrow">PREVIEW CONFIRMATION</span><h2 id="confirm-title">確認安裝這組改裝？</h2><p id="modal-config"></p><div class="modal-price"><span>確認後扣款</span><b id="modal-price"></b></div><button class="confirm-button" id="apply"><span>確認安裝</span><i>→</i></button><small>Bot 會再次驗證車主、圖片素材、價格與金幣餘額。</small></section>
+  </div>
+</main>
+<script src="./app.js"></script>
+</body></html>

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#e6004f">
+  <title>開運刮刮樂｜澳門最大賭場</title>
+  <meta name="description" content="台灣即開型彩券風格的互動式刮刮卡">
+  <link rel="stylesheet" href="/scratch.css">
+</head>
+<body>
+  <main class="scratch-shell">
+    <header class="casino-brand">
+      <span class="brand-seal">澳</span>
+      <div><b>澳門最大賭場</b><small>MACAU GRAND CASINO</small></div>
+      <span class="secure-pill"><i></i> 伺服器封存</span>
+    </header>
+
+    <section class="intro">
+      <span class="eyebrow">LUCKY SCRATCH / 即開型彩券</span>
+      <h1>開運<span>刮刮樂</span></h1>
+      <p>用手指或滑鼠刮除整片銀色塗層。進度必須達到 100%，系統才會驗證並派發獎金。</p>
+    </section>
+
+    <section class="ticket-wrap" aria-label="互動式刮刮卡">
+      <article class="ticket" id="ticket">
+        <div class="ticket-edge left"></div><div class="ticket-edge right"></div>
+        <div class="ticket-head">
+          <div class="ticket-mark"><span>即開</span><b>彩券</b></div>
+          <div class="ticket-logo"><span>好運旺旺來</span><strong>開運刮刮樂</strong><small>LUCKY TREASURE</small></div>
+          <div class="top-prize"><span>最高獎金</span><b>10×</b><small>本局下注</small></div>
+        </div>
+        <div class="fortune-row" aria-hidden="true"><span>發</span><span>財</span><span>中</span><span>獎</span><span>旺</span></div>
+        <div class="rule-ribbon"><span>3 個相同圖案得 10 倍</span><i>★</i><span>2 個相同圖案得 2 倍</span></div>
+        <div class="scratch-zone" id="scratch-zone">
+          <div class="scratch-title"><span>請刮開全部遊戲區</span><b>YOUR SYMBOLS</b></div>
+          <div class="prize-grid" id="prize-grid" aria-live="polite">
+            <div class="prize"><small>幸運號碼 01</small><span>?</span></div>
+            <div class="prize"><small>幸運號碼 02</small><span>?</span></div>
+            <div class="prize"><small>幸運號碼 03</small><span>?</span></div>
+          </div>
+          <canvas id="scratch-canvas" aria-label="銀色刮除區域"></canvas>
+          <div class="scratch-hint" id="scratch-hint"><span>↔</span> 在此刮開</div>
+        </div>
+        <div class="ticket-foot">
+          <div class="price-box"><span>本券金額</span><b id="bet">—</b></div>
+          <div class="barcode" aria-hidden="true"></div>
+          <div class="serial"><span>票券編號</span><b id="serial">LOADING</b></div>
+        </div>
+        <div class="ticket-notice">未滿 100% 不派獎｜獎項由伺服器封存｜逾期票券無效</div>
+      </article>
+    </section>
+
+    <section class="status-card">
+      <div class="progress-copy"><span id="status-label">正在讀取你的刮刮卡…</span><b id="progress-value">0%</b></div>
+      <div class="progress-track"><i id="progress-bar"></i></div>
+      <button id="assist" type="button">無法完整刮除？啟用輔助刮開</button>
+    </section>
+
+    <section class="result-card" id="result" hidden aria-live="assertive">
+      <span class="result-icon" id="result-icon">✦</span>
+      <small>OFFICIAL RESULT</small>
+      <h2 id="result-title">開獎結果</h2>
+      <p id="result-message"></p>
+      <div class="result-stats">
+        <div><span>本次派彩</span><b id="credited">0</b></div>
+        <div><span>目前金庫</span><b id="balance">0</b></div>
+      </div>
+      <p class="title-notice" id="title-notice"></p>
+      <div class="dog-event" id="dog-event" hidden>
+        <span>🐕</span>
+        <div><b>博美犬叼走了獲利！</b><small>你有一次機會把金幣追回來。</small></div>
+        <button id="chase" type="button">追上去</button>
+      </div>
+      <button class="close-page" type="button" id="close-page">完成，返回 Discord</button>
+    </section>
+
+    <section class="error-card" id="error" hidden>
+      <span>!</span><h2>刮刮卡無法開啟</h2><p id="error-message"></p>
+    </section>
+  </main>
+  <script src="/scratch.js"></script>
+</body>
+</html>

@@ -7,7 +7,10 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY src ./src
 COPY scripts ./scripts
+COPY updates ./updates
+COPY CHANGELOG.md ./CHANGELOG.md
 COPY assets ./assets
+COPY activity/public ./activity/public
 RUN mkdir -p /app/data/renders
 ENV NODE_ENV=production
 VOLUME ["/app/data"]
