@@ -4494,8 +4494,7 @@ const commands = [
     .addUserOption(o=>o.setName('對手').setDescription('指定決鬥對手').setRequired(true)),'雙方各自支付的下注金額'),
   new SlashCommandBuilder().setName('稱號設定').setDescription('管理員設定玩家資料卡稱號').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption(o=>o.setName('玩家').setDescription('目標玩家').setRequired(true))
-    .addStringOption(o=>o.setName('稱號').setDescription('指定特殊稱號').setRequired(true).addChoices(
-      ...Object.entries(profileTitles).map(([value,name])=>({name,value})),{name:'❌ 清除特殊稱號',value:'clear'})),
+    .addStringOption(o=>o.setName('稱號').setDescription('輸入名稱搜尋特殊稱號').setRequired(true).setAutocomplete(true)),
   new SlashCommandBuilder().setName('搶劫公告頻道').setDescription('管理員設定搶劫成功與週日寶庫情報頻道').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addChannelOption(o=>o.setName('頻道').setDescription('單人或團隊搶劫成功時發布公告的頻道').setRequired(true).addChannelTypes(ChannelType.GuildText,ChannelType.GuildAnnouncement)),
   new SlashCommandBuilder().setName('單人搶劫機率').setDescription('管理員設定單人搶銀行的基礎成功率').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -4542,6 +4541,13 @@ const daily = new Map();
 async function handleInteraction(i) {
   if(i.isAutocomplete()) {
     const focused=i.options.getFocused(true),query=String(focused.value||'').trim().toLowerCase();
+    if(i.commandName==='稱號設定'&&focused.name==='稱號') {
+      const entries=[...Object.entries(profileTitles),['clear','❌ 清除特殊稱號']];
+      return i.respond(entries
+        .filter(([value,name])=>!query||value.toLowerCase().includes(query)||name.toLowerCase().includes(query))
+        .slice(0,25)
+        .map(([value,name])=>({name,value})));
+    }
     if(i.commandName==='二手市場'&&focused.name==='編號') {
       if(!i.guildId) return i.respond([]);
       const listings=db.prepare("SELECT id,asset_id,quantity,price FROM asset_market_listings WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 25").all(i.guildId);

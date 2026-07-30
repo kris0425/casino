@@ -35,6 +35,12 @@ test('13 個新成就與稱號完整註冊',()=>{
   const titleChoiceBlock=source.match(/setName\('稱號'\)[\s\S]+?\{name:'❌ 取消目前稱號',value:'clear'\}\)\)/)?.[0]||'';
   assert.ok(titleChoiceBlock);
   assert.ok((titleChoiceBlock.match(/\{name:/g)||[]).length<=25,'Discord 稱號選項不可超過 25 個');
+  const adminTitleStart=source.indexOf("setName('稱號設定')");
+  const adminTitleEnd=source.indexOf("setName('搶劫公告頻道')",adminTitleStart);
+  const adminTitleBlock=adminTitleStart>=0&&adminTitleEnd>adminTitleStart?source.slice(adminTitleStart,adminTitleEnd):'';
+  assert.ok(adminTitleBlock,'管理員稱號設定必須使用 autocomplete，避免超過 Discord 25 個選項限制');
+  assert.match(adminTitleBlock,/setAutocomplete\(true\)/);
+  assert.doesNotMatch(adminTitleBlock,/addChoices\(/);
 });
 
 test('成就累加資料表可安全累計與取最大值',()=>{
