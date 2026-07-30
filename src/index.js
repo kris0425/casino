@@ -175,7 +175,7 @@ function dealerReaction(playerWon) {
   return reactions[Math.floor(Math.random()*reactions.length)];
 }
 function settleGamePayout(g,u,bet,payout,game,{balanceChanger=changeBalance,allIn=false}={}) {
-  const allInProgress=allIn?recordCasinoAllIn(g,u,game):null;
+  const allInProgress=allIn?recordCasinoAllIn(g,u,game,bet):null;
   let titleMultiplier=1,titleInitialMultiplier=1,titleActive=false,titleSkillTriggered=false,titleId='';
   if(payout>bet) {
     recordCasinoGameWin(g,u,game);
@@ -381,6 +381,20 @@ db.exec(`
     dm_notified_at INTEGER,
     PRIMARY KEY (guild_id, user_id)
   );
+  CREATE TABLE IF NOT EXISTS casino_all_in_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    game TEXT NOT NULL,
+    bet INTEGER NOT NULL,
+    all_in_count INTEGER NOT NULL,
+    channel_id TEXT,
+    message_id TEXT,
+    broadcasted_at INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_casino_all_in_events_pending
+    ON casino_all_in_events(broadcasted_at,id);
   CREATE TABLE IF NOT EXISTS player_assets (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, asset_id TEXT NOT NULL, quantity INTEGER NOT NULL DEFAULT 0,
     acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2516,10 +2530,76 @@ function playerTitle(g,u) {
 }
 const ALL_IN_HERO_TARGET=50;
 const allInTitleNotificationsInFlight=new Set();
+const FREE_LOBBY_CHANNEL_KEYWORD='自由大廳';
+const allInBroadcastsInFlight=new Set();
 function casinoAllInCount(g,u) {
   return db.prepare('SELECT all_in_count FROM casino_all_in_stats WHERE guild_id=? AND user_id=?').get(g,u)?.all_in_count||0;
 }
-function recordCasinoAllIn(g,u,game) {
+function freeLobbyChannelRank(name) {
+  const normalized=String(name||'').trim();
+  if(normalized===FREE_LOBBY_CHANNEL_KEYWORD) return 0;
+  if(normalized.endsWith(`｜${FREE_LOBBY_CHANNEL_KEYWORD}`)||normalized.endsWith(`|${FREE_LOBBY_CHANNEL_KEYWORD}`)) return 1;
+  return normalized.includes(FREE_LOBBY_CHANNEL_KEYWORD)?2:99;
+}
+function freeLobbyTextChannels(channels) {
+  return [...channels].filter(channel=>channel
+    &&[ChannelType.GuildText,ChannelType.GuildAnnouncement].includes(channel.type)
+    &&typeof channel.send==='function'
+    &&freeLobbyChannelRank(channel.name)<99
+  ).sort((left,right)=>freeLobbyChannelRank(left.name)-freeLobbyChannelRank(right.name)||left.position-right.position);
+}
+async function freeLobbyChannel(guildId) {
+  const guild=client.guilds.cache.get(guildId)||await client.guilds.fetch(guildId);
+  let matches=freeLobbyTextChannels(guild.channels.cache.values());
+  if(matches.length) return matches[0];
+  const fetched=await guild.channels.fetch();
+  matches=freeLobbyTextChannels([...fetched.values()].filter(Boolean));
+  return matches[0]||null;
+}
+async function announceCasinoAllInEvent(eventId) {
+  if(allInBroadcastsInFlight.has(eventId)) return false;
+  const event=db.prepare('SELECT * FROM casino_all_in_events WHERE id=? AND broadcasted_at IS NULL').get(eventId);
+  if(!event) return false;
+  allInBroadcastsInFlight.add(eventId);
+  try {
+    const channel=await freeLobbyChannel(event.guild_id);
+    if(!channel) throw new Error(`找不到名稱包含「${FREE_LOBBY_CHANNEL_KEYWORD}」的文字頻道`);
+    const message=await channel.send({
+      embeds:[new EmbedBuilder()
+        .setColor(0xE53935)
+        .setTitle('🔥 歐印警報！')
+        .setDescription(`<@${event.user_id}> 在 **${event.game}** 選擇歐印，將當時持有的金幣全部押上！`)
+        .addFields(
+          {name:'💰 歐印金額',value:fmt(event.bet),inline:true},
+          {name:'🎮 遊戲',value:event.game,inline:true},
+          {name:'🔥 累積歐印',value:`${fmt(event.all_in_count)} 次`,inline:true}
+        )
+        .setFooter({text:'自由大廳自動播報｜本局結果請回原遊戲頻道查看'})
+        .setTimestamp()],
+      allowedMentions:{parse:[]}
+    });
+    if(channel.type===ChannelType.GuildAnnouncement) {
+      try { await message.crosspost(); }
+      catch(error) { console.error(`歐印警報交叉發布失敗 channel=${channel.id}: ${error.message}`); }
+    }
+    db.prepare(`UPDATE casino_all_in_events
+      SET channel_id=?,message_id=?,broadcasted_at=?
+      WHERE id=? AND broadcasted_at IS NULL`).run(channel.id,message.id,Date.now(),eventId);
+    return true;
+  } catch(error) {
+    console.error(`歐印警報發布失敗 event=${eventId} guild=${event.guild_id}: ${error.message}`);
+    return false;
+  } finally {
+    allInBroadcastsInFlight.delete(eventId);
+  }
+}
+async function notifyPendingCasinoAllIns() {
+  const rows=db.prepare(`SELECT id FROM casino_all_in_events
+    WHERE broadcasted_at IS NULL ORDER BY id LIMIT 25`).all();
+  for(const row of rows) await announceCasinoAllInEvent(row.id);
+}
+function recordCasinoAllIn(g,u,game,bet) {
+  if(!Number.isSafeInteger(bet)||bet<1) throw new Error('歐印金額必須是正安全整數');
   db.prepare(`INSERT INTO casino_all_in_stats(guild_id,user_id,all_in_count)
     VALUES(?,?,1)
     ON CONFLICT(guild_id,user_id) DO UPDATE SET all_in_count=all_in_count+1`).run(g,u);
@@ -2531,7 +2611,11 @@ function recordCasinoAllIn(g,u,game) {
     db.prepare('INSERT OR IGNORE INTO player_achievements(guild_id,user_id,achievement_id) VALUES(?,?,?)').run(g,u,'all_in_hero');
     queueMicrotask(()=>notifyAllInHeroUnlock(g,u).catch(error=>console.error(`歐印勇者解鎖私訊失敗 guild=${g} user=${u}: ${error.message}`)));
   }
-  return {count,newlyUnlocked,game};
+  const inserted=db.prepare(`INSERT INTO casino_all_in_events(guild_id,user_id,game,bet,all_in_count)
+    VALUES(?,?,?,?,?)`).run(g,u,String(game),bet,count);
+  const eventId=Number(inserted.lastInsertRowid);
+  queueMicrotask(()=>announceCasinoAllInEvent(eventId).catch(error=>console.error(`歐印警報排程失敗 event=${eventId}: ${error.message}`)));
+  return {count,newlyUnlocked,game,eventId};
 }
 async function notifyAllInHeroUnlock(g,u) {
   const key=`${g}:${u}`;
@@ -7275,11 +7359,13 @@ client.once('clientReady',()=>{
   setInterval(announceSundayCasinoVault,60000);
   setInterval(notifyCompletedAirlineFlights,60000);
   setInterval(notifyPendingAllInHeroUnlocks,60000);
+  setInterval(()=>notifyPendingCasinoAllIns().catch(error=>console.error(`待補發歐印警報失敗：${error.message}`)),60000);
   setInterval(expireWebJengaGames,60000);
   announceTomorrowBank();
   announceSundayCasinoVault();
   notifyCompletedAirlineFlights();
   notifyPendingAllInHeroUnlocks();
+  notifyPendingCasinoAllIns().catch(error=>console.error(`啟動補發歐印警報失敗：${error.message}`));
   expireWebJengaGames();
 });
 function activitySignature(value) {

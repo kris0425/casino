@@ -67,6 +67,30 @@ test('成就累加資料表可安全累計與取最大值',()=>{
   assert.equal(db.prepare("SELECT value FROM achievement_progress WHERE metric='comebackReached'").get().value,1);
 });
 
+test('完成歐印時排入自由大廳自動播報',()=>{
+  assert.match(source,/recordCasinoAllIn\(g,u,game,bet\)/);
+  assert.match(source,/allIn\?recordCasinoAllIn\(g,u,game,bet\):null/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS casino_all_in_events/);
+  assert.match(source,/FREE_LOBBY_CHANNEL_KEYWORD='自由大廳'/);
+  assert.match(source,/setInterval\(\(\)=>notifyPendingCasinoAllIns\(\)\.catch/);
+  assert.match(source,/allowedMentions:\{parse:\[\]\}/);
+
+  const db=new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE casino_all_in_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, game TEXT NOT NULL,
+    bet INTEGER NOT NULL, all_in_count INTEGER NOT NULL,
+    channel_id TEXT, message_id TEXT, broadcasted_at INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  const inserted=db.prepare(`INSERT INTO casino_all_in_events(guild_id,user_id,game,bet,all_in_count)
+    VALUES(?,?,?,?,?)`).run('guild','player','比大小',50000,3);
+  const pending=db.prepare('SELECT * FROM casino_all_in_events WHERE id=? AND broadcasted_at IS NULL').get(Number(inserted.lastInsertRowid));
+  assert.equal(pending.bet,50000);
+  assert.equal(pending.game,'比大小');
+  assert.equal(pending.all_in_count,3);
+});
+
 test('公告檔案包含成就與轉帳規則',()=>{
   const update=JSON.parse(readFileSync(new URL('../updates/2026-07-30-transfer-achievements.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-07-30-transfer-achievements');
