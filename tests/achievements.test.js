@@ -92,6 +92,40 @@ test('完成歐印時排入賭場公告自動播報',()=>{
   assert.equal(pending.all_in_count,3);
 });
 
+test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
+  const block=source.match(/async function publishLatestHeistResult\(interaction,payload\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.ok(block,'缺少搶劫最終結果發布函式');
+  assert.match(block,/new Set\(\[50027,10015,10062\]\)/);
+  assert.match(block,/client\.channels\.fetch\(interaction\.channelId\)/);
+  assert.match(block,/return channel\.send\(\{/);
+  assert.match(block,/搶劫已完成，以下為本次最終結果/);
+  assert.doesNotMatch(block,/changeBalance|INSERT INTO jail|UPDATE wallets/);
+  assert.match(source,/if\(escaped\) \{[\s\S]+changeBalance\(g,u,SOLO_HEIST_REWARD,'job'/);
+  assert.match(source,/return publishLatestHeistResult\(i,payload\)/);
+
+  class FakeEmbedBuilder {
+    setColor(){return this;}
+    setTitle(){return this;}
+    setDescription(){return this;}
+  }
+  const sent=[];
+  const channel={isTextBased:()=>true,send:async payload=>{sent.push(payload);return payload;}};
+  const client={channels:{fetch:async()=>channel}};
+  const publish=new Function('EmbedBuilder','client',`${block}; return publishLatestHeistResult;`)(FakeEmbedBuilder,client);
+  let followUps=0;
+  const interaction={
+    user:{id:'player'},channel,channelId:'channel',
+    editReply:async()=>{throw Object.assign(new Error('Invalid Webhook Token'),{code:50027});},
+    followUp:async()=>{followUps++;throw new Error('不應使用失效的 webhook');}
+  };
+  const payload={embeds:[{title:'最終結果'}],attachments:[],files:[{name:'result.jpg'}]};
+  await publish(interaction,payload);
+  assert.equal(followUps,0);
+  assert.equal(sent.length,1);
+  assert.equal(sent[0].content,'<@player> 搶劫已完成，以下為本次最終結果。');
+  assert.deepEqual(sent[0].files,payload.files);
+});
+
 test('機場整合交通事業並支援最多五個同時航班機位',()=>{
   assert.match(source,/flight_slots INTEGER NOT NULL DEFAULT 1/);
   assert.match(source,/const AIRLINE_MAX_FLIGHT_SLOTS=5/);
@@ -209,4 +243,13 @@ test('交通事業整合與多機位更新公告完整',()=>{
   assert.match(update.summary,/交通事業/);
   assert.match(update.changes.join('\n'),/5 個機位/);
   assert.match(update.changes.join('\n'),/賭場公告/);
+});
+
+test('搶劫備援與貨運站圖片修復公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-07-31-heist-fallback-freight-image.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-07-31-heist-fallback-freight-image');
+  assert.equal(update.changes.length,7);
+  assert.match(update.summary,/皇冠港物流貨運站圖片/);
+  assert.match(update.changes.join('\n'),/Invalid Webhook Token/);
+  assert.match(update.changes.join('\n'),/不會重複派彩或處罰/);
 });

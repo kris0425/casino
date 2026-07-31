@@ -162,12 +162,36 @@ function heistScenePayload(embed,scene) {
   };
 }
 async function publishLatestHeistResult(interaction,payload) {
-  await interaction.editReply({
-    embeds:[new EmbedBuilder().setColor(0x607D8B).setTitle('🏁 搶劫任務已完成').setDescription('完整的最新結果已發布在頻道最下方，玩家不需要再往上翻找。')],
-    components:[],attachments:[],files:[]
-  });
   const {attachments,...followUpPayload}=payload;
-  return interaction.followUp({...followUpPayload,allowedMentions:{parse:[]}});
+  const invalidWebhookCodes=new Set([50027,10015,10062]);
+  const isInvalidWebhook=error=>invalidWebhookCodes.has(Number(error?.code||error?.rawError?.code||0));
+  const sendChannelFallback=async error=>{
+    const channel=interaction.channel
+      ||(interaction.channelId?await client.channels.fetch(interaction.channelId).catch(()=>null):null);
+    if(!channel?.isTextBased()||typeof channel.send!=='function') throw error;
+    console.warn(`搶劫最終結果改用頻道備援 user=${interaction.user?.id||'unknown'} code=${error?.code||error?.rawError?.code||'unknown'}`);
+    const userId=interaction.user?.id;
+    return channel.send({
+      ...followUpPayload,
+      content:userId?`<@${userId}> 搶劫已完成，以下為本次最終結果。`:undefined,
+      allowedMentions:userId?{users:[userId],roles:[],repliedUser:false}:{parse:[]}
+    });
+  };
+  try {
+    await interaction.editReply({
+      embeds:[new EmbedBuilder().setColor(0x607D8B).setTitle('🏁 搶劫任務已完成').setDescription('完整的最新結果已發布在頻道最下方，玩家不需要再往上翻找。')],
+      components:[],attachments:[],files:[]
+    });
+    try {
+      return await interaction.followUp({...followUpPayload,allowedMentions:{parse:[]}});
+    } catch(error) {
+      if(!isInvalidWebhook(error)) throw error;
+      return sendChannelFallback(error);
+    }
+  } catch(error) {
+    if(!isInvalidWebhook(error)) throw error;
+    return sendChannelFallback(error);
+  }
 }
 function dealerReaction(playerWon) {
   if(playerWon) return {quote:'💢 莊家：「我要驗牌！」',path:dealerImages.verify,name:'dealer_verify.webp'};
