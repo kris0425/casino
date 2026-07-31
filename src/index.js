@@ -37,6 +37,9 @@ const ACTIVITY_BACKEND_SECRET = process.env.ACTIVITY_BACKEND_SECRET || '';
 const PLAYER_TRANSFER_FEE_RATE = 0.02;
 const PLAYER_TRANSFER_MIZI_CHANCE = 0.05;
 const PLAYER_TRANSFER_EXTRA_ZERO_CHANCE = 0.05;
+const K_CAR_WASH_BASE_REWARD = 12_000;
+const K_CAR_WASH_SCRATCH_CHANCE = 0.10;
+const K_CAR_WASH_SCRATCH_COMPENSATION = 20_000;
 const ECONOMY_SINK_LABELS={
   asset_purchase:'房地產／永久資產',
   asset_rental:'套房／限時租賃',
@@ -3758,6 +3761,14 @@ function burglaryLobbyEmbed(lobby) {
     `隊長：<@${lobby.leaderId}>\n目標：**${target}**\n成員：${[...lobby.members].map(id=>`<@${id}>`).join('、')}\n人數：**${lobby.members.size}/4**\n目前成功率：**${chance}%**\n\n每名成員開始時消耗 **10 體力**；成功後平均分贓，失敗則全員關進迷子的小黑屋 2 分鐘。`
   );
 }
+function randomBurglaryTheft(targetCoins,random=Math.random) {
+  if(!Number.isSafeInteger(targetCoins)||targetCoins<=0) return 0;
+  const maximum=Math.floor(targetCoins*0.50);
+  if(maximum<1) return 0;
+  const minimum=Math.min(maximum,Math.max(1,Math.floor(targetCoins*0.10)));
+  const roll=Math.min(0.9999999999999999,Math.max(0,Number(random())||0));
+  return minimum+Math.floor(roll*(maximum-minimum+1));
+}
 const heistPoliceTactics={
   roadblock:{name:'🚧 設置路障',description:'克制接應車輛；命中時提供 10% 壓制，否則 2%。'},
   air_intercept:{name:'🚁 空中攔截',description:'克制直升機撤離；命中時提供 10% 壓制，否則 2%。'},
@@ -5054,6 +5065,7 @@ const commands = [
       {name:'🚕 開計程車（+750）',value:'taxi'},
       {name:'🛵 送外送（+650）',value:'delivery'},
       {name:'📸 幫 Hao 拍女僕寫真（+1,200）',value:'maid_photos'},
+      {name:'🧽 幫 K 佬洗車（+12,000｜10% 刮傷賠 20,000）',value:'k_car_wash'},
       {name:'📦 運輸神秘粉末（非法工作）',value:'mystery_powder'},
       {name:'🏚️ 闖空門（可指定玩家）',value:'burglary'},
       {name:'🏗️ 偷鋼筋去賣（30% 成功；失敗罰款 2,000）',value:'rebar'},
@@ -6641,7 +6653,7 @@ async function handleInteraction(i) {
       if(lobby.targetId) {
         const targetCoins=balance(i.guildId,lobby.targetId);
         if(targetCoins>0) {
-          total=Math.min(5000,3000*members.length,targetCoins,Math.max(100,Math.floor(targetCoins*(0.10+Math.random()*0.16+0.05*(members.length-1)))));
+          total=randomBurglaryTheft(targetCoins);
           changeBalance(i.guildId,lobby.targetId,-total,'theft',lobby.leaderId,`遭 ${members.length} 人闖空門`);
         }
       } else total=Math.min(5000,(Math.floor(Math.random()*1801)+1200)*members.length);
@@ -7405,7 +7417,7 @@ async function handleInteraction(i) {
       const hospitalized=hospitalRemaining(g,u);
       if(hospitalized) throw new Error(`你正在醫院休養，還有 ${jailText(hospitalized)} 才能行動`);
       const job=i.options.getString('工作',true);
-      if(!['dishes','hao','trash','move_bricks','clean_jail','taxi','delivery','maid_photos','mystery_powder','burglary','rebar','wire','robbery'].includes(job)) throw new Error('未知的工作');
+      if(!['dishes','hao','trash','move_bricks','clean_jail','taxi','delivery','maid_photos','k_car_wash','mystery_powder','burglary','rebar','wire','robbery'].includes(job)) throw new Error('未知的工作');
       if((job==='rebar'||job==='wire') && balance(g,u)<2000) throw new Error(`${job==='wire'?'剪電線':'偷鋼筋'}失敗可能被罰 ${fmt(2000)}，請先準備足夠金幣`);
       if(job==='burglary') {
         const target=i.options.getUser('目標');
@@ -7417,7 +7429,7 @@ async function handleInteraction(i) {
         setTimeout(()=>{if(burglaryLobbies.get(token)===lobby) burglaryLobbies.delete(token);},5*60*1000);
         return i.reply({embeds:[burglaryLobbyEmbed(lobby)],components:[burglaryLobbyRow(token)]});
       }
-      const legalJob=['dishes','hao','trash','move_bricks','clean_jail','taxi','delivery','maid_photos'].includes(job);
+      const legalJob=['dishes','hao','trash','move_bricks','clean_jail','taxi','delivery','maid_photos','k_car_wash'].includes(job);
       if(legalJob && legalWorkCount(g,u)>=5) throw new Error('今天的合法打工次數已達 5 次，請明天再來');
       const staminaAfter=consumeStamina(g,u,10);
       scheduleRandomEvent(i,g,u);
@@ -7526,7 +7538,8 @@ async function handleInteraction(i) {
           if(target) {
             const targetCoins=balance(g,target.id);
             if(targetCoins<=0) return i.editReply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🕸️ 撲了個空！').setDescription(`<@${target.id}> 的金庫空空如也，你只好兩手空空離開。`)]});
-            const stolen=Math.min(3000,targetCoins,Math.max(100,Math.floor(targetCoins*(0.10+Math.random()*0.16))));
+            const stolen=randomBurglaryTheft(targetCoins);
+            if(!stolen) return i.editReply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🕸️ 撲了個空！').setDescription(`<@${target.id}> 的金庫沒有足夠的整數金幣可以帶走。`)]});
             changeBalance(g,target.id,-stolen,'theft',u,`遭 <@${u}> 闖空門`);
             const next=changeBalance(g,u,stolen,'theft',u,`闖入 <@${target.id}> 住處`);
             return i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('💰 闖空門成功！').setDescription(`你從 <@${target.id}> 的金庫拿走 **${fmt(stolen)}** 並順利離開。\n你的金庫：${fmt(next)}`)]});
@@ -7561,13 +7574,24 @@ async function handleInteraction(i) {
         clean_jail:{amount:600,title:'🧹 幫迷子打掃小黑屋',message:'你把迷子的小黑屋刷得乾乾淨淨，連鐵欄杆都亮到反光！'},
         taxi:{amount:750,title:'🚕 開計程車',message:'你安全載完一整輪客人，還收到了一筆不錯的小費！'},
         delivery:{amount:650,title:'🛵 送外送',message:'你趕在餐點冷掉前送達，顧客給了五星好評！'},
-        maid_photos:{amount:1200,title:'📸 幫 Hao 拍女僕寫真',message:'你替 Hao 完成一組女僕寫真，成品意外地大受好評！'}
+        maid_photos:{amount:1200,title:'📸 幫 Hao 拍女僕寫真',message:'你替 Hao 完成一組女僕寫真，成品意外地大受好評！'},
+        k_car_wash:{amount:K_CAR_WASH_BASE_REWARD,title:'🧽 幫 K 佬洗車',message:'你幫 K 佬把豪車洗得閃閃發亮！'}
       };
       const selected=jobs[job];
       if(!selected) throw new Error('未知的工作');
       const earned=selected.amount*workMultiplier(g,u);
       legalWorkCount(g,u,true);
       const before=balance(g,u), next=changeBalance(g,u,earned,'job',u,selected.title), actual=next-before;
+      if(job==='k_car_wash'&&Math.random()<K_CAR_WASH_SCRATCH_CHANCE) {
+        const compensation=Math.min(K_CAR_WASH_SCRATCH_COMPENSATION,next);
+        const finalBalance=compensation
+          ?changeBalance(g,u,-compensation,'fine',u,'幫 K 佬洗車時刮傷豪車')
+          :next;
+        const compensationNote=compensation<K_CAR_WASH_SCRATCH_COMPENSATION
+          ?`\n金庫不足，實際扣除：**${fmt(compensation)}**（金庫已歸零）`
+          :'';
+        return i.reply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🚘💥 幫 K 佬洗車｜刮傷豪車').setDescription(`**好消息：刮到一輛豪車。**\n**壞消息：刮到一輛豪車。**\n\n洗車工資：**${fmt(actual)}**\n賠償：**${fmt(K_CAR_WASH_SCRATCH_COMPENSATION)}**${compensationNote}\n本次淨變動：**${fmt(finalBalance-before)}**\n金庫：${fmt(finalBalance)}`)]});
+      }
       return i.reply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle(selected.title).setDescription(`${selected.message}\n獲得 **${fmt(actual)}**\n金庫：${fmt(next)}`)]});
     }
     const jailed=jailRemaining(g,u);

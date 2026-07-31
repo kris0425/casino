@@ -116,6 +116,37 @@ test('歐印勇者每日只能發動一次並於台北時間換日重置',()=>{
   assert.equal(claim('guild','player'),true,'台北時間換日後應可再次發動');
 });
 
+test('幫 K 佬洗車提供 12000 工資並有 10% 豪車刮傷賠償事件',()=>{
+  assert.match(source,/const K_CAR_WASH_BASE_REWARD = 12_000/);
+  assert.match(source,/const K_CAR_WASH_SCRATCH_CHANCE = 0\.10/);
+  assert.match(source,/const K_CAR_WASH_SCRATCH_COMPENSATION = 20_000/);
+  assert.match(source,/幫 K 佬洗車（\+12,000｜10% 刮傷賠 20,000）/);
+  assert.match(source,/legalJob=\[[^\]]+'k_car_wash'\]\.includes\(job\)/);
+  assert.match(source,/k_car_wash:\{amount:K_CAR_WASH_BASE_REWARD/);
+  assert.match(source,/job==='k_car_wash'&&Math\.random\(\)<K_CAR_WASH_SCRATCH_CHANCE/);
+  assert.match(source,/好消息：刮到一輛豪車。/);
+  assert.match(source,/壞消息：刮到一輛豪車。/);
+  assert.match(source,/Math\.min\(K_CAR_WASH_SCRATCH_COMPENSATION,next\)/);
+});
+
+test('指定玩家闖空門隨機偷取 10% 至 50% 並移除固定金額上限',()=>{
+  const block=source.match(/function randomBurglaryTheft\(targetCoins,random=Math\.random\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.ok(block,'缺少闖空門隨機金額函式');
+  const steal=new Function(`${block}; return randomBurglaryTheft;`)();
+  assert.equal(steal(100_000,()=>0),10_000);
+  assert.equal(steal(100_000,()=>0.5),30_000);
+  assert.equal(steal(100_000,()=>0.999999),50_000);
+  assert.equal(steal(1,()=>0.5),0,'不可從只有 1 金幣的玩家偷走超過 50%');
+  assert.equal(steal(2,()=>0.5),1);
+  for(let index=0;index<100;index++) {
+    const amount=steal(987_654,()=>index/100);
+    assert.ok(amount>=98_765&&amount<=493_827,`偷竊金額超出 10%～50%：${amount}`);
+  }
+  assert.ok((source.match(/randomBurglaryTheft\(targetCoins\)/g)||[]).length>=2,'單人與多人指定目標都必須使用新規則');
+  assert.doesNotMatch(source,/Math\.min\(3000,targetCoins/);
+  assert.doesNotMatch(source,/Math\.min\(5000,3000\*members\.length,targetCoins/);
+});
+
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
   const block=source.match(/async function publishLatestHeistResult\(interaction,payload\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少搶劫最終結果發布函式');
@@ -285,4 +316,13 @@ test('歐印勇者每日一次更新公告完整',()=>{
   assert.match(update.summary,/每天最多發動一次/);
   assert.match(update.changes.join('\n'),/台北時間 00:00/);
   assert.match(update.changes.join('\n'),/普通歐印次數.*歐印警報/s);
+});
+
+test('K 佬洗車與闖空門金額更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-07-31-k-car-wash-burglary-loot.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-07-31-k-car-wash-burglary-loot');
+  assert.equal(update.version,'2026.07.31.4');
+  assert.match(update.summary,/幫 K 佬洗車/);
+  assert.match(update.changes.join('\n'),/12,000.*20,000/s);
+  assert.match(update.changes.join('\n'),/最多 50%/);
 });
