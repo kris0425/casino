@@ -92,6 +92,30 @@ test('完成歐印時排入賭場公告自動播報',()=>{
   assert.equal(pending.all_in_count,3);
 });
 
+test('歐印勇者每日只能發動一次並於台北時間換日重置',()=>{
+  assert.match(source,/hero_trigger_day TEXT/);
+  assert.match(source,/ALTER TABLE casino_all_in_stats ADD COLUMN hero_trigger_day TEXT/);
+  assert.match(source,/allIn&&equippedTitleId\(g,u\)==='all_in_hero'&&claimAllInHeroDaily\(g,u\)/);
+  assert.match(source,/每日第一次歐印獲勝時派彩 ×3（台北時間 00:00 重置）/);
+
+  const block=source.match(/function claimAllInHeroDaily\(g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.ok(block,'缺少歐印勇者每日觸發限制函式');
+  const db=new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE casino_all_in_stats (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL,
+    all_in_count INTEGER NOT NULL DEFAULT 0,
+    hero_trigger_day TEXT,
+    PRIMARY KEY (guild_id,user_id)
+  )`);
+  let today='2026-07-31';
+  const claim=new Function('db','taipeiDay',`${block}; return claimAllInHeroDaily;`)(db,()=>today);
+  assert.equal(claim('guild','player'),true,'當日第一次應成功發動');
+  assert.equal(claim('guild','player'),false,'同一玩家同一天不得再次發動');
+  assert.equal(claim('guild','other-player'),true,'其他玩家仍可各自發動');
+  today='2026-08-01';
+  assert.equal(claim('guild','player'),true,'台北時間換日後應可再次發動');
+});
+
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
   const block=source.match(/async function publishLatestHeistResult\(interaction,payload\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少搶劫最終結果發布函式');
@@ -252,4 +276,13 @@ test('搶劫備援與貨運站圖片修復公告完整',()=>{
   assert.match(update.summary,/皇冠港物流貨運站圖片/);
   assert.match(update.changes.join('\n'),/Invalid Webhook Token/);
   assert.match(update.changes.join('\n'),/不會重複派彩或處罰/);
+});
+
+test('歐印勇者每日一次更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-07-31-all-in-hero-daily-limit.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-07-31-all-in-hero-daily-limit');
+  assert.equal(update.version,'2026.07.31.3');
+  assert.match(update.summary,/每天最多發動一次/);
+  assert.match(update.changes.join('\n'),/台北時間 00:00/);
+  assert.match(update.changes.join('\n'),/普通歐印次數.*歐印警報/s);
 });

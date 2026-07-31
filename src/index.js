@@ -206,7 +206,7 @@ function settleGamePayout(g,u,bet,payout,game,{balanceChanger=changeBalance,allI
   let titleMultiplier=1,titleInitialMultiplier=1,titleActive=false,titleSkillTriggered=false,titleId='';
   if(payout>bet) {
     recordCasinoGameWin(g,u,game);
-    if(allIn&&equippedTitleId(g,u)==='all_in_hero') {
+    if(allIn&&equippedTitleId(g,u)==='all_in_hero'&&claimAllInHeroDaily(g,u)) {
       titleId='all_in_hero';
       titleActive=true;
       titleInitialMultiplier=3;
@@ -406,6 +406,7 @@ db.exec(`
     all_in_count INTEGER NOT NULL DEFAULT 0,
     unlocked_at TEXT,
     dm_notified_at INTEGER,
+    hero_trigger_day TEXT,
     PRIMARY KEY (guild_id, user_id)
   );
   CREATE TABLE IF NOT EXISTS casino_all_in_events (
@@ -693,6 +694,9 @@ function migrateAirlineFlightsForSlots() {
 migrateAirlineFlightsForSlots();
 if(!db.prepare('PRAGMA table_info(web_scratch_tickets)').all().some(column=>column.name==='all_in')) {
   db.exec('ALTER TABLE web_scratch_tickets ADD COLUMN all_in INTEGER NOT NULL DEFAULT 0');
+}
+if(!db.prepare('PRAGMA table_info(casino_all_in_stats)').all().some(column=>column.name==='hero_trigger_day')) {
+  db.exec('ALTER TABLE casino_all_in_stats ADD COLUMN hero_trigger_day TEXT');
 }
 db.exec(`INSERT OR IGNORE INTO casino_game_wins(guild_id,user_id,game_id,wins)
   SELECT guild_id,user_id,reason,COUNT(*)
@@ -3009,6 +3013,15 @@ function returnsCasinoMultiplier(g,u) {
   if(roll<0.95) return 2;
   return 10;
 }
+function claimAllInHeroDaily(g,u) {
+  const today=taipeiDay();
+  db.prepare(`INSERT OR IGNORE INTO casino_all_in_stats(guild_id,user_id,all_in_count)
+    VALUES(?,?,0)`).run(g,u);
+  return db.prepare(`UPDATE casino_all_in_stats
+    SET hero_trigger_day=?
+    WHERE guild_id=? AND user_id=?
+      AND (hero_trigger_day IS NULL OR hero_trigger_day<>?)`).run(today,g,u,today).changes===1;
+}
 function titleLuckNotice(settlement) {
   if(!settlement.titleActive) return '';
   if(settlement.titleId==='all_in_hero') return '\n\n🔥 **傳奇稱號「歐印勇者」發動：歐印勝利派彩 ×3！**';
@@ -3018,7 +3031,7 @@ function titleLuckNotice(settlement) {
 }
 function playerTitle(g,u) {
   const id=equippedTitleId(g,u),name=profileTitles[id]||'尚未設定特殊稱號';
-  if(id==='all_in_hero') return `${name}\n稀有度：傳奇｜賭場遊戲歐印獲勝時派彩 ×3`;
+  if(id==='all_in_hero') return `${name}\n稀有度：傳奇｜每日第一次歐印獲勝時派彩 ×3（台北時間 00:00 重置）`;
   return returnTitleSkillNames[id]?`${name}\n每次賭場獲勝隨機獲得 ×0.1～×10 派彩；3% 發動「${returnTitleSkillNames[id]}」重抽一次`:name;
 }
 const ALL_IN_HERO_TARGET=50;
@@ -3126,10 +3139,10 @@ async function notifyAllInHeroUnlock(g,u) {
         .setDescription('你已在賭場遊戲完成 **50 次歐印**，正式獲得傳奇稱號 **🔥 歐印勇者**！')
         .addFields(
           {name:'🎰 解鎖進度',value:`${Math.min(row.all_in_count,ALL_IN_HERO_TARGET)}/${ALL_IN_HERO_TARGET}`,inline:true},
-          {name:'🔥 稱號效果',value:'配戴期間，賭場遊戲使用歐印並獲勝時，派彩提升為 **3 倍**。',inline:false},
+          {name:'🔥 稱號效果',value:'配戴期間，每天第一次在賭場遊戲使用歐印並獲勝時，派彩提升為 **3 倍**。',inline:false},
           {name:'🏷️ 配戴方式',value:'回到伺服器使用 `/稱號`，選擇 **🔥 歐印勇者｜傳奇**。',inline:false}
         )
-        .setFooter({text:'只有歐印勝利會觸發三倍派彩；一般下注不受影響'})
+        .setFooter({text:'每日最多發動一次，台北時間 00:00 重置；一般下注不受影響'})
         .setTimestamp()]
     });
     db.prepare('UPDATE casino_all_in_stats SET dm_notified_at=? WHERE guild_id=? AND user_id=? AND dm_notified_at IS NULL').run(Date.now(),g,u);
