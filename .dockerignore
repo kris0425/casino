@@ -1,0 +1,24 @@
+# Use an allowlist so Docker never receives Git history, local databases,
+# dependencies, logs, tests, backups, or other development-only files.
+**
+
+!package.json
+!package-lock.json
+
+!src/
+!src/**
+
+!scripts/
+!scripts/**
+
+!updates/
+!updates/**
+
+!CHANGELOG.md
+
+!assets/
+!assets/**
+
+!activity/
+!activity/public/
+!activity/public/**

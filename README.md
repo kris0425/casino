@@ -22,6 +22,12 @@ vehicle modification previews.
 Python 3, Pillow and Noto CJK fonts are installed by the Docker image for card
 rendering.
 
+Production builds require Docker Buildx and Compose v2. BuildKit transfers only
+changed build-context files and reuses the separate dependency, media and source
+layers. The allowlist in `.dockerignore` must stay synchronized with every
+Dockerfile `COPY` source so local databases, Git history and development output
+never enter the build context.
+
 For migration to another Windows computer, follow
 [`PORTABLE_SETUP.md`](PORTABLE_SETUP.md). The portable archive includes a
 consistent SQLite snapshot but intentionally excludes `.env`, tokens and SSH
