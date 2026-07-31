@@ -56,6 +56,7 @@ const ECONOMY_SINK_LABELS={
   airline_slot:'航空公司額外機位',
   transport_registration:'交通公司行號註冊費',
   transport_operation:'交通事業營運成本',
+  train_blind_box:'列車盲盒',
   transfer_fee:'玩家轉帳手續費'
 };
 const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer']);
@@ -1001,6 +1002,18 @@ const assetCatalog={
   grand_bay_high_speed_rail_terminal:{name:'🚄 金灣中央火車站',category:'房地產',price:6888888,description:'串聯都會通勤、城際商務與夜間特快的高鐵樞紐。購買後可支付手續費註冊交通公司行號，鐵路營收加成 10%。',image:'properties/stations/grand_bay_high_speed_rail_terminal.png',rarity:'傳說',unique:true,transportType:'rail',transportMultiplier:1.1},
   lotus_metropolitan_coach_terminal:{name:'🚌 蓮都國際客運站',category:'房地產',price:3888888,description:'擁有多層候車大廳與城際月台的豪華客運轉運中心。購買後可註冊交通公司行號，經營通勤、城際與觀光客運。',image:'properties/stations/lotus_metropolitan_coach_terminal.png',rarity:'史詩',unique:true,transportType:'coach',transportMultiplier:0.95},
   harbor_crown_freight_terminal:{name:'🚛 皇冠港物流貨運站',category:'房地產',price:9888888,description:'整合鐵路貨場、卡車月台、智慧倉儲與貨櫃調度的物流基地。購買後可註冊交通公司行號，貨運營收加成 25%。',image:'properties/stations/harbor_crown_freight_terminal.png',rarity:'神話',unique:true,transportType:'freight',transportMultiplier:1.25},
+  train_city_glow_commuter:{name:'🚈 城市微光電聯車',category:'列車',price:60000,description:'可靠的都會入門電聯車，繁忙尖峰也能穩定周轉。列車盲盒限定收藏。',image:'trains/city_glow_commuter.png',rarity:'一般',buff:'transport',trainRevenueBonus:0.03,forSale:false,trainBlindBox:true},
+  train_bay_breeze_commuter:{name:'🌊 海灣通勤號',category:'列車',price:80000,description:'沿著海灣高架線穿梭的清爽通勤列車。列車盲盒限定收藏。',image:'trains/bay_breeze_commuter.png',rarity:'一般',buff:'transport',trainRevenueBonus:0.04,forSale:false,trainBlindBox:true},
+  train_greenfield_diesel:{name:'🌿 綠野柴油列車',category:'列車',price:100000,description:'適合鄉野支線的耐用柴油列車，維護簡單又可靠。列車盲盒限定收藏。',image:'trains/greenfield_diesel.png',rarity:'一般',buff:'transport',trainRevenueBonus:0.05,forSale:false,trainBlindBox:true},
+  train_harbor_regional_express:{name:'⚓ 港都區間快車',category:'列車',price:130000,description:'服務港區與市中心的高運量區間快車。列車盲盒限定收藏。',image:'trains/harbor_regional_express.png',rarity:'一般',buff:'transport',trainRevenueBonus:0.06,forSale:false,trainBlindBox:true},
+  train_crimson_mist_mountain:{name:'🍁 赤霧山岳特急',category:'列車',price:220000,description:'專為陡坡與連續彎道打造的山岳特急。列車盲盒限定收藏。',image:'trains/crimson_mist_mountain.png',rarity:'稀有',buff:'transport',trainRevenueBonus:0.08,forSale:false,trainBlindBox:true},
+  train_blue_tide_double_decker:{name:'🌐 藍潮雙層城際列車',category:'列車',price:300000,description:'雙層車廂帶來優秀載客量，適合繁忙城際路線。列車盲盒限定收藏。',image:'trains/blue_tide_double_decker.png',rarity:'稀有',buff:'transport',trainRevenueBonus:0.10,forSale:false,trainBlindBox:true},
+  train_golden_bay_business:{name:'✨ 金灣商務動車',category:'列車',price:420000,description:'以高價商務服務提升班次收益的豪華動車。列車盲盒限定收藏。',image:'trains/golden_bay_business.png',rarity:'稀有',buff:'transport',trainRevenueBonus:0.12,forSale:false,trainBlindBox:true},
+  train_sakura_snow_sightseeing:{name:'🌸 櫻雪觀光特急',category:'列車',price:650000,description:'全景車窗串聯櫻花與雪山景致的觀光名車。列車盲盒限定收藏。',image:'trains/sakura_snow_sightseeing.png',rarity:'史詩',buff:'transport',trainRevenueBonus:0.15,forSale:false,trainBlindBox:true},
+  train_obsidian_night_sleeper:{name:'🌙 黑曜夜行寢台',category:'列車',price:900000,description:'提供長程高級寢台服務的黑曜夜行列車。列車盲盒限定收藏。',image:'trains/obsidian_night_sleeper.png',rarity:'史詩',buff:'transport',trainRevenueBonus:0.18,forSale:false,trainBlindBox:true},
+  train_skyreach_maglev:{name:'☁️ 天穹磁浮列車',category:'列車',price:1300000,description:'穿梭雲端都會的高速磁浮列車，速度與運量兼備。列車盲盒限定收藏。',image:'trains/skyreach_maglev.png',rarity:'史詩',buff:'transport',trainRevenueBonus:0.22,forSale:false,trainBlindBox:true},
+  train_imperial_crown_high_speed:{name:'👑 帝國皇冠高速列車',category:'列車',price:2200000,description:'以皇家規格打造的頂級高速列車，能大幅提高鐵路營收。列車盲盒限定收藏。',image:'trains/imperial_crown_high_speed.png',rarity:'傳說',buff:'transport',trainRevenueBonus:0.30,forSale:false,trainBlindBox:true},
+  train_orbital_aurora_superconducting:{name:'🌌 星環極光超導列車',category:'列車',price:3800000,description:'在極光下運行的超導夢幻列車，是列車盲盒最稀有的終極收藏。',image:'trains/orbital_aurora_superconducting.png',rarity:'傳說',buff:'transport',trainRevenueBonus:0.45,forSale:false,trainBlindBox:true},
   yacht:{name:'🛥️ 私人遊艇',category:'郵輪',price:350000,description:'小型私人海上娛樂空間。'},
   cruise:{name:'🛳️ 豪華郵輪｜Ocean Majesty',category:'郵輪',price:1200000,description:'燈火璀璨的海上宮殿，設有泳池、宴會廳、劇院與直升機坪，整晚派對能為賭場之夜帶來好運。',image:'ships/luxury_cruise.jpg',rarity:'傳說',buff:'casino'},
   going_merry:{name:'☠️ 梅莉號 Going Merry',category:'郵輪',price:3500000,description:'承載冒險、友情與無數回憶的傳奇海賊船；羊首船艏會在最危急的時刻帶領船員突破封鎖。',image:'ships/going_merry.jpg',rarity:'限定',buff:'getaway',buffMultiplier:3},
@@ -1410,6 +1423,133 @@ const transportRoutes={
   freight_port_logistics:{name:'🏗️ 港區貨櫃聯運',type:'freight',description:'整合貨櫃場、鐵路與卡車的港區物流任務。',durationMs:50*60*1000,baseRevenue:440000,operatingCost:150000,stamina:24},
   freight_continental_contract:{name:'🌐 跨境物流合約',type:'freight',description:'承攬高價值跨境貨物與長途供應鏈合約。',durationMs:2*60*60*1000,baseRevenue:1300000,operatingCost:500000,stamina:42}
 };
+const TRAIN_BLIND_BOX_SINGLE_PRICE=50000;
+const TRAIN_BLIND_BOX_TEN_PRICE=480000;
+const trainBlindBoxRates={
+  train_city_glow_commuter:15,
+  train_bay_breeze_commuter:14,
+  train_greenfield_diesel:13,
+  train_harbor_regional_express:12,
+  train_crimson_mist_mountain:10,
+  train_blue_tide_double_decker:9,
+  train_golden_bay_business:8,
+  train_sakura_snow_sightseeing:6,
+  train_obsidian_night_sleeper:5,
+  train_skyreach_maglev:4,
+  train_imperial_crown_high_speed:2.5,
+  train_orbital_aurora_superconducting:1.5
+};
+const trainBlindBoxIds=Object.keys(trainBlindBoxRates);
+const trainRarityRank={一般:1,稀有:2,史詩:3,傳說:4};
+function drawTrainBlindBoxAssetId(random=Math.random) {
+  const roll=random()*100;
+  let cumulative=0;
+  for(const assetId of trainBlindBoxIds) {
+    cumulative+=trainBlindBoxRates[assetId];
+    if(roll<cumulative) return assetId;
+  }
+  return trainBlindBoxIds.at(-1);
+}
+function ownedTrainRows(g,u) {
+  return assetsOf(g,u).filter(row=>trainBlindBoxIds.includes(row.asset_id));
+}
+function bestOwnedTrain(g,u) {
+  return ownedTrainRows(g,u).sort((a,b)=>(assetCatalog[b.asset_id]?.trainRevenueBonus||0)-(assetCatalog[a.asset_id]?.trainRevenueBonus||0))[0]||null;
+}
+function trainBlindBoxPrice(quantity) {
+  if(quantity===1) return TRAIN_BLIND_BOX_SINGLE_PRICE;
+  if(quantity===10) return TRAIN_BLIND_BOX_TEN_PRICE;
+  throw new Error('列車盲盒只能選擇單抽或十抽');
+}
+function openTrainBlindBoxes(g,u,quantity) {
+  const total=trainBlindBoxPrice(quantity);
+  ensureWallet(g,u);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,u).balance;
+    if(current<total) throw new Error(`金幣不足，需要 ${fmt(total)}`);
+    const next=changeBalanceUnlocked(g,u,-total,'train_blind_box',u,`購買列車盲盒 x${quantity}`);
+    const pulls=[];
+    for(let index=0;index<quantity;index++) {
+      const assetId=drawTrainBlindBoxAssetId();
+      addAssetQuantity(g,u,assetId,1);
+      ensureAssetBuff(g,u,assetId,'transport');
+      pulls.push(assetId);
+    }
+    db.exec('COMMIT');
+    return {pulls,total,next};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function trainRarityColor(rarity) {
+  return {一般:0x78909C,稀有:0x42A5F5,史詩:0xAB47BC,傳說:0xFFD700}[rarity]||0x607D8B;
+}
+function trainBlindBoxCatalogRow(ownerId,selected=null) {
+  return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+    .setCustomId(`train_blind_box_catalog:${ownerId}`)
+    .setPlaceholder('查看 12 輛列車、圖片與機率')
+    .addOptions(trainBlindBoxIds.map(assetId=>{
+      const asset=assetCatalog[assetId];
+      return {
+        label:asset.name.replace(/^[^A-Za-z0-9\u3400-\u9FFF]+/u,'').slice(0,100),
+        description:`${asset.rarity}｜${trainBlindBoxRates[assetId]}%｜鐵路營收 +${Math.round(asset.trainRevenueBonus*100)}%`.slice(0,100),
+        value:assetId,
+        default:assetId===selected
+      };
+    })));
+}
+function trainBlindBoxComponents(ownerId,selected=null) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`train_blind_box_open:${ownerId}:1`).setLabel(`單抽｜${fmt(TRAIN_BLIND_BOX_SINGLE_PRICE)}`).setEmoji('🎫').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`train_blind_box_open:${ownerId}:10`).setLabel(`十抽｜${fmt(TRAIN_BLIND_BOX_TEN_PRICE)}`).setEmoji('🎟️').setStyle(ButtonStyle.Success)
+    ),
+    trainBlindBoxCatalogRow(ownerId,selected),
+    new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`transport_hub_home:${ownerId}`).setLabel('交通事業首頁').setEmoji('🧭').setStyle(ButtonStyle.Secondary))
+  ];
+}
+function trainBlindBoxOverviewPayload(g,u,notice='') {
+  const owned=ownedTrainRows(g,u),best=bestOwnedTrain(g,u),showcase=assetCatalog.train_orbital_aurora_superconducting;
+  const bestText=best?`${assetCatalog[best.asset_id].name}｜鐵路營收 **+${Math.round(assetCatalog[best.asset_id].trainRevenueBonus*100)}%**`:'尚未持有列車，鐵路班次使用基本營收';
+  const embed=new EmbedBuilder()
+    .setColor(0x7E57C2)
+    .setTitle('🚆 列車盲盒｜12 輛限定列車')
+    .setDescription(`${notice?`${notice}\n\n`:''}單抽：**${fmt(TRAIN_BLIND_BOX_SINGLE_PRICE)}**｜十抽：**${fmt(TRAIN_BLIND_BOX_TEN_PRICE)}**\n十抽現省：**${fmt(TRAIN_BLIND_BOX_SINGLE_PRICE*10-TRAIN_BLIND_BOX_TEN_PRICE)}**\n\n抽到的列車會永久進入資產收藏；開始鐵路班次時，系統自動套用持有列車中最高的營收加成，重複列車不疊加。\n\n**稀有度分布**\n一般 **54%**｜稀有 **27%**｜史詩 **15%**｜傳說 **4%**\n\n**目前收藏**\n已收集：**${owned.length}/12 種**\n最佳列車：${bestText}\n金庫：**${fmt(balance(g,u))}**`)
+    .setFooter({text:'使用下拉選單可查看每輛列車的圖片、機率與營收加成'});
+  return {...assetMediaPayload(embed,'train_orbital_aurora_superconducting',showcase),components:trainBlindBoxComponents(u)};
+}
+function trainBlindBoxCatalogPayload(g,u,assetId) {
+  const asset=assetCatalog[assetId];
+  if(!asset||!trainBlindBoxIds.includes(assetId)) throw new Error('找不到這輛列車');
+  const owned=assetQuantity(g,u,assetId);
+  const embed=new EmbedBuilder()
+    .setColor(trainRarityColor(asset.rarity))
+    .setTitle(asset.name)
+    .setDescription(`稀有度：**${asset.rarity}**\n抽取機率：**${trainBlindBoxRates[assetId]}%／每盒**\n鐵路班次營收：**+${Math.round(asset.trainRevenueBonus*100)}%**\n參考價值：**${fmt(asset.price)}**\n目前持有：**${owned} 輛**\n\n${asset.description}`);
+  return {...assetMediaPayload(embed,assetId,asset),components:trainBlindBoxComponents(u,assetId)};
+}
+function trainBlindBoxResultPayload(g,u,result) {
+  const counts=new Map();
+  for(const assetId of result.pulls) counts.set(assetId,(counts.get(assetId)||0)+1);
+  const showcaseId=[...counts.keys()].sort((a,b)=>{
+    const assetA=assetCatalog[a],assetB=assetCatalog[b];
+    return (trainRarityRank[assetB.rarity]||0)-(trainRarityRank[assetA.rarity]||0)||(assetB.trainRevenueBonus||0)-(assetA.trainRevenueBonus||0);
+  })[0];
+  const showcase=assetCatalog[showcaseId];
+  const results=[...counts.entries()].map(([assetId,count])=>{
+    const asset=assetCatalog[assetId];
+    return `${asset.name} × **${count}**｜${asset.rarity}｜營收 +${Math.round(asset.trainRevenueBonus*100)}%`;
+  }).join('\n');
+  const best=bestOwnedTrain(g,u),bestAsset=best&&assetCatalog[best.asset_id];
+  const embed=new EmbedBuilder()
+    .setColor(trainRarityColor(showcase.rarity))
+    .setTitle(showcase.rarity==='傳說'?'🌟 傳說列車出庫！':'🚆 列車盲盒開箱結果')
+    .setDescription(`本次支付：**${fmt(result.total)}**\n\n${results}\n\n所有列車已加入資產收藏。\n目前最高鐵路營收加成：**${bestAsset?`${bestAsset.name}｜+${Math.round(bestAsset.trainRevenueBonus*100)}%`:'無'}**\n金庫：**${fmt(result.next)}**`)
+    .setFooter({text:'鐵路班次發車時會自動使用最高加成列車；重複列車不疊加'});
+  return {...assetMediaPayload(embed,showcaseId,showcase),components:trainBlindBoxComponents(u,showcaseId)};
+}
 function airlineCompany(g,u) {
   return db.prepare('SELECT * FROM airline_companies WHERE guild_id=? AND user_id=?').get(g,u)||null;
 }
@@ -1746,6 +1886,7 @@ function transportHubEmbed(g,u,notice='') {
   const airline=airlineCompany(g,u),flights=airlineFlights(g,u);
   const airports=ownedAirports(g,u),airliners=ownedPassengerAirliners(g,u);
   const ground=transportCompany(g,u),stations=ownedTransportStations(g,u),operation=transportOperation(g,u);
+  const trains=ownedTrainRows(g,u),bestTrain=bestOwnedTrain(g,u),bestTrainAsset=bestTrain&&assetCatalog[bestTrain.asset_id];
   const airlineStatus=airline
     ? `公司：**${airline.company_name}**\n機場：**${airports.length} 座**｜客機種類：**${airliners.length} 種**\n航班：**${flights.length}/${Math.max(1,Number(airline.flight_slots)||1)} 個機位使用中**`
     : `尚未註冊航空公司\n持有機場：**${airports.length} 座**｜客機種類：**${airliners.length} 種**`;
@@ -1755,13 +1896,14 @@ function transportHubEmbed(g,u,notice='') {
   return new EmbedBuilder()
     .setColor(0x0D47A1)
     .setTitle('🧭 交通事業營運總部')
-    .setDescription(`${notice?`${notice}\n\n`:''}機場航空、鐵路、城際客運與物流貨運現已集中在同一個交通事業入口。請選擇要管理的事業。\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路運輸**\n${groundStatus}\n\n目前金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
-    .setFooter({text:'航空、火車、客運與貨運皆從 /交通事業 進入'});
+    .setDescription(`${notice?`${notice}\n\n`:''}機場航空、鐵路、城際客運與物流貨運現已集中在同一個交通事業入口。請選擇要管理的事業。\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路運輸**\n${groundStatus}\n\n**🚆 列車盲盒**\n收藏：**${trains.length}/12 種**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n\n目前金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .setFooter({text:'航空、火車、客運、貨運與列車盲盒皆從 /交通事業 進入'});
 }
 function transportHubComponents(g,u) {
   return [new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`transport_hub_airline:${u}`).setLabel('航空運輸').setEmoji('✈️').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`transport_hub_ground:${u}`).setLabel('火車・客運・貨運').setEmoji('🚉').setStyle(ButtonStyle.Success)
+    new ButtonBuilder().setCustomId(`transport_hub_ground:${u}`).setLabel('火車・客運・貨運').setEmoji('🚉').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`transport_hub_train_box:${u}`).setLabel('列車盲盒').setEmoji('🚆').setStyle(ButtonStyle.Secondary)
   )];
 }
 function transportDashboardEmbed(g,u,notice='') {
@@ -1785,8 +1927,10 @@ function transportDashboardEmbed(g,u,notice='') {
       ? `✅ **${transportBusinessTypes[transportRoutes[operation.route_id]?.type]?.operationLabel||'營運任務'}已完成，可以領取營收**\n${transportSelectionName(operation.route_id)}｜可領營收 **${fmt(operation.gross_revenue)}**`
       : `${transportBusinessTypes[transportRoutes[operation.route_id]?.type]?.emoji||'🚉'} **${transportBusinessTypes[transportRoutes[operation.route_id]?.type]?.operationLabel||'營運任務'}進行中**\n${transportSelectionName(operation.route_id)}｜<t:${Math.floor(operation.completes_at/1000)}:R> 完成\n預計營收：**${fmt(operation.gross_revenue)}**`
     : '目前沒有進行中的交通營運任務。';
+  const activeTrain=route?.type==='rail'?bestOwnedTrain(g,u):null,activeTrainAsset=activeTrain&&assetCatalog[activeTrain.asset_id];
+  const trainMultiplier=activeTrainAsset?1+activeTrainAsset.trainRevenueBonus:1;
   const routeEstimate=station&&route&&station.transportType===route.type
-    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier))}**（另有市場需求浮動）\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
+    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier))}**（另有市場需求浮動）${route.type==='rail'?`\n套用列車：${activeTrainAsset?`${activeTrainAsset.name}｜營收 **+${Math.round(activeTrainAsset.trainRevenueBonus*100)}%**`:'未持有列車｜無額外加成'}`:''}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
     : '';
   return new EmbedBuilder()
     .setColor(operation&&Date.now()>=operation.completes_at?0x35C46A:(type?.color||0x455A64))
@@ -1875,8 +2019,10 @@ function startTransportOperation(g,u) {
   const staminaUsed=staminaCost(g,u,route.stamina),currentStamina=stamina(g,u);
   if(currentStamina<staminaUsed) throw new Error(`體力不足，需要 ${staminaUsed} 點`);
   if(balance(g,u)<route.operatingCost) throw new Error(`營運資金不足，需要 ${fmt(route.operatingCost)}`);
+  const train=route.type==='rail'?bestOwnedTrain(g,u):null,trainAsset=train&&assetCatalog[train.asset_id];
+  const trainMultiplier=trainAsset?1+trainAsset.trainRevenueBonus:1;
   const demandMultiplier=0.90+Math.random()*0.21;
-  const grossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*demandMultiplier);
+  const grossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*demandMultiplier);
   const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -1889,7 +2035,7 @@ function startTransportOperation(g,u) {
     db.exec('ROLLBACK');
     throw error;
   }
-  return {company,station,route,type:transportBusinessTypes[route.type],grossRevenue,staminaUsed,startedAt,completesAt};
+  return {company,station,route,type:transportBusinessTypes[route.type],train:trainAsset,trainMultiplier,grossRevenue,staminaUsed,startedAt,completesAt};
 }
 function claimTransportRevenue(g,u) {
   const company=transportCompany(g,u),operation=transportOperation(g,u);
@@ -2373,6 +2519,7 @@ const assetBuffs={
   casino:{name:'🍀 幸運收藏',description:'賭場獲勝派彩 +5%（資產效果合計最高 +60%）',casino:0.05},
   discount:{name:'🏷️ 尊榮會員',description:'商城額外折扣 5%（資產效果合計最高 30%）',discount:0.05},
   combat:{name:'🔫 戰術裝備',description:'用於搶劫、警方行動與賭場保全交戰；不提供被動經濟增益。'},
+  transport:{name:'🚆 鐵路營運車隊',description:'開始鐵路班次時自動套用持有列車中最高的營收加成；重複列車不疊加。'},
   haunted_fortune:{name:'👻 鬼王護駕',description:'搶銀行成功率 +15%。',heist:15},
   haunted_energy:{name:'🩸 陰氣灌體',description:'每日體力上限 +100。',stamina:100},
   haunted_work:{name:'🕯️ 鬼差代班',description:'工作收入 +60%。',work:0.60},
@@ -4835,7 +4982,7 @@ const gameHelpDetails={
   heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
   money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/日常 領取\` 取得每日獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。可用 \`/日常 體力\` 查看狀態，並從 \`/補給\` 購買及使用恢復用品。`},
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。`},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。交通事業首頁另設列車盲盒，單抽 **50,000**、十抽 **480,000**；12 輛列車最高為傳說，鐵路班次會自動套用持有列車中最高的營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
   playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、成就與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 成就` 與 `/玩家 稱號`，集中管理角色資訊。'},
   dailyHub:{label:'日常中心',emoji:'📅',hint:'每日獎勵、增益與體力',title:'📅 日常中心',body:'使用 `/日常 領取` 領每日獎勵；`/日常 增益` 查看輪替效果；`/日常 體力` 與 `/日常 回體力` 管理每日體力。'},
@@ -6303,16 +6450,38 @@ async function handleInteraction(i) {
     db.prepare('UPDATE player_pets SET nickname=? WHERE guild_id=? AND user_id=? AND pet_id=?').run(nickname,i.guildId,ownerId,petId);
     return i.update({...petProfilePayload(i.guildId,ownerId),components:petProfileComponents(i.guildId,ownerId),attachments:[]});
   }
-  if(i.isButton()&&['transport_hub_home:','transport_hub_airline:','transport_hub_ground:'].some(prefix=>i.customId.startsWith(prefix))&&i.guildId) {
+  if(i.isButton()&&['transport_hub_home:','transport_hub_airline:','transport_hub_ground:','transport_hub_train_box:'].some(prefix=>i.customId.startsWith(prefix))&&i.guildId) {
     const [kind,ownerId]=i.customId.split(':');
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有事業擁有者可以操作這個交通事業面板。',ephemeral:true});
     if(kind==='transport_hub_airline') {
-      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId)],components:airlineDashboardComponents(i.guildId,ownerId)});
+      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId)],components:airlineDashboardComponents(i.guildId,ownerId),attachments:[]});
     }
     if(kind==='transport_hub_ground') {
-      return i.update({embeds:[transportDashboardEmbed(i.guildId,ownerId)],components:transportDashboardComponents(i.guildId,ownerId)});
+      return i.update({embeds:[transportDashboardEmbed(i.guildId,ownerId)],components:transportDashboardComponents(i.guildId,ownerId),attachments:[]});
     }
-    return i.update({embeds:[transportHubEmbed(i.guildId,ownerId)],components:transportHubComponents(i.guildId,ownerId)});
+    if(kind==='transport_hub_train_box') {
+      return i.update({...trainBlindBoxOverviewPayload(i.guildId,ownerId),attachments:[]});
+    }
+    return i.update({embeds:[transportHubEmbed(i.guildId,ownerId)],components:transportHubComponents(i.guildId,ownerId),attachments:[]});
+  }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('train_blind_box_catalog:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有開啟列車盲盒的玩家可以操作。',ephemeral:true});
+    try {
+      return i.update({...trainBlindBoxCatalogPayload(i.guildId,ownerId,i.values[0]),attachments:[]});
+    } catch(error) {
+      return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('train_blind_box_open:')&&i.guildId) {
+    const [,ownerId,quantityText]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有開啟列車盲盒的玩家可以購買。',ephemeral:true});
+    try {
+      const result=openTrainBlindBoxes(i.guildId,ownerId,Number(quantityText));
+      return i.update({...trainBlindBoxResultPayload(i.guildId,ownerId,result),attachments:[]});
+    } catch(error) {
+      return i.reply({content:`⚠️ 列車盲盒購買失敗：${error.message}`,ephemeral:true});
+    }
   }
   if(i.isButton()&&i.customId.startsWith('airline_register:')&&i.guildId) {
     const ownerId=i.customId.split(':')[1];
@@ -6429,7 +6598,8 @@ async function handleInteraction(i) {
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有公司行號擁有者可以開始營運。',ephemeral:true});
     try {
       const result=startTransportOperation(i.guildId,ownerId);
-      const notice=`${result.type.emoji} **${result.route.name} 已開始營運！**\n場站：${result.station.name}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n完成時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+      const trainText=result.train?`\n執行列車：${result.train.name}｜營收 **+${Math.round(result.train.trainRevenueBonus*100)}%**`:'';
+      const notice=`${result.type.emoji} **${result.route.name} 已開始營運！**\n場站：${result.station.name}${trainText}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n完成時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
       return i.update({embeds:[transportDashboardEmbed(i.guildId,ownerId,notice)],components:transportDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法開始營運：${error.message}`,ephemeral:true});

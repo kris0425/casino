@@ -327,6 +327,36 @@ test('交通事業整合與多機位更新公告完整',()=>{
   assert.match(update.changes.join('\n'),/賭場公告/);
 });
 
+test('列車盲盒整合交通事業並套用鐵路營收加成',()=>{
+  const trainIds=[
+    'train_city_glow_commuter','train_bay_breeze_commuter','train_greenfield_diesel','train_harbor_regional_express',
+    'train_crimson_mist_mountain','train_blue_tide_double_decker','train_golden_bay_business','train_sakura_snow_sightseeing',
+    'train_obsidian_night_sleeper','train_skyreach_maglev','train_imperial_crown_high_speed','train_orbital_aurora_superconducting'
+  ];
+  assert.equal(trainIds.length,12);
+  for(const assetId of trainIds) {
+    assert.match(source,new RegExp(`${assetId}:\\{name:`),`缺少列車資產 ${assetId}`);
+    const imageName=assetId.replace(/^train_/,'').replace('harbor_regional_express','harbor_regional_express');
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    const image=assetBlock.match(/image:'([^']+)'/)?.[1];
+    assert.ok(image,`${assetId} 缺少圖片路徑`);
+    const file=readFileSync(new URL(`../assets/${image}`,import.meta.url));
+    assert.equal(file.subarray(1,4).toString(),'PNG',`${imageName} 不是有效 PNG`);
+  }
+  const ratesBlock=source.match(/const trainBlindBoxRates=\{[\s\S]+?\n\};/)?.[0]||'';
+  const rates=[...ratesBlock.matchAll(/train_[a-z_]+:(\d+(?:\.\d+)?)/g)].map(match=>Number(match[1]));
+  assert.equal(rates.length,12);
+  assert.equal(rates.reduce((sum,value)=>sum+value,0),100);
+  assert.match(source,/const TRAIN_BLIND_BOX_SINGLE_PRICE=50000/);
+  assert.match(source,/const TRAIN_BLIND_BOX_TEN_PRICE=480000/);
+  assert.match(source,/setCustomId\(`transport_hub_train_box:\$\{u\}`\)/);
+  assert.match(source,/setCustomId\(`train_blind_box_open:\$\{ownerId\}:10`\)/);
+  assert.match(source,/bestOwnedTrain\(g,u\)/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*demandMultiplier/);
+  const commandStart=source.indexOf('const commands = ['),commandEnd=source.indexOf('].map(c=>c.toJSON());',commandStart);
+  assert.doesNotMatch(source.slice(commandStart,commandEnd),/setName\('列車盲盒'\)/,'列車盲盒應整合在 /交通事業，不新增獨立指令');
+});
+
 test('搶劫備援與貨運站圖片修復公告完整',()=>{
   const update=JSON.parse(readFileSync(new URL('../updates/2026-07-31-heist-fallback-freight-image.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-07-31-heist-fallback-freight-image');
@@ -363,4 +393,14 @@ test('指令整合玩法公告列出所有新版入口',()=>{
     assert.match(update.changes.join('\n'),new RegExp(command.replace('/','\\/')),`玩法公告缺少 ${command}`);
   }
   assert.match(update.note,/不是遊戲或功能/);
+});
+
+test('列車盲盒更新公告包含售價、十抽與營收規則',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-07-31-train-blind-box.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-07-31-train-blind-box');
+  assert.equal(update.version,'2026.07.31.6');
+  assert.match(update.summary,/12 輛列車/);
+  assert.match(update.changes.join('\n'),/50,000.*480,000/s);
+  assert.match(update.changes.join('\n'),/傳說/);
+  assert.match(update.changes.join('\n'),/最高.*營收加成/s);
 });
