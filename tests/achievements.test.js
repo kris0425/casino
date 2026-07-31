@@ -32,9 +32,10 @@ test('13 個新成就與稱號完整註冊',()=>{
     assert.match(source,new RegExp(`${id}:'`),`缺少稱號 ${id}`);
     assert.match(source,new RegExp(`value:'${id}'`),`稱號 ${id} 未加入斜線指令`);
   }
-  const titleChoiceBlock=source.match(/setName\('稱號'\)[\s\S]+?\{name:'❌ 取消目前稱號',value:'clear'\}\)\)/)?.[0]||'';
+  const titleChoiceBlock=source.match(/const playerTitleChoices=\[[\s\S]+?\n\];/)?.[0]||'';
   assert.ok(titleChoiceBlock);
   assert.ok((titleChoiceBlock.match(/\{name:/g)||[]).length<=25,'Discord 稱號選項不可超過 25 個');
+  assert.match(source,/setName\('玩家'\)[\s\S]+setName\('稱號'\)[\s\S]+addChoices\(\.\.\.playerTitleChoices\)/);
   const adminTitleStart=source.indexOf("setName('稱號設定')");
   const adminTitleEnd=source.indexOf("setName('搶劫公告頻道')",adminTitleStart);
   const adminTitleBlock=adminTitleStart>=0&&adminTitleEnd>adminTitleStart?source.slice(adminTitleStart,adminTitleEnd):'';
@@ -42,6 +43,32 @@ test('13 個新成就與稱號完整註冊',()=>{
   assert.match(adminTitleBlock,/setAutocomplete\(true\)/);
   assert.doesNotMatch(adminTitleBlock,/addChoices\(/);
   assert.match(source,/process\.env\.COMMAND_BUILD_ONLY==='1'/);
+});
+
+test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
+  const start=source.indexOf('const commands = ['),end=source.indexOf('].map(c=>c.toJSON());',start);
+  const commandBlock=start>=0&&end>start?source.slice(start,end):'';
+  assert.ok(commandBlock,'缺少 Discord 指令定義');
+  for(const hub of ['玩家','日常','補給','寵物','小遊戲','交通事業']) {
+    assert.match(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${hub}'\\)`),`缺少整合入口 /${hub}`);
+  }
+  const removed=[
+    '金庫','個人資料','成就','稱號','每日增益','體力','每日回體力','每日',
+    '商城','背包','購買','使用','寵物店','我的寵物','機場',
+    '比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','骰盅吹牛',
+    '大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥'
+  ];
+  for(const name of removed) {
+    assert.doesNotMatch(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${name}'\\)`),`舊指令 /${name} 仍在註冊`);
+  }
+  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',成就:'成就',稱號:'稱號'\}/);
+  assert.match(source,/日常:\{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'\}/);
+  assert.match(source,/補給:\{商城:'商城',背包:'背包',購買:'購買',使用:'使用'\}/);
+  assert.match(source,/寵物:\{商店:'寵物店',我的:'我的寵物'\}/);
+  for(const game of ['比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','骰盅吹牛','大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥']) {
+    assert.match(source,new RegExp(`command:'${game}'`),`/${game} 移除後未保留在小遊戲選單`);
+  }
+  assert.match(source,/miniGameProxyInteraction\(i,game\.command/);
 });
 
 test('成就累加資料表可安全累計與取最大值',()=>{
@@ -325,4 +352,15 @@ test('K 佬洗車與闖空門金額更新公告完整',()=>{
   assert.match(update.summary,/幫 K 佬洗車/);
   assert.match(update.changes.join('\n'),/12,000.*20,000/s);
   assert.match(update.changes.join('\n'),/最多 50%/);
+});
+
+test('指令整合玩法公告列出所有新版入口',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-07-31-command-hubs-gameplay-guide.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-07-31-command-hubs-gameplay-guide');
+  assert.equal(update.version,'2026.07.31.5');
+  assert.match(update.summary,/68 個精簡為 41 個/);
+  for(const command of ['/小遊戲','/玩家','/日常','/補給','/寵物','/交通事業','/玩法']) {
+    assert.match(update.changes.join('\n'),new RegExp(command.replace('/','\\/')),`玩法公告缺少 ${command}`);
+  }
+  assert.match(update.note,/不是遊戲或功能/);
 });

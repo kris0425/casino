@@ -1756,7 +1756,7 @@ function transportHubEmbed(g,u,notice='') {
     .setColor(0x0D47A1)
     .setTitle('🧭 交通事業營運總部')
     .setDescription(`${notice?`${notice}\n\n`:''}機場航空、鐵路、城際客運與物流貨運現已集中在同一個交通事業入口。請選擇要管理的事業。\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路運輸**\n${groundStatus}\n\n目前金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
-    .setFooter({text:'舊有 /機場 指令仍可使用，並會直接開啟航空運輸面板'});
+    .setFooter({text:'航空、火車、客運與貨運皆從 /交通事業 進入'});
 }
 function transportHubComponents(g,u) {
   return [new ActionRowBuilder().addComponents(
@@ -3143,7 +3143,7 @@ async function notifyAllInHeroUnlock(g,u) {
         .addFields(
           {name:'🎰 解鎖進度',value:`${Math.min(row.all_in_count,ALL_IN_HERO_TARGET)}/${ALL_IN_HERO_TARGET}`,inline:true},
           {name:'🔥 稱號效果',value:'配戴期間，每天第一次在賭場遊戲使用歐印並獲勝時，派彩提升為 **3 倍**。',inline:false},
-          {name:'🏷️ 配戴方式',value:'回到伺服器使用 `/稱號`，選擇 **🔥 歐印勇者｜傳奇**。',inline:false}
+          {name:'🏷️ 配戴方式',value:'回到伺服器使用 `/玩家 稱號`，選擇 **🔥 歐印勇者｜傳奇**。',inline:false}
         )
         .setFooter({text:'每日最多發動一次，台北時間 00:00 重置；一般下注不受影響'})
         .setTimestamp()]
@@ -4061,7 +4061,7 @@ const miniGameCatalog=[
   {id:'duel',command:'決鬥',label:'PvP 輪盤決鬥',emoji:'🔫',description:'指定玩家進行虛構槍械決鬥',setup:'pvp'}
 ];
 function miniGameLauncherEmbed() {
-  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🎮 小遊戲大廳').setDescription(`從下方選單選擇遊戲，機器人會接著開啟下注、號碼或對手設定。\n\n🧱 **圖片版網頁遊戲：堆積木**\n完成下注後會取得專屬網站連結；網站會以圖片呈現穩定、搖晃及倒塌的積木塔。每回合從左、中、右三塊積木中選一塊，成功後可安全收手或繼續挑戰。完成六次的基礎派彩為 **4.4 倍**，高風險積木成功時還會累加額外倍率。\n\n下注欄可輸入金額，想投入全部金幣時輸入「**歐印**」。\n\n本選單不包含工作、單人搶劫及團隊搶劫。`);
+  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🎮 小遊戲大廳').setDescription(`所有 **17 款遊戲**已整合到此入口；從下方選單選擇遊戲，機器人會接著開啟下注、號碼或對手設定。\n\n🧱 **圖片版網頁遊戲：堆積木**\n完成下注後會取得專屬網站連結；網站會以圖片呈現穩定、搖晃及倒塌的積木塔。每回合從左、中、右三塊積木中選一塊，成功後可安全收手或繼續挑戰。完成六次的基礎派彩為 **4.4 倍**，高風險積木成功時還會累加額外倍率。\n\n下注欄可輸入金額，想投入全部金幣時輸入「**歐印**」。\n\n個別遊戲舊指令已移除；工作與搶劫請使用 \`/賺錢\`、\`/團隊搶銀行\`。`);
 }
 function miniGameMenuRow(ownerId) {
   return new ActionRowBuilder().addComponents(
@@ -4814,15 +4814,15 @@ function riotRow(token,disabled=false) {
   );
 }
 const gameHelpDetails={
-  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/每日\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 3 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限；也可以輸入「歐印」，投入當下全部金幣。所有收益皆無每日金幣上限。`},
+  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/日常 領取\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 3 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n所有 17 款遊戲統一由 \`/小遊戲\` 進入；一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限，也可以輸入「歐印」。`},
   highlow:{label:'比大小',emoji:'🃏',hint:'與莊家各抽一張牌',title:'🃏 比大小',body:'你與莊家各抽一張牌，點數與花色較大者獲勝。勝利獲得下注額 **2 倍**，平手退回下注，落敗則失去下注。'},
   dragon:{label:'射龍門',emoji:'🚪',hint:'判斷第三張牌是否落在門牌中間',title:'🚪 射龍門',body:'先開出兩張門牌，再選擇射牌或不射。第三張牌嚴格落在兩張門牌之間即獲得 **2 倍**；撞柱或射偏會失去下注，不射則退回下注。'},
   horse:{label:'賽馬',emoji:'🏇',hint:'選擇一匹馬觀看即時競賽',title:'🏇 賽馬',body:'從 1～4 號馬選擇一匹下注，畫面會即時更新到衝線。猜中冠軍獲得下注額 **4 倍**。'},
-  race:{label:'競速',emoji:'🏁',hint:'駕駛自己的汽車或機車競賽',title:'🏁 地下街頭競速',body:'使用 `/競速` 輸入下注後，從下拉選單挑選自己擁有的汽車或機車參賽。車輛價格、稀有度與資產增益會影響速度，但賽道爆發仍可能逆轉名次。冠軍獲得 **2.5 倍**，亞軍獲得 **1.2 倍**派彩，每場消耗 **10 體力**。'},
-  petRace:{label:'寵物競賽',emoji:'🐾',hint:'派出自己的寵物參加障礙賽',title:'🐾 寵物障礙競賽',body:'使用 `/寵物競賽` 輸入下注後，從下拉選單派出自己領養的寵物。幸福度與寵物價值會影響表現，每次參賽幸福度 -8。冠軍獲得 **3 倍**，亞軍獲得 **1.25 倍**派彩，每場消耗 **8 體力**。'},
-  racePvp:{label:'競速 PVP',emoji:'⚔️',hint:'指定玩家進行車輛競速對決',title:'⚔️ 競速 PVP',body:'使用 `/競速pvp` 指定對手與下注。對手接受後，雙方從下拉選單挑選自己的車輛，由挑戰者開始賽事。雙方各押同額，勝者取得完整獎池；每人消耗 **10 體力**。'},
-  petRacePvp:{label:'寵物競速 PVP',emoji:'🐾',hint:'指定玩家進行寵物障礙對決',title:'🐾 寵物競速 PVP',body:'使用 `/寵物競速pvp` 指定對手與下注。對手接受後，雙方各派一隻寵物參賽。勝者取得雙方獎池；每人消耗 **8 體力**，參賽寵物幸福度 -8。'},
-  liarDice:{label:'骰盅吹牛 PVP',emoji:'🎲',hint:'秘密看骰、輪流喊骰與抓吹牛',title:'🎲 骰盅吹牛｜雙人 PVP',body:'使用 `/骰盅吹牛` 指定對手與下注。對手接受後，雙方各擲 **5 顆秘密骰子**，可按「查看我的骰子」取得只有自己看得到的點數。挑戰者先喊；每次喊注必須增加骰子數量，或在相同數量提高點數。**1 點為百搭**，可計入任何 2～6 點，因此喊骰只使用 2～6 點。輪到的玩家若認為上一家喊得超過雙方實際骰數，可按「抓吹牛」開盅：數量不足則抓人的玩家獲勝，數量足夠則上一位喊骰玩家獲勝。雙方各押同額，勝者取得完整獎池；每人消耗 **5 體力**。每次行動限時 **2 分鐘**，逾時退還下注但不退體力。'},
+  race:{label:'競速',emoji:'🏁',hint:'駕駛自己的汽車或機車競賽',title:'🏁 地下街頭競速',body:'使用 `/小遊戲` 選擇「車輛競速」並輸入下注，再從下拉選單挑選自己的載具。冠軍獲得 **2.5 倍**，亞軍獲得 **1.2 倍**派彩，每場消耗 **10 體力**。'},
+  petRace:{label:'寵物競賽',emoji:'🐾',hint:'派出自己的寵物參加障礙賽',title:'🐾 寵物障礙競賽',body:'使用 `/小遊戲` 選擇「寵物競賽」並輸入下注，再派出自己的寵物。冠軍獲得 **3 倍**，亞軍獲得 **1.25 倍**派彩，每場消耗 **8 體力**。'},
+  racePvp:{label:'競速 PVP',emoji:'⚔️',hint:'指定玩家進行車輛競速對決',title:'⚔️ 競速 PVP',body:'使用 `/小遊戲` 選擇「競速 PVP」，輸入對手與下注。雙方各押同額，勝者取得完整獎池；每人消耗 **10 體力**。'},
+  petRacePvp:{label:'寵物競速 PVP',emoji:'🐾',hint:'指定玩家進行寵物障礙對決',title:'🐾 寵物競速 PVP',body:'使用 `/小遊戲` 選擇「寵物競速 PVP」，輸入對手與下注。勝者取得雙方獎池；每人消耗 **8 體力**，參賽寵物幸福度 -8。'},
+  liarDice:{label:'骰盅吹牛 PVP',emoji:'🎲',hint:'秘密看骰、輪流喊骰與抓吹牛',title:'🎲 骰盅吹牛｜雙人 PVP',body:'使用 `/小遊戲` 選擇「骰盅吹牛 PVP」，輸入對手與下注。雙方各擲 **5 顆秘密骰子**，1 點為百搭；雙方各押同額，勝者取得完整獎池。'},
   big2:{label:'大老二',emoji:'🂡',hint:'挑戰五張牌型強度',title:'🂡 大老二挑戰',body:'系統發出 13 張牌並選出最高五張牌型。牌型通過本局強度門檻即可獲得下注額 **2 倍**。'},
   miniGames:{label:'小遊戲大廳',emoji:'🎮',hint:'用單一下拉選單開啟所有遊戲',title:'🎮 小遊戲大廳與圖片版堆積木',body:'使用 `/小遊戲` 後，從下拉式選單選擇遊戲；需要下注、號碼、馬匹或 PVP 對手時，機器人會自動開啟設定視窗。選單不包含工作與搶劫。「抽積木」完成下注後會提供專屬網站連結，以圖片呈現積木塔的穩定、搖晃與倒塌狀態。玩家從左、中、右三塊積木中選擇一塊抽出，畫面會標示每塊的倒塌率；每次成功後可立即收手領取目前倍率，或繼續挑戰。成功 1～6 次的基礎派彩依序為 **1.1、1.3、1.65、2.2、3、4.4 倍**；普通與緊實積木風險較高，但成功時會額外累加倍率。高塔倒塌會失去本局下注，結果與派彩皆由 Oracle 伺服器保存，重新整理不會重抽。'},
   slots:{label:'角子機',emoji:'🎰',hint:'三軸圖案配對派彩',title:'🎰 角子機',body:'三個 7️⃣ 可獲得 **20 倍**，其他三個相同圖案 **10 倍**，兩個相同圖案 **2 倍**；沒有配對則失去下注。'},
@@ -4833,22 +4833,25 @@ const gameHelpDetails={
   mahjong:{label:'麻將',emoji:'🀄',hint:'台式 16 張｜吃、碰、槓、胡與補花',title:'🀄 台式 16 張麻將',body:'採用四家台式 16 張核心規則：莊家 17 張先出，其他家 16 張摸 1 打 1；花牌會自動補花。輪到自己時從下拉選單選擇出牌；他家打出牌後可依規則選擇吃、碰、槓或胡。單人不足座位由三名電腦補齊，多人桌不足四位也會補電腦。胡牌依 **五組面子加一對將** 判定；流局會退回真人玩家本金。單人胡牌基本派彩 **4 倍**，多人胡牌取得真人玩家獎池；週六獎金 ×1.5。'},
   duel:{label:'PvP 輪盤決鬥',emoji:'⚔️',hint:'指定玩家進行虛構槍械決鬥',title:'⚔️ PvP 輪盤決鬥',body:'指定另一名玩家並下注，選擇左輪或霰彈槍模式。對方接受後輪流行動，勝者取得雙方獎池。'},
   heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
-  money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/每日\` 領取獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。大多數行動會消耗體力，食物與飲料可恢復；所有合法工作、冒險、搶劫與賭場收益皆無每日金幣上限。`},
+  money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/日常 領取\` 取得每日獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。可用 \`/日常 體力\` 查看狀態，並從 \`/補給\` 購買及使用恢復用品。`},
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；目前共有 **16 座國際機場**，持有機場與客機後可用 \`/交通事業\` 註冊航空公司並經營航線。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛；\`/機場\` 保留為航空面板捷徑。\n\n另有 **金灣中央火車站、蓮都國際客運站、皇冠港物流貨運站**三種交通事業資產。持有任一場站後，可在同一個 \`/交通事業\` 總部支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}** 手續費註冊公司行號，再從鐵路、城際客運或物流貨運專屬路線中選擇任務賺取收入。`},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產與載具，購買前可先看圖片。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
-  pets:{label:'寵物系統',emoji:'🐾',hint:'領養、陪伴、照顧與特殊增益',title:'🐾 寵物陪伴系統',body:'使用 `/寵物店` 預覽並領養寵物，或購買罐頭、玩具與洗護用品。再用 `/我的寵物` 設定同行夥伴與使用用品。寵物每天心情 -10，心情低於 20 時特殊功能暫停；好好照顧即可持續獲得小幅工作、賭場、商城或體力加成。'}
+  playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、成就與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 成就` 與 `/玩家 稱號`，集中管理角色資訊。'},
+  dailyHub:{label:'日常中心',emoji:'📅',hint:'每日獎勵、增益與體力',title:'📅 日常中心',body:'使用 `/日常 領取` 領每日獎勵；`/日常 增益` 查看輪替效果；`/日常 體力` 與 `/日常 回體力` 管理每日體力。'},
+  supplyHub:{label:'補給中心',emoji:'🛒',hint:'商城、背包、購買與使用',title:'🛒 補給中心',body:'使用 `/補給 商城` 與 `/補給 背包` 查看物品，再以 `/補給 購買`、`/補給 使用` 完成補給。'},
+  pets:{label:'寵物系統',emoji:'🐾',hint:'領養、陪伴、照顧與特殊增益',title:'🐾 寵物陪伴系統',body:'使用 `/寵物 商店` 預覽並領養寵物或購買用品，再用 `/寵物 我的` 設定同行夥伴與使用用品。寵物每天心情 -10，心情低於 20 時特殊功能暫停。'}
 };
 const commandHelpCategories={
-  casino:{label:'🎰 賭場與賺錢',description:'所有下注遊戲、免費輪盤與工作',commands:['小遊戲','比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','骰盅吹牛','大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥','賺錢']},
-  account:{label:'👤 玩家與經濟',description:'個人資料、金庫、轉帳、銀行、體力與每日獎勵',commands:['金庫','轉帳','個人資料','成就','稱號','每日增益','銀行','體力','每日回體力','每日']},
-  shop:{label:'🛒 商城與背包',description:'購買、查看及使用補給品',commands:['商城','背包','購買','使用']},
-  pets:{label:'🐾 寵物與陪伴',description:'領養寵物、購買用品並設定同行同伴',commands:['寵物店','我的寵物']},
-  assets:{label:'🏎️ 資產與交易',description:'房產、航空與交通事業、載具、改裝、展示與二手市場',commands:['資產商城','購買資產','我的資產','藏身處','機場','交通事業','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','變賣資產','回收廠','二手市場']},
+  casino:{label:'🎰 賭場與賺錢',description:'遊戲大廳與工作、搶劫入口',commands:['小遊戲','賺錢']},
+  account:{label:'👤 玩家與經濟',description:'玩家中心、轉帳、銀行與日常',commands:['玩家','轉帳','銀行','日常']},
+  shop:{label:'🛒 商城與背包',description:'集中購買、查看及使用補給品',commands:['補給']},
+  pets:{label:'🐾 寵物與陪伴',description:'寵物商店及同行夥伴管理',commands:['寵物']},
+  assets:{label:'🏎️ 資產與交易',description:'房產、航空與交通事業、載具、改裝、展示與二手市場',commands:['資產商城','購買資產','我的資產','藏身處','交通事業','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','變賣資產','回收廠','二手市場']},
   heist:{label:'🚓 團隊與小黑屋',description:'隊伍搶劫、情報、救援、逃獄與暴動',commands:['隊伍','團隊搶銀行','銀行情報','賄絡迷子','減刑','逃獄','小黑屋暴動','救援同伴']},
   admin:{label:'🛡️ 管理員與系統',description:'玩法入口及限管理員使用的維護指令',commands:['玩法','搶劫公告頻道','單人搶劫機率','稱號設定','資產調整','金幣調整','管理員入金','帳務紀錄','經濟監控']}
 };
-const detailedHelpCommandKeys={小遊戲:'miniGames',比大小:'highlow',射龍門:'dragon',賽馬:'horse',競速:'race',寵物競賽:'petRace',競速pvp:'racePvp',寵物競速pvp:'petRacePvp',骰盅吹牛:'liarDice',大老二:'big2',角子機:'slots',幸運輪盤:'wheel',大樂透:'lottery',賓果:'bingo',刮刮樂:'scratch',麻將:'mahjong',決鬥:'duel',團隊搶銀行:'heist',賺錢:'money',轉帳:'transfers',資產商城:'assets',交通事業:'assets',藏身處:'hideout',寵物店:'pets',我的寵物:'pets'};
+const detailedHelpCommandKeys={小遊戲:'miniGames',玩家:'playerHub',日常:'dailyHub',補給:'supplyHub',寵物:'pets',團隊搶銀行:'heist',賺錢:'money',轉帳:'transfers',資產商城:'assets',交通事業:'assets',藏身處:'hideout'};
 function commandHelpCategoryRow(selected='casino') {
   return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('game_help_category').setPlaceholder('第一步：選擇指令分類').addOptions(
     Object.entries(commandHelpCategories).map(([value,category])=>({label:category.label,description:category.description,value,default:value===selected}))
@@ -4929,11 +4932,11 @@ function petShopSelectRows(userId,selected=null) {
 function petShopOverviewEmbed() {
   const pets=Object.values(petCatalog).map(p=>`${p.emoji} **${p.name}**${p.rarity?`｜🌟 ${p.rarity}`:''}｜${fmt(p.price)}\n${p.bonusText}${p.hungerMultiplier>1?`｜每日心情消耗 ×${p.hungerMultiplier}`:''}`).join('\n\n');
   const items=Object.values(petItemCatalog).map(item=>`${item.emoji} **${item.name}**｜${fmt(item.price)}｜${petItemEffectLabel(item)}${petItemTargetLabel(item)?`｜${petItemTargetLabel(item)}`:''}`).join('\n');
-  return new EmbedBuilder().setColor(0xE8A2C8).setTitle('🐾 迷子寵物店').setDescription(`領養一位陪伴同伴，並在 **/我的寵物** 設定同行。\n\n${pets}\n\n**寵物用品**\n${items}\n\n寵物每天心情 -10；心情低於 20 時增益暫停。所有消費直接銷毀金幣。`);
+  return new EmbedBuilder().setColor(0xE8A2C8).setTitle('🐾 迷子寵物店').setDescription(`領養一位陪伴同伴，並在 **/寵物 我的** 設定同行。\n\n${pets}\n\n**寵物用品**\n${items}\n\n寵物每天心情 -10；心情低於 20 時增益暫停。所有消費直接銷毀金幣。`);
 }
 function petProfileEmbed(g,u) {
   const pets=ownedPets(g,u),active=activePet(g,u);
-  if(!pets.length) return new EmbedBuilder().setColor(0x9AA0A6).setTitle('🐾 我的寵物').setDescription('你還沒有寵物。使用 **/寵物店** 領養第一位陪伴同伴吧！');
+  if(!pets.length) return new EmbedBuilder().setColor(0x9AA0A6).setTitle('🐾 我的寵物').setDescription('你還沒有寵物。使用 **/寵物 商店** 領養第一位陪伴同伴吧！');
   const inventory=Object.entries(petItemCatalog).map(([id,item])=>{const quantity=db.prepare('SELECT quantity FROM pet_inventory WHERE guild_id=? AND user_id=? AND item_id=?').get(g,u,id)?.quantity||0; return `${item.emoji} ${item.name}${item.permanent?(quantity>0?'｜**已擁有・自動生效**':'｜未擁有'):` × ${quantity}`}`;}).join('\n');
   const lines=pets.map(row=>{const p=petCatalog[row.petId],marker=active?.petId===row.petId?'**同行中**':'收藏'; return `【${marker}】**${petDisplayName(row.petId,row.nickname)}**${p.rarity?`｜🌟 ${p.rarity}`:''}｜心情 ${row.happiness}/100 ${petMoodBar(row.happiness)}\n${p.bonusText}${p.hungerMultiplier>1?`｜食量 ×${p.hungerMultiplier}`:''}${row.happiness<20?'（目前暫停）':''}`;}).join('\n\n');
   return new EmbedBuilder().setColor(0xE8A2C8).setTitle('🐾 我的寵物夥伴').setDescription(`${lines}\n\n**用品背包**\n${inventory}`);
@@ -4958,33 +4961,46 @@ function petProfileComponents(g,u) {
   return rows;
 }
 
+const playerTitleChoices=[
+  {name:'🐣 萌禽',value:'cute_bird'},{name:'🐶 萌犬',value:'cute_dog'},{name:'🐕 猛犬',value:'fierce_dog'},{name:'🦅 猛禽',value:'fierce_bird'},
+  {name:'🐈 貓的報恩｜派彩全靠運氣',value:'cat_returns'},{name:'🐕 犬的報恩｜派彩全靠運氣',value:'dog_returns'},{name:'🔥 歐印勇者｜傳奇',value:'all_in_hero'},
+  {name:'💸 地下匯兌王｜稀有',value:'transfer_mogul'},{name:'🕵️ 迷子獵人｜史詩',value:'mizi_hunter'},{name:'🔟 手滑之神｜史詩',value:'extra_zero_god'},
+  {name:'🧱 塔頂之人｜史詩',value:'tower_top'},{name:'🎰 全能賭徒｜史詩',value:'casino_all_rounder'},{name:'🚓 澳門警長｜史詩',value:'macau_sheriff'},
+  {name:'✈️ 天空霸主｜傳奇',value:'sky_overlord'},{name:'🐾 毛孩教父｜史詩',value:'pet_godfather'},{name:'📈 逆風之王｜傳奇',value:'comeback_king'},
+  {name:'🎭 無影怪盜｜傳奇',value:'shadow_thief'},{name:'🐕‍🦺 博美指定玩具｜隱藏',value:'pomeranian_toy'},
+  {name:'📸 Hao 御用攝影師｜隱藏',value:'hao_photographer'},{name:'🧹 小黑屋管家｜隱藏',value:'jail_keeper'},
+  {name:'❌ 取消目前稱號',value:'clear'}
+];
 const commands = [
-  new SlashCommandBuilder().setName('金庫').setDescription('查看自己或其他玩家的金幣').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
+  new SlashCommandBuilder().setName('玩家').setDescription('統一查看金庫、資料、成就與設定稱號')
+    .addSubcommand(s=>s.setName('金庫').setDescription('查看自己或其他玩家的金幣').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
+    .addSubcommand(s=>s.setName('資料').setDescription('查看類似 Tatsu 的玩家資料卡').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
+    .addSubcommand(s=>s.setName('成就').setDescription('查看自己或其他玩家的成就進度').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
+    .addSubcommand(s=>s.setName('稱號').setDescription('裝備由成就解鎖的個人稱號').addStringOption(o=>o.setName('選擇').setDescription('選擇已解鎖的稱號').setRequired(true).addChoices(...playerTitleChoices))),
   new SlashCommandBuilder().setName('轉帳').setDescription('轉帳金幣給其他玩家（收取 2% 手續費）')
     .addUserOption(o=>o.setName('收款人').setDescription('選擇要收款的玩家').setRequired(true))
     .addIntegerOption(o=>o.setName('金額').setDescription('輸入轉帳本金，手續費另計').setRequired(true).setMinValue(1).setAutocomplete(true)),
-  new SlashCommandBuilder().setName('個人資料').setDescription('查看類似 Tatsu 的玩家資料卡').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
-  new SlashCommandBuilder().setName('成就').setDescription('查看自己或其他玩家的成就進度').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
-  new SlashCommandBuilder().setName('稱號').setDescription('裝備由成就解鎖的個人稱號').addStringOption(o=>o.setName('選擇').setDescription('選擇已解鎖的稱號').setRequired(true).addChoices(
-    {name:'🐣 萌禽',value:'cute_bird'},{name:'🐶 萌犬',value:'cute_dog'},{name:'🐕 猛犬',value:'fierce_dog'},{name:'🦅 猛禽',value:'fierce_bird'},
-    {name:'🐈 貓的報恩｜派彩全靠運氣',value:'cat_returns'},{name:'🐕 犬的報恩｜派彩全靠運氣',value:'dog_returns'},{name:'🔥 歐印勇者｜傳奇',value:'all_in_hero'},
-    {name:'💸 地下匯兌王｜稀有',value:'transfer_mogul'},{name:'🕵️ 迷子獵人｜史詩',value:'mizi_hunter'},{name:'🔟 手滑之神｜史詩',value:'extra_zero_god'},
-    {name:'🧱 塔頂之人｜史詩',value:'tower_top'},{name:'🎰 全能賭徒｜史詩',value:'casino_all_rounder'},{name:'🚓 澳門警長｜史詩',value:'macau_sheriff'},
-    {name:'✈️ 天空霸主｜傳奇',value:'sky_overlord'},{name:'🐾 毛孩教父｜史詩',value:'pet_godfather'},{name:'📈 逆風之王｜傳奇',value:'comeback_king'},
-    {name:'🎭 無影怪盜｜傳奇',value:'shadow_thief'},{name:'🐕‍🦺 博美指定玩具｜隱藏',value:'pomeranian_toy'},
-    {name:'📸 Hao 御用攝影師｜隱藏',value:'hao_photographer'},{name:'🧹 小黑屋管家｜隱藏',value:'jail_keeper'},
-    {name:'❌ 取消目前稱號',value:'clear'})),
-  new SlashCommandBuilder().setName('每日增益').setDescription('查看週一到週日的輪替增益'),
   new SlashCommandBuilder().setName('銀行').setDescription('查詢、借款或償還虛擬金幣')
     .addSubcommand(s=>s.setName('查詢').setDescription('查看金庫、負債與可借額度'))
     .addSubcommand(s=>s.setName('借款').setDescription('依個人核貸額度向銀行借入虛擬金幣').addIntegerOption(o=>o.setName('金額').setDescription('最高依個人額度核貸，上限 1 億').setRequired(true).setMinValue(1).setMaxValue(LOAN_LIMIT).setAutocomplete(true)))
     .addSubcommand(s=>s.setName('還款').setDescription('償還銀行負債').addIntegerOption(o=>o.setName('金額').setDescription('從建議下拉選擇或輸入還款金額').setRequired(true).setMinValue(1).setMaxValue(LOAN_LIMIT).setAutocomplete(true))),
-  new SlashCommandBuilder().setName('體力').setDescription('查看今日剩餘體力'),
-  new SlashCommandBuilder().setName('每日回體力').setDescription('每天免費一次將目前體力恢復至上限'),
-  new SlashCommandBuilder().setName('商城').setDescription('查看可購買的食物與飲料'),
-  new SlashCommandBuilder().setName('背包').setDescription('查看持有的食物與飲料'),
-  new SlashCommandBuilder().setName('寵物店').setDescription('領養陪伴寵物或購買寵物用品'),
-  new SlashCommandBuilder().setName('我的寵物').setDescription('查看、切換與照顧自己的寵物夥伴'),
+  new SlashCommandBuilder().setName('日常').setDescription('統一領取每日獎勵、查看增益與管理體力')
+    .addSubcommand(s=>s.setName('領取').setDescription('領取每日獎勵（週日雙倍）'))
+    .addSubcommand(s=>s.setName('增益').setDescription('查看週一到週日的輪替增益'))
+    .addSubcommand(s=>s.setName('體力').setDescription('查看今日剩餘體力'))
+    .addSubcommand(s=>s.setName('回體力').setDescription('每天免費一次將目前體力恢復至上限')),
+  new SlashCommandBuilder().setName('補給').setDescription('統一查看商城、背包、購買與使用補給品')
+    .addSubcommand(s=>s.setName('商城').setDescription('查看可購買的食物與飲料'))
+    .addSubcommand(s=>s.setName('背包').setDescription('查看持有的食物與飲料'))
+    .addSubcommand(s=>s.setName('購買').setDescription('從商城購買恢復體力的物品')
+      .addStringOption(o=>o.setName('商品').setDescription('選擇商品').setRequired(true).addChoices(...Object.entries(shopItems).map(([value,item])=>({name:`${item.name}｜${item.price} 金幣｜${shopItemEffectLabel(item)}`,value}))))
+      .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇購買數量，未填寫時預設為 1').setMinValue(1).setMaxValue(20).addChoices(...integerChoiceOptions(20))))
+    .addSubcommand(s=>s.setName('使用').setDescription('使用背包中的食物或飲料')
+      .addStringOption(o=>o.setName('商品').setDescription('選擇商品').setRequired(true).addChoices(...Object.entries(shopItems).map(([value,item])=>({name:`${item.name}｜${shopItemEffectLabel(item)}`,value}))))
+      .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇使用數量').setRequired(true).setMinValue(1).setMaxValue(20).addChoices(...integerChoiceOptions(20)))),
+  new SlashCommandBuilder().setName('寵物').setDescription('統一開啟寵物商店與管理自己的寵物')
+    .addSubcommand(s=>s.setName('商店').setDescription('領養陪伴寵物或購買寵物用品'))
+    .addSubcommand(s=>s.setName('我的').setDescription('查看、切換與照顧自己的寵物夥伴')),
   new SlashCommandBuilder().setName('資產商城').setDescription('查看房地產與載具商品')
     .addStringOption(o=>o.setName('分類').setDescription('篩選資產種類').addChoices(...assetCategories.map(category=>({name:category,value:category}))))
     .addStringOption(o=>o.setName('商品').setDescription('輸入名稱搜尋商品圖片與完整資料').setAutocomplete(true)),
@@ -4996,7 +5012,6 @@ const commands = [
     .addStringOption(o=>o.setName('車包').setDescription('選擇要查看的汽車盲盒').addChoices(...blindBoxPackChoices)),
   new SlashCommandBuilder().setName('我的資產').setDescription('查看玩家擁有的房地產與載具').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
   new SlashCommandBuilder().setName('藏身處').setDescription('將現有房地產設為藏身處並進行高階升級'),
-  new SlashCommandBuilder().setName('機場').setDescription('開啟已整合至交通事業的航空公司與多機位航班面板'),
   new SlashCommandBuilder().setName('交通事業').setDescription('統一管理機場、火車站、客運站與貨運站事業'),
   new SlashCommandBuilder().setName('車庫').setDescription('查看自己的汽車、機車與資產增益')
     .addStringOption(o=>o.setName('展示').setDescription('輸入名稱搜尋車輛').setAutocomplete(true)),
@@ -5035,15 +5050,6 @@ const commands = [
     .addStringOption(o=>o.setName('地圖').setDescription('選擇本次搶劫地圖').setRequired(true).addChoices(
       ...Object.entries(heistMaps).map(([value,map])=>({name:`${map.name}｜成功率 ${map.chance>=0?'+':''}${map.chance}%｜收益 ×${map.rewardMultiplier}`,value})))),
   new SlashCommandBuilder().setName('銀行情報').setDescription('查看今日與明日大量入金銀行'),
-  new SlashCommandBuilder().setName('購買').setDescription('從商城購買恢復體力的物品')
-    .addStringOption(o=>o.setName('商品').setDescription('選擇商品').setRequired(true).addChoices(
-      ...Object.entries(shopItems).map(([value,item])=>({name:`${item.name}｜${item.price} 金幣｜${shopItemEffectLabel(item)}`,value}))))
-    .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇購買數量，未填寫時預設為 1').setMinValue(1).setMaxValue(20).addChoices(...integerChoiceOptions(20))),
-  new SlashCommandBuilder().setName('使用').setDescription('使用背包中的食物或飲料')
-    .addStringOption(o=>o.setName('商品').setDescription('選擇商品').setRequired(true).addChoices(
-      ...Object.entries(shopItems).map(([value,item])=>({name:`${item.name}｜${shopItemEffectLabel(item)}`,value}))))
-    .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇使用數量').setRequired(true).setMinValue(1).setMaxValue(20).addChoices(...integerChoiceOptions(20))),
-  new SlashCommandBuilder().setName('每日').setDescription('領取每日獎勵（週日雙倍）'),
   new SlashCommandBuilder().setName('賄絡迷子').setDescription('花費 500 金幣嘗試提早離開小黑屋（45% 被拒絕）'),
   new SlashCommandBuilder().setName('減刑').setDescription('選擇迷子的調教方案以縮短或解除刑期')
     .addStringOption(o=>o.setName('方式').setDescription('選擇減刑方式').setRequired(true).addChoices(
@@ -5072,29 +5078,6 @@ const commands = [
       {name:'⚡ 剪電線去賣（30% 成功；失敗罰款 2,000）',value:'wire'},
       {name:'🏦 搶銀行（5% 成功，失敗關 8 分鐘）',value:'robbery'}))
     .addUserOption(o=>o.setName('目標').setDescription('闖空門時可指定玩家；未指定則直接尋找無人住宅').setRequired(false)),
-  addWagerOptions(new SlashCommandBuilder().setName('比大小').setDescription('與莊家各抽一張牌')),
-  addWagerOptions(new SlashCommandBuilder().setName('射龍門').setDescription('兩張門牌之間即獲勝')),
-  addWagerOptions(new SlashCommandBuilder().setName('賽馬').setDescription('從四匹馬選一匹下注')
-    .addIntegerOption(o=>o.setName('馬匹').setDescription('下拉選擇 1～4 號馬').setRequired(true).setMinValue(1).setMaxValue(4).addChoices(...integerChoiceOptions(4,'馬匹')))),
-  addWagerOptions(new SlashCommandBuilder().setName('競速').setDescription('使用自己的汽車或機車參加動態競速')),
-  addWagerOptions(new SlashCommandBuilder().setName('寵物競賽').setDescription('派出自己的寵物參加動態障礙賽')),
-  addWagerOptions(new SlashCommandBuilder().setName('競速pvp').setDescription('指定玩家，以自己的車輛進行零和競速對決')
-    .addUserOption(o=>o.setName('對手').setDescription('指定挑戰對手').setRequired(true)),'雙方各自支付的下注金額'),
-  addWagerOptions(new SlashCommandBuilder().setName('寵物競速pvp').setDescription('指定玩家，派出寵物進行零和障礙賽對決')
-    .addUserOption(o=>o.setName('對手').setDescription('指定挑戰對手').setRequired(true)),'雙方各自支付的下注金額'),
-  addWagerOptions(new SlashCommandBuilder().setName('骰盅吹牛').setDescription('向另一位玩家發起秘密骰盅吹牛 PVP')
-    .addUserOption(o=>o.setName('對手').setDescription('指定挑戰對手').setRequired(true)),'雙方各自支付的下注金額'),
-  addWagerOptions(new SlashCommandBuilder().setName('大老二').setDescription('單人挑戰：從 13 張牌選出最大的五張牌型')),
-  addWagerOptions(new SlashCommandBuilder().setName('角子機').setDescription('轉動三軸角子機')),
-  new SlashCommandBuilder().setName('幸運輪盤').setDescription('每日 3 次免費抽現金或本週隱藏車輛'),
-  addWagerOptions(new SlashCommandBuilder().setName('大樂透').setDescription('選一個幸運號碼並對獎')
-    .addIntegerOption(o=>o.setName('幸運號碼').setDescription('從可搜尋下拉選擇 1～49').setRequired(true).setMinValue(1).setMaxValue(49).setAutocomplete(true))),
-  addWagerOptions(new SlashCommandBuilder().setName('賓果').setDescription('自選九宮格號碼並進行開獎')
-    .addStringOption(o=>o.setName('號碼').setDescription('輸入 9 個數字，以空格、英文逗號或中文逗號分隔').setRequired(true).setMinLength(17).setMaxLength(40))),
-  addWagerOptions(new SlashCommandBuilder().setName('刮刮樂').setDescription('刮開三個圖案試手氣')),
-  new SlashCommandBuilder().setName('麻將').setDescription('開啟網頁版台式 16 張麻將（8 台起胡）'),
-  addWagerOptions(new SlashCommandBuilder().setName('決鬥').setDescription('向另一位玩家發起卡通 PvP 輪盤決鬥')
-    .addUserOption(o=>o.setName('對手').setDescription('指定決鬥對手').setRequired(true)),'雙方各自支付的下注金額'),
   new SlashCommandBuilder().setName('稱號設定').setDescription('管理員設定玩家資料卡稱號').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption(o=>o.setName('玩家').setDescription('目標玩家').setRequired(true))
     .addStringOption(o=>o.setName('稱號').setDescription('輸入名稱搜尋特殊稱號').setRequired(true).setAutocomplete(true)),
@@ -6276,7 +6259,7 @@ async function handleInteraction(i) {
     }
     try {
       const result=buyPetShopProduct(i.guildId,i.user.id,kind,id),product=result.product;
-      const text=`你已領養 **${product.emoji} ${product.name}**！使用 **/我的寵物** 查看與照顧。`;
+      const text=`你已領養 **${product.emoji} ${product.name}**！使用 **/寵物 我的** 查看與照顧。`;
       return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('✅ 寵物店交易完成').setDescription(`${text}\n\n金庫：**${fmt(result.balance)}**`)],components:petShopSelectRows(ownerId),attachments:[]});
     } catch(error) { return i.reply({content:`⚠️ ${error.message}`,ephemeral:true}); }
   }
@@ -6748,8 +6731,16 @@ async function handleInteraction(i) {
   }
   if (!i.isChatInputCommand() || !i.guildId) return;
   const g=i.guildId, u=i.user.id;
+  const hubRoutes={
+    玩家:{金庫:'金庫',資料:'個人資料',成就:'成就',稱號:'稱號'},
+    日常:{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'},
+    補給:{商城:'商城',背包:'背包',購買:'購買',使用:'使用'},
+    寵物:{商店:'寵物店',我的:'我的寵物'}
+  };
+  const hubRoute=hubRoutes[i.commandName];
+  const routedCommand=hubRoute?hubRoute[i.options.getSubcommand()]||i.commandName:i.commandName;
   try {
-    if (i.commandName==='金庫') {
+    if (routedCommand==='金庫') {
       const target=i.options.getUser('玩家') || i.user;
       return i.reply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🏦 玩家金庫').setDescription(`${target} 目前擁有 **${fmt(balance(g,target.id))}**`)]});
     }
@@ -6812,23 +6803,23 @@ async function handleInteraction(i) {
           .setTimestamp()]
       });
     }
-    if(i.commandName==='成就') {
+    if(routedCommand==='成就') {
       const target=i.options.getUser('玩家')||i.user,state=syncAchievements(g,target.id),lines=achievementLines(g,target.id);
       const unlocked=state.unlocked.size,total=achievementDefinitions.length;
       const recent=state.newlyUnlocked.length?`\n\n🎉 本次新解鎖：${state.newlyUnlocked.map(item=>`**${item.name}**`).join('、')}`:'';
       return i.reply({embeds:[new EmbedBuilder().setColor(0xFFD54F).setAuthor({name:`${target.username} 的成就收藏`,iconURL:target.displayAvatarURL()}).setTitle(`🏆 成就進度 ${unlocked}/${total}`).setDescription(`${lines.join('\n\n')}${recent}`).setFooter({text:'符合條件的成就會在查看時自動補發'})]});
     }
-    if(i.commandName==='稱號') {
+    if(routedCommand==='稱號') {
       const selected=i.options.getString('選擇',true);
       if(selected==='clear') {
         db.prepare('DELETE FROM player_profiles WHERE guild_id=? AND user_id=?').run(g,u);
         return i.reply({content:'✅ 已取消目前裝備的個人稱號。',ephemeral:true});
       }
-      if(!achievementTitleUnlocked(g,u,selected)) throw new Error(`你尚未解鎖稱號 ${profileTitles[selected]||selected}，請使用 /成就 查看條件`);
+      if(!achievementTitleUnlocked(g,u,selected)) throw new Error(`你尚未解鎖稱號 ${profileTitles[selected]||selected}，請使用 /玩家 成就 查看條件`);
       db.prepare('INSERT INTO player_profiles(guild_id,user_id,title) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET title=excluded.title,updated_at=CURRENT_TIMESTAMP').run(g,u,selected);
       return i.reply({content:`✅ 已裝備個人稱號 **${profileTitles[selected]}**。`,ephemeral:true});
     }
-    if(i.commandName==='個人資料') {
+    if(routedCommand==='個人資料') {
       const target=i.options.getUser('玩家')||i.user,coins=balance(g,target.id),energy=stamina(g,target.id),maxEnergy=staminaMax(g,target.id);
       const ledger=db.prepare("SELECT COUNT(*) actions, SUM(CASE WHEN kind='payout' AND delta>0 THEN 1 ELSE 0 END) wins, SUM(CASE WHEN kind IN ('bet','duel_bet') THEN 1 ELSE 0 END) bets FROM ledger WHERE guild_id=? AND user_id=?").get(g,target.id);
       const earned=db.prepare("SELECT COALESCE(SUM(CASE WHEN delta>0 THEN delta ELSE 0 END),0) total FROM ledger WHERE guild_id=? AND user_id=?").get(g,target.id).total;
@@ -6841,13 +6832,13 @@ async function handleInteraction(i) {
         {name:'💰 經濟',value:`金庫：${fmt(coins)}\n負債：${fmt(debt(g,target.id))}\n累積獲得：${fmt(earned)}`,inline:true},
         {name:'🎮 紀錄',value:`獲勝紀錄：${ledger.wins||0}\n下注次數：${ledger.bets||0}\n帳務活動：${ledger.actions||0}`,inline:true},
         {name:'🏷️ 特殊稱號',value:playerTitle(g,target.id),inline:true},
-        {name:'🏆 成就收藏',value:`已解鎖：${achievementState.unlocked.size}/${achievementDefinitions.length}\n徽章：${achievementBadgeText(g,target.id)}\n使用 /成就 查看完整進度`,inline:true},
+        {name:'🏆 成就收藏',value:`已解鎖：${achievementState.unlocked.size}/${achievementDefinitions.length}\n徽章：${achievementBadgeText(g,target.id)}\n使用 /玩家 成就 查看完整進度`,inline:true},
         {name:'🏠 豪華資產',value:`持有數量：${assetCount}\n原價總值：${fmt(assetValue)}`,inline:true},
         {name:'🎒 社交與狀態',value:`背包物品：${items}\n隊伍：${team?`${teamDisplayName(team)}（${team.members.length} 人）`:'尚未加入'}\n狀態：${status}`,inline:false},
         {name:`${todayBuff().icon} 今日增益｜${todayBuff().name}`,value:todayBuff().text,inline:false}
       ).setFooter({text:`玩家 ID：${target.id}｜資料即時更新`})]});
     }
-    if(i.commandName==='每日增益') {
+    if(routedCommand==='每日增益') {
       const today=taipeiWeekday();
       const list=dailyBuffs.map((buff,index)=>`${index===today?'➡️':'　'} **${buff.day}｜${buff.icon} ${buff.name}**\n　${buff.text}`).join('\n');
       return i.reply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('📅 每週增益輪替表').setDescription(`${list}\n\n每日於台北時間 **00:00** 自動切換。`)]});
@@ -6863,25 +6854,25 @@ async function handleInteraction(i) {
       const interestPercent=(LOAN_DAILY_INTEREST_RATE*100).toFixed(2).replace(/\.00$/,'');
       return i.reply({embeds:[new EmbedBuilder().setColor(action==='借款'?0x35C46A:0xF5B942).setTitle(action==='借款'?'💵 借款成功':'✅ 還款成功').setDescription(`${action==='借款'?'已存入金庫':'已償還'}：**${fmt(amount)}**\n金庫餘額：${fmt(result.balance)}\n剩餘負債：${fmt(result.debt)}\n信用評等：**${result.rating}**\n個人核貸上限：**${fmt(result.limit)}**\n目前可借：**${fmt(Math.max(0,result.limit-result.debt))}**\n每日利率：**${interestPercent}% 複利**`)]});
     }
-    if (i.commandName==='體力') {
+    if (routedCommand==='體力') {
       const current=stamina(g,u), max=staminaMax(g,u), bars=Math.round(current/max*10),claimed=dailyStaminaRestoreClaimed(g,u);
-      return i.reply({embeds:[new EmbedBuilder().setColor(current>=max/2?0x35C46A:0xD94A4A).setTitle('⚡ 玩家體力').setDescription(`**${current}/${max}**\n${'🟩'.repeat(bars)}${'⬛'.repeat(10-bars)}\n\n每日免費回體力：**${claimed?'今日已使用':'可以使用 `/每日回體力`'}**\n每天台北時間 00:00 重置；拍立得加成僅限當日。`)]});
+      return i.reply({embeds:[new EmbedBuilder().setColor(current>=max/2?0x35C46A:0xD94A4A).setTitle('⚡ 玩家體力').setDescription(`**${current}/${max}**\n${'🟩'.repeat(bars)}${'⬛'.repeat(10-bars)}\n\n每日免費回體力：**${claimed?'今日已使用':'可以使用 `/日常 回體力`'}**\n每天台北時間 00:00 重置；拍立得加成僅限當日。`)]});
     }
-    if(i.commandName==='每日回體力') {
+    if(routedCommand==='每日回體力') {
       const result=claimDailyStaminaRestore(g,u);
       return i.reply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('⚡ 每日免費體力恢復完成').setDescription(`本次免費恢復：**${result.restored} 點**\n恢復前：**${result.before}/${result.max}**\n目前體力：**${result.stamina}/${result.max}**\n\n今天的免費次數已使用；台北時間 00:00 後可再次使用。`).setTimestamp()]});
     }
-    if (i.commandName==='商城') {
+    if (routedCommand==='商城') {
       const list=Object.values(shopItems).map(item=>`${item.name}｜**${fmt(item.price)}**｜${item.fullRestore?'回滿全部體力':item.maxBonus?`當日體力上限 **+${item.maxBonus}**`:`恢復 **${item.stamina}** 體力`}`).join('\n');
-      return i.reply({embeds:[new EmbedBuilder().setColor(0x9C27B0).setTitle('🛒 體力商城').setDescription(`${list}\n\n使用 \`/購買\` 選購，商品會放入背包。`)]});
+      return i.reply({embeds:[new EmbedBuilder().setColor(0x9C27B0).setTitle('🛒 體力商城').setDescription(`${list}\n\n使用 \`/補給 購買\` 選購，商品會放入背包。`)]});
     }
-    if (i.commandName==='背包') {
+    if (routedCommand==='背包') {
       const rows=db.prepare('SELECT item_id,quantity FROM inventory WHERE guild_id=? AND user_id=? AND quantity>0').all(g,u);
       const list=rows.length?rows.map(row=>`${shopItems[row.item_id]?.name||row.item_id} × **${row.quantity}**`).join('\n'):'背包目前是空的。';
       return i.reply({embeds:[new EmbedBuilder().setColor(0x795548).setTitle('🎒 我的背包').setDescription(`${list}\n\n目前體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)]});
     }
-    if(i.commandName==='寵物店') return i.reply({embeds:[petShopOverviewEmbed()],components:petShopSelectRows(u)});
-    if(i.commandName==='我的寵物') return i.reply({...petProfilePayload(g,u),components:petProfileComponents(g,u)});
+    if(routedCommand==='寵物店') return i.reply({embeds:[petShopOverviewEmbed()],components:petShopSelectRows(u)});
+    if(routedCommand==='我的寵物') return i.reply({...petProfilePayload(g,u),components:petProfileComponents(g,u)});
     if(i.commandName==='資產商城') {
       const category=i.options.getString('分類'),assetId=i.options.getString('商品');
       if(assetId) {
@@ -7185,22 +7176,22 @@ async function handleInteraction(i) {
       setTimeout(()=>{if(mahjongRooms.get(token)===game&&['discard','claim'].includes(game.state)) mahjongRooms.delete(token);},30*60*1000);
       return i.reply({embeds:[mahjongGameEmbed(game,'你是莊家，持 17 張牌先出。其餘三家由電腦補位；打出後可等待其他家吃、碰、槓、胡，或點「全員過」讓下一家摸牌。')],components:mahjongGameRows(token,game)});
     }
-    if (i.commandName==='購買') {
+    if (routedCommand==='購買') {
       const itemId=i.options.getString('商品',true), quantity=i.options.getInteger('數量')??1, item=shopItems[itemId];
       const eventDiscount=(effectActive(g,u,'shop_sale_until')||taipeiWeekday()===5)?0.8:1;
       const paid=Math.ceil(item.price*quantity*Math.max(0.5,eventDiscount-assetShopDiscount(g,u)));
       const next=buyItem(g,u,itemId,quantity);
-      const embed=new EmbedBuilder().setColor(0x35C46A).setTitle('🛍️ 購買成功').setDescription(`${item.name} × **${quantity}**\n支付：${fmt(paid)}${paid<item.price*quantity?'（特價）':''}\n金庫：${fmt(next)}\n\n商品已放入背包，使用 \`/使用\` 即可恢復體力。`);
+      const embed=new EmbedBuilder().setColor(0x35C46A).setTitle('🛍️ 購買成功').setDescription(`${item.name} × **${quantity}**\n支付：${fmt(paid)}${paid<item.price*quantity?'（特價）':''}\n金庫：${fmt(next)}\n\n商品已放入背包，使用 \`/補給 使用\` 即可恢復體力。`);
       return i.reply(shopItemMediaPayload(embed,itemId,item));
     }
-    if (i.commandName==='使用') {
+    if (routedCommand==='使用') {
       const itemId=i.options.getString('商品',true), quantity=i.options.getInteger('數量',true), item=shopItems[itemId];
       const result=useItem(g,u,itemId,quantity);
       const description=result.special?`**「${result.special}」**\n\n當日體力上限提升至 **${result.max}**。\n目前體力：**${result.stamina}/${result.max}**`:`恢復 **${result.restored}** 點體力\n目前體力：**${result.stamina}/${result.max}**`;
       const embed=new EmbedBuilder().setColor(0x35C46A).setTitle(`${item.name} 使用成功`).setDescription(description);
       return i.reply(shopItemMediaPayload(embed,itemId,item));
     }
-    if (i.commandName==='每日') {
+    if (routedCommand==='每日') {
       const key=`${g}:${u}`, now=Date.now(), last=daily.get(key)||0, wait=86400000-(now-last);
       if(wait>0) throw new Error(`距離下次領取還有 ${Math.ceil(wait/3600000)} 小時`);
       const reward=taipeiWeekday()===0?1000:500,before=balance(g,u);
