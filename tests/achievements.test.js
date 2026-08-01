@@ -204,6 +204,31 @@ test('萌犬豪華客機已加入商城、航空營運及圖片資產',()=>{
   assert.ok(width>=1500&&height>=800&&width>height,`萌犬豪華客機圖片規格錯誤：${width}x${height}`);
 });
 
+test('航空航線基礎營收下修 25% 且不影響其他交通事業',()=>{
+  const airlineBlock=source.match(/const airlineRoutes=\{[\s\S]+?\n\};/)?.[0]||'';
+  const expectedRevenue={
+    regional:63750,
+    east_asia:172500,
+    intercontinental:450000,
+    first_class_world:1125000,
+    neon_bay_shuttle:90000,
+    alpine_lake_express:142500,
+    aegean_resort_hop:270000,
+    polar_night_longhaul:1575000,
+    grand_world_odyssey:2550000
+  };
+  for(const [routeId,revenue] of Object.entries(expectedRevenue)) {
+    assert.match(airlineBlock,new RegExp(`${routeId}:\\{[^\\n]+baseRevenue:${revenue}(?:,|\\})`),`${routeId} 基礎營收不正確`);
+  }
+  assert.equal((airlineBlock.match(/baseRevenue:/g)||[]).length,9,'航空航線數量或營收設定異常');
+  assert.match(source,/INSERT INTO airline_flights\([^\n]+gross_revenue[^\n]+\)[\s\S]+?\.run\([^\n]+grossRevenue/,'起飛時必須保存當次營收，避免調整已起飛航班');
+
+  const groundBlock=source.match(/const transportRoutes=\{[\s\S]+?\n\};/)?.[0]||'';
+  assert.match(groundBlock,/rail_metro_commuter:\{[^\n]+baseRevenue:72000/);
+  assert.match(groundBlock,/coach_city_shuttle:\{[^\n]+baseRevenue:45000/);
+  assert.match(groundBlock,/freight_city_distribution:\{[^\n]+baseRevenue:120000/);
+});
+
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
   const block=source.match(/async function publishLatestHeistResult\(interaction,payload\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少搶劫最終結果發布函式');

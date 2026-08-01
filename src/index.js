@@ -1533,15 +1533,15 @@ const passengerAirlinerIds=new Set([
   'boeing_787_9_snow','airbus_a350_1000_snow','embraer_e195_e2_snow','puppy_luxury_airliner'
 ]);
 const airlineRoutes={
-  regional:{name:'🏝️ 港澳台區域快線',description:'高頻短程航班，適合剛成立的航空公司。',durationMs:10*60*1000,baseRevenue:85000,operatingCost:25000,stamina:10,minTier:1},
-  east_asia:{name:'🌏 東亞商務航線',description:'連結亞洲主要商務城市的中程航線。',durationMs:30*60*1000,baseRevenue:230000,operatingCost:75000,stamina:20,minTier:1},
-  intercontinental:{name:'🌐 跨洲國際航線',description:'需要大型國際機場支援的長程高收益航線。',durationMs:60*60*1000,baseRevenue:600000,operatingCost:210000,stamina:35,minTier:2},
-  first_class_world:{name:'👑 環球頭等艙航線',description:'只由帝國環球航空城開放的頂級環球航線。',durationMs:120*60*1000,baseRevenue:1500000,operatingCost:600000,stamina:50,minTier:3},
-  neon_bay_shuttle:{name:'🌃 灣區霓虹快線',description:'穿梭海灣商圈與鄰近都會的高頻入門短途航線。',durationMs:15*60*1000,baseRevenue:120000,operatingCost:38000,stamina:12,minTier:1},
-  alpine_lake_express:{name:'🏔️ 阿爾卑斯湖岸快線',description:'沿雪峰與冰河湖飛行的觀光商務短途航線。',durationMs:25*60*1000,baseRevenue:190000,operatingCost:60000,stamina:16,minTier:1},
-  aegean_resort_hop:{name:'🏖️ 愛琴海度假短航',description:'串聯地中海度假島嶼與海岸城市的精品短途航線。',durationMs:45*60*1000,baseRevenue:360000,operatingCost:120000,stamina:24,minTier:2},
-  polar_night_longhaul:{name:'🌌 極夜洲際長程航線',description:'跨越極圈與大洋的三小時長程航班，需要大型國際機場支援。',durationMs:3*60*60*1000,baseRevenue:2100000,operatingCost:780000,stamina:55,minTier:2},
-  grand_world_odyssey:{name:'🌍 環球天際遠征航線',description:'歷時四小時、橫跨多個大洲的最高階遠征航線。',durationMs:4*60*60*1000,baseRevenue:3400000,operatingCost:1350000,stamina:70,minTier:3}
+  regional:{name:'🏝️ 港澳台區域快線',description:'高頻短程航班，適合剛成立的航空公司。',durationMs:10*60*1000,baseRevenue:63750,operatingCost:25000,stamina:10,minTier:1},
+  east_asia:{name:'🌏 東亞商務航線',description:'連結亞洲主要商務城市的中程航線。',durationMs:30*60*1000,baseRevenue:172500,operatingCost:75000,stamina:20,minTier:1},
+  intercontinental:{name:'🌐 跨洲國際航線',description:'需要大型國際機場支援的長程高收益航線。',durationMs:60*60*1000,baseRevenue:450000,operatingCost:210000,stamina:35,minTier:2},
+  first_class_world:{name:'👑 環球頭等艙航線',description:'只由帝國環球航空城開放的頂級環球航線。',durationMs:120*60*1000,baseRevenue:1125000,operatingCost:600000,stamina:50,minTier:3},
+  neon_bay_shuttle:{name:'🌃 灣區霓虹快線',description:'穿梭海灣商圈與鄰近都會的高頻入門短途航線。',durationMs:15*60*1000,baseRevenue:90000,operatingCost:38000,stamina:12,minTier:1},
+  alpine_lake_express:{name:'🏔️ 阿爾卑斯湖岸快線',description:'沿雪峰與冰河湖飛行的觀光商務短途航線。',durationMs:25*60*1000,baseRevenue:142500,operatingCost:60000,stamina:16,minTier:1},
+  aegean_resort_hop:{name:'🏖️ 愛琴海度假短航',description:'串聯地中海度假島嶼與海岸城市的精品短途航線。',durationMs:45*60*1000,baseRevenue:270000,operatingCost:120000,stamina:24,minTier:2},
+  polar_night_longhaul:{name:'🌌 極夜洲際長程航線',description:'跨越極圈與大洋的三小時長程航班，需要大型國際機場支援。',durationMs:3*60*60*1000,baseRevenue:1575000,operatingCost:780000,stamina:55,minTier:2},
+  grand_world_odyssey:{name:'🌍 環球天際遠征航線',description:'歷時四小時、橫跨多個大洲的最高階遠征航線。',durationMs:4*60*60*1000,baseRevenue:2550000,operatingCost:1350000,stamina:70,minTier:3}
 };
 const transportStationIds=[
   'grand_bay_high_speed_rail_terminal',
