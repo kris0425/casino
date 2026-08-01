@@ -59,10 +59,12 @@ const ECONOMY_SINK_LABELS={
   airline_slot:'航空公司額外機位',
   transport_registration:'交通公司行號註冊費',
   transport_operation:'交通事業營運成本',
+  enterprise_upgrade:'交通企業升級',
+  auction_payment:'限時資產拍賣得標款',
   train_blind_box:'列車盲盒',
   transfer_fee:'玩家轉帳手續費'
 };
-const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer']);
+const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund']);
 const BASE_STAMINA = 800;
 const assetPath=name=>resolve(process.cwd(),'assets',name);
 const petCatalog={
@@ -277,7 +279,7 @@ const transportPanelCustomIdPrefixes=[
   'transport_station:','transport_route:','transport_start:','transport_claim:','transport_refresh:',
   'train_blind_box_','train_garage_upgrade:','airline_register:','airline_register_modal:',
   'airline_airport:','airline_aircraft:','airline_route:','airline_start:','airline_buy_slot:',
-  'airline_claim_select:','airline_claim:','airline_refresh:'
+  'airline_claim_select:','airline_claim:','airline_refresh:','enterprise_upgrade:'
 ];
 function scheduleTransportPanelDeletion(message) {
   if(!message?.id||typeof message.delete!=='function') return false;
@@ -505,6 +507,38 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'active', buyer_id TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT
   );
+  CREATE TABLE IF NOT EXISTS asset_auctions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    start_price INTEGER NOT NULL,
+    current_bid INTEGER NOT NULL DEFAULT 0,
+    current_bidder_id TEXT,
+    bid_count INTEGER NOT NULL DEFAULT 0,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','expired')),
+    winner_id TEXT,
+    final_price INTEGER,
+    announced_at INTEGER,
+    closed_announced_at INTEGER,
+    settled_at INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_auctions_active_guild
+    ON asset_auctions(guild_id) WHERE status='active';
+  CREATE INDEX IF NOT EXISTS idx_asset_auctions_settlement
+    ON asset_auctions(status,ends_at);
+  CREATE TABLE IF NOT EXISTS asset_auction_bids (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    auction_id INTEGER NOT NULL,
+    guild_id TEXT NOT NULL,
+    bidder_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_asset_auction_bids_auction
+    ON asset_auction_bids(auction_id,id);
   CREATE TABLE IF NOT EXISTS lucky_wheel_daily (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, spin_day TEXT NOT NULL,
     spins INTEGER NOT NULL DEFAULT 0,
@@ -604,6 +638,7 @@ db.exec(`
     aircraft_id TEXT,
     route_id TEXT,
     flight_slots INTEGER NOT NULL DEFAULT 1,
+    company_level INTEGER NOT NULL DEFAULT 1,
     registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id,user_id)
@@ -658,6 +693,7 @@ db.exec(`
     company_name TEXT NOT NULL,
     station_id TEXT,
     route_id TEXT,
+    company_level INTEGER NOT NULL DEFAULT 1,
     registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id,user_id,business_type)
@@ -752,7 +788,7 @@ db.exec(`
   WHEN NEW.delta < 0 AND NEW.kind NOT IN (
     'asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return',
     'admin_adjust','bank_deposit','bank_withdraw','loan_repayment','casino_vault_heist',
-    'player_transfer','transfer_mizi_theft'
+    'player_transfer','transfer_mizi_theft','enterprise_upgrade','auction_bid_escrow'
   )
   BEGIN
     INSERT INTO casino_vault(guild_id,balance) VALUES(NEW.guild_id,ABS(NEW.delta))
@@ -777,6 +813,12 @@ if(!db.prepare('PRAGMA table_info(player_pets)').all().some(column=>column.name=
 }
 if(!db.prepare('PRAGMA table_info(airline_companies)').all().some(column=>column.name==='flight_slots')) {
   db.exec('ALTER TABLE airline_companies ADD COLUMN flight_slots INTEGER NOT NULL DEFAULT 1');
+}
+if(!db.prepare('PRAGMA table_info(airline_companies)').all().some(column=>column.name==='company_level')) {
+  db.exec('ALTER TABLE airline_companies ADD COLUMN company_level INTEGER NOT NULL DEFAULT 1');
+}
+if(!db.prepare('PRAGMA table_info(transport_business_companies)').all().some(column=>column.name==='company_level')) {
+  db.exec('ALTER TABLE transport_business_companies ADD COLUMN company_level INTEGER NOT NULL DEFAULT 1');
 }
 if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='dm_notified_at')) {
   db.exec('ALTER TABLE airline_flights ADD COLUMN dm_notified_at INTEGER');
@@ -1005,6 +1047,10 @@ function economyFlow(g,sinceModifier) {
     if(row.delta<0) burned+=Math.abs(row.delta);
     if(row.delta<0&&Object.hasOwn(sinks,row.kind)) sinks[row.kind]+=Math.abs(row.delta);
   }
+  const auctionBurned=db.prepare("SELECT COALESCE(SUM(final_price),0) total FROM asset_auctions WHERE guild_id=? AND status='completed' AND settled_at>=unixepoch('now',?)*1000")
+    .get(g,sinceModifier).total||0;
+  burned+=auctionBurned;
+  sinks.auction_payment=auctionBurned;
   return {minted,burned,net:minted-burned,sinks};
 }
 const dayNumber=day=>Math.floor(Date.parse(`${day}T00:00:00Z`)/86400000);
@@ -1516,6 +1562,17 @@ const AIRLINE_REGISTRATION_FEE=500000;
 const AIRLINE_COMPLETION_CHANNEL_ID='1531857208781045831';
 const AIRLINE_MAX_FLIGHT_SLOTS=5;
 const AIRLINE_SLOT_COSTS={2:1000000,3:2500000,4:5000000,5:10000000};
+const ENTERPRISE_MAX_LEVEL=10;
+const ENTERPRISE_REVENUE_BONUS_PER_LEVEL=0.04;
+const ENTERPRISE_UPGRADE_COSTS={2:1000000,3:2500000,4:5000000,5:10000000,6:20000000,7:40000000,8:75000000,9:125000000,10:200000000};
+const ASSET_AUCTION_DURATION_MS=12*60*60*1000;
+const ASSET_AUCTION_EXTENSION_MS=5*60*1000;
+const ASSET_AUCTION_MIN_INCREMENT=100000;
+const ASSET_AUCTION_MIN_INCREMENT_RATE=0.05;
+const ASSET_AUCTION_MIN_START_PRICE=5000000;
+const assetAuctionPool=[
+  'mystery_huayra','toyota_supra_mk4','ford_mustang_1964_hidden','blind_totoro_catbus','ford_gt_2017'
+];
 const TRANSPORT_REGISTRATION_FEE=300000;
 const TRANSPORT_COMPLETION_CHANNEL_ID=AIRLINE_COMPLETION_CHANNEL_ID;
 const airportAssetIds=[
@@ -1820,6 +1877,45 @@ function airlineDurationLabel(durationMs) {
   const minutes=Math.round(durationMs/60000);
   return minutes>=60?`${minutes/60} 小時`:`${minutes} 分鐘`;
 }
+function enterpriseLevel(company) {
+  return Math.max(1,Math.min(ENTERPRISE_MAX_LEVEL,Number(company?.company_level)||1));
+}
+function enterpriseRevenueMultiplier(company) {
+  return 1+(enterpriseLevel(company)-1)*ENTERPRISE_REVENUE_BONUS_PER_LEVEL;
+}
+function nextEnterpriseUpgrade(company) {
+  const level=enterpriseLevel(company),nextLevel=level+1;
+  return nextLevel<=ENTERPRISE_MAX_LEVEL?{level:nextLevel,cost:ENTERPRISE_UPGRADE_COSTS[nextLevel]}:null;
+}
+function enterpriseTypeName(businessType) {
+  if(businessType==='airline') return '航空運輸';
+  return transportBusinessTypes[businessType]?.name||null;
+}
+function upgradeEnterprise(g,u,businessType) {
+  const typeName=enterpriseTypeName(businessType);
+  if(!typeName) throw new Error('找不到這個企業類型');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const company=businessType==='airline'
+      ? db.prepare('SELECT * FROM airline_companies WHERE guild_id=? AND user_id=?').get(g,u)
+      : db.prepare('SELECT * FROM transport_business_companies WHERE guild_id=? AND user_id=? AND business_type=?').get(g,u,businessType);
+    if(!company) throw new Error(`請先註冊${typeName}公司`);
+    const upgrade=nextEnterpriseUpgrade(company);
+    if(!upgrade) throw new Error(`企業已達最高 Lv.${ENTERPRISE_MAX_LEVEL}`);
+    changeBalanceUnlocked(g,u,-upgrade.cost,'enterprise_upgrade',u,`${company.company_name}｜${typeName}企業升級至 Lv.${upgrade.level}｜金幣直接回收`);
+    if(businessType==='airline') {
+      db.prepare('UPDATE airline_companies SET company_level=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(upgrade.level,g,u);
+    } else {
+      db.prepare('UPDATE transport_business_companies SET company_level=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=? AND business_type=?').run(upgrade.level,g,u,businessType);
+    }
+    db.exec('COMMIT');
+    const updated=businessType==='airline'?airlineCompany(g,u):businessTransportCompany(g,u,businessType);
+    return {company:updated,level:upgrade.level,cost:upgrade.cost,next:balance(g,u),multiplier:enterpriseRevenueMultiplier(updated)};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
 function normalizeAirlineName(value) {
   return String(value||'').trim().replace(/\s+/g,' ').replace(/@/g,'＠');
 }
@@ -1852,6 +1948,7 @@ function airlineDashboardEmbed(g,u,notice='') {
   }
   const flights=airlineFlights(g,u);
   const slots=Math.max(1,Math.min(AIRLINE_MAX_FLIGHT_SLOTS,Number(company.flight_slots)||1));
+  const companyLevel=enterpriseLevel(company),companyMultiplier=enterpriseRevenueMultiplier(company);
   const airport=assetCatalog[company.airport_id],aircraft=assetCatalog[company.aircraft_id],route=airlineRoutes[company.route_id];
   const flightText=Array.from({length:slots},(_,index)=>{
     const flight=flights.find(row=>row.flight_slot===index+1);
@@ -1862,11 +1959,13 @@ function airlineDashboardEmbed(g,u,notice='') {
     return `**機位 #${flight.flight_slot}**｜${status}\n└ ${airlineSelectionName(flight.aircraft_id)}｜${airlineSelectionName(flight.route_id)}｜**${fmt(flight.gross_revenue)}**`;
   }).join('\n');
   const routeEstimate=airport&&aircraft&&route
-    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)))}**（另有市場需求浮動）\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜航程：**${airlineDurationLabel(route.durationMs)}**`
+    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*companyMultiplier))}**（另有市場需求浮動）\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜航程：**${airlineDurationLabel(route.durationMs)}**`
     : '';
   const nextCost=nextAirlineSlotCost(company);
   const slotText=nextCost?`下一機位：**${fmt(nextCost)}**`:'機位已擴充至上限';
-  return new EmbedBuilder().setColor(flights.some(flight=>Date.now()>=flight.completes_at)?0x35C46A:0x0288D1).setTitle(`✈️ ${company.company_name}`).setDescription(`${notice?`${notice}\n\n`:''}**營運配置**\n機場：${airlineSelectionName(company.airport_id)}\n客機：${airlineSelectionName(company.aircraft_id)}\n航線：${airlineSelectionName(company.route_id)}\n\n**航班與機位（${flights.length}/${slots}）**\n${flightText}${routeEstimate}\n\n持有客機種類：**${airliners.length} 種**｜${slotText}\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+  const nextUpgrade=nextEnterpriseUpgrade(company);
+  const upgradeText=nextUpgrade?`下一級：**${fmt(nextUpgrade.cost)}**`:'已升至最高等級';
+  return new EmbedBuilder().setColor(flights.some(flight=>Date.now()>=flight.completes_at)?0x35C46A:0x0288D1).setTitle(`✈️ ${company.company_name}`).setDescription(`${notice?`${notice}\n\n`:''}**企業等級**\nLv.**${companyLevel}**｜營收加成 **+${Math.round((companyMultiplier-1)*100)}%**｜${upgradeText}\n\n**營運配置**\n機場：${airlineSelectionName(company.airport_id)}\n客機：${airlineSelectionName(company.aircraft_id)}\n航線：${airlineSelectionName(company.route_id)}\n\n**航班與機位（${flights.length}/${slots}）**\n${flightText}${routeEstimate}\n\n持有客機種類：**${airliners.length} 種**｜${slotText}\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
 }
 function airlineDashboardComponents(g,u) {
   const airports=ownedAirports(g,u),company=airlineCompany(g,u);
@@ -1906,9 +2005,11 @@ function airlineDashboardComponents(g,u) {
   const route=airlineRoutes[company.route_id],airport=assetCatalog[company.airport_id];
   const validConfiguration=airports.includes(company.airport_id)&&airliners.includes(company.aircraft_id)&&availability.available>0&&route&&airport?.airportTier>=route.minTier;
   const nextCost=nextAirlineSlotCost(company);
+  const nextUpgrade=nextEnterpriseUpgrade(company);
   const actionButtons=[
     new ButtonBuilder().setCustomId(`airline_start:${u}`).setLabel('派遣新航班').setEmoji('🛫').setStyle(ButtonStyle.Primary).setDisabled(flights.length>=slots||!validConfiguration),
     new ButtonBuilder().setCustomId(`airline_buy_slot:${u}`).setLabel(nextCost?`購買機位｜${fmt(nextCost)}`:'機位已達上限').setEmoji('➕').setStyle(ButtonStyle.Success).setDisabled(!nextCost),
+    new ButtonBuilder().setCustomId(`enterprise_upgrade:${u}:airline`).setLabel(nextUpgrade?`企業 Lv.${nextUpgrade.level}｜${fmt(nextUpgrade.cost)}`:'企業已滿級').setEmoji('🏢').setStyle(ButtonStyle.Success).setDisabled(!nextUpgrade),
     new ButtonBuilder().setCustomId(`airline_refresh:${u}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
     homeButton()
   ];
@@ -1940,7 +2041,7 @@ function startAirlineFlight(g,u) {
   if(currentStamina<staminaUsed) throw new Error(`體力不足，需要 ${staminaUsed} 點`);
   if(balance(g,u)<route.operatingCost) throw new Error(`營運資金不足，需要 ${fmt(route.operatingCost)}`);
   const demandMultiplier=0.90+Math.random()*0.21;
-  const grossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*demandMultiplier);
+  const grossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*enterpriseRevenueMultiplier(company)*demandMultiplier);
   const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
   const flightSlot=Array.from({length:slots},(_,index)=>index+1).find(slot=>!flights.some(flight=>flight.flight_slot===slot));
   let flightId=0;
@@ -2326,7 +2427,7 @@ function transportBusinessStatus(g,u,businessType) {
   const company=businessTransportCompany(g,u,businessType),operation=businessTransportOperation(g,u,businessType);
   if(!stations.length) return `${type.emoji} **${type.name}**｜尚未持有${type.stationLabel}`;
   if(!company) return `${type.emoji} **${type.name}**｜持有${type.stationLabel}，尚未註冊公司`;
-  return `${type.emoji} **${type.name}**｜${company.company_name}｜${operation?(Date.now()>=operation.completes_at?'可領取營收':'營運中'):'待命中'}`;
+  return `${type.emoji} **${type.name}**｜${company.company_name} Lv.${enterpriseLevel(company)}｜${operation?(Date.now()>=operation.completes_at?'可領取營收':'營運中'):'待命中'}`;
 }
 function transportGroundOverviewEmbed(g,u,notice='') {
   ensureStarterTrain(g,u);
@@ -2360,6 +2461,7 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
       .setDescription(`${notice?`${notice}\n\n`:''}你已擁有${type.stationLabel}，下一步是為 **${type.name}** 單獨註冊公司行號。\n\n註冊手續費：**${fmt(TRANSPORT_REGISTRATION_FEE)}**\n火車站與客運站的公司、路線及行程完全分開，可同時營運。\n\n目前金庫：**${fmt(balance(g,u))}**`);
   }
   const station=assetCatalog[company.station_id],route=transportRoutes[company.route_id];
+  const companyLevel=enterpriseLevel(company),companyMultiplier=enterpriseRevenueMultiplier(company);
   const operationText=operation
     ? Date.now()>=operation.completes_at
       ? `✅ **${type.operationLabel}已完成，可以領取營收**\n${transportSelectionName(operation.route_id)}｜可領營收 **${fmt(operation.gross_revenue)}**`
@@ -2373,14 +2475,15 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
       : `${activeTrainAsset.name}｜營收 **+${Math.round(activeTrainAsset.trainRevenueBonus*100)}%**`
     : '沒有列車，無法發車';
   const routeEstimate=station&&route&&station.transportType===route.type
-    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier))}**（另有市場需求浮動）${businessType==='rail'?`\n執行列車：${activeTrainText}`:''}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
+    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*companyMultiplier))}**（另有市場需求浮動）${businessType==='rail'?`\n執行列車：${activeTrainText}`:''}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
     : '';
   const garage=businessType==='rail'?ensureTrainGarage(g,u):null;
   const garageText=garage?`\n列車車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**（配給列車不計）`:'';
+  const nextUpgrade=nextEnterpriseUpgrade(company),upgradeText=nextUpgrade?`下一級：**${fmt(nextUpgrade.cost)}**`:'已升至最高等級';
   return new EmbedBuilder()
     .setColor(operation&&Date.now()>=operation.completes_at?0x35C46A:type.color)
     .setTitle(`${type.emoji} ${company.company_name}`)
-    .setDescription(`${notice?`${notice}\n\n`:''}**${type.name}營運配置**\n公司行號：**${company.company_name}**\n營運場站：${transportSelectionName(company.station_id)}\n營運路線：${transportSelectionName(company.route_id)}\n\n**營運狀態**\n${operationText}${routeEstimate}${garageText}\n\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+    .setDescription(`${notice?`${notice}\n\n`:''}**企業等級**\nLv.**${companyLevel}**｜營收加成 **+${Math.round((companyMultiplier-1)*100)}%**｜${upgradeText}\n\n**${type.name}營運配置**\n公司行號：**${company.company_name}**\n營運場站：${transportSelectionName(company.station_id)}\n營運路線：${transportSelectionName(company.route_id)}\n\n**營運狀態**\n${operationText}${routeEstimate}${garageText}\n\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
 }
 function transportBusinessDashboardComponents(g,u,businessType) {
   requireTransportBusinessType(businessType);
@@ -2402,12 +2505,14 @@ function transportBusinessDashboardComponents(g,u,businessType) {
     .setCustomId(`transport_route:${u}:${businessType}`).setPlaceholder(`選擇${type.name}路線`).setDisabled(!!operation)
     .addOptions(routeEntries.map(([id,route])=>({label:route.name.slice(0,100),value:id,description:`${airlineDurationLabel(route.durationMs)}｜成本 ${fmt(route.operatingCost)}｜體力 ${route.stamina}`,default:company.route_id===id})))));
   const ready=operation&&Date.now()>=operation.completes_at;
+  const nextUpgrade=nextEnterpriseUpgrade(company);
   const hasTrain=businessType!=='rail'||ownedTrainRows(g,u).length>0;
   const validConfiguration=station&&stations.includes(company.station_id)&&transportRoutes[company.route_id]?.type===businessType&&hasTrain;
   const actionButtons=[operation
     ? new ButtonBuilder().setCustomId(ready?`transport_claim:${u}:${businessType}`:`transport_refresh:${u}:${businessType}`).setLabel(ready?`領取${type.name}營收`:'重新整理營運狀態').setEmoji(ready?'💰':'🔄').setStyle(ready?ButtonStyle.Success:ButtonStyle.Secondary)
     : new ButtonBuilder().setCustomId(`transport_start:${u}:${businessType}`).setLabel(businessType==='rail'&&!hasTrain?'需要列車才能發車':'確認配置並開始營運').setEmoji('🚦').setStyle(ButtonStyle.Primary).setDisabled(!validConfiguration)];
   if(businessType==='rail') actionButtons.push(new ButtonBuilder().setCustomId(`transport_hub_train_box:${u}`).setLabel('列車車庫・盲盒').setEmoji('🚆').setStyle(ButtonStyle.Success));
+  actionButtons.push(new ButtonBuilder().setCustomId(`enterprise_upgrade:${u}:${businessType}`).setLabel(nextUpgrade?`企業 Lv.${nextUpgrade.level}｜${fmt(nextUpgrade.cost)}`:'企業已滿級').setEmoji('🏢').setStyle(ButtonStyle.Success).setDisabled(!nextUpgrade));
   actionButtons.push(backButton());
   rows.push(new ActionRowBuilder().addComponents(actionButtons));
   return rows;
@@ -2451,7 +2556,7 @@ function startTransportBusinessOperation(g,u,businessType) {
   if(balance(g,u)<route.operatingCost) throw new Error(`營運資金不足，需要 ${fmt(route.operatingCost)}`);
   const trainMultiplier=trainAsset?1+trainAsset.trainRevenueBonus:1;
   const demandMultiplier=0.90+Math.random()*0.21;
-  const grossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*demandMultiplier);
+  const grossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*enterpriseRevenueMultiplier(company)*demandMultiplier);
   const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -2788,13 +2893,15 @@ function assetShopCategoryLabel(categoryKey) {
 }
 function assetShopCategoryRow(token,selectedCategory=null) {
   const menu=new StringSelectMenuBuilder().setCustomId(`asset_shop_category:${token}`).setPlaceholder('先選擇資產分類').addOptions(
-    Object.entries(assetShopCategories).map(([value,category])=>({
+    [...Object.entries(assetShopCategories).map(([value,category])=>({
       label:category.label,
       value,
       emoji:category.emoji,
       description:`查看可購買的${category.label}`,
       default:value===selectedCategory
-    }))
+    })),{
+      label:'限時資產拍賣',value:'auction',emoji:'🔥',description:'競標系統釋出的稀有資產',default:selectedCategory==='auction'
+    }]
   );
   return new ActionRowBuilder().addComponents(menu);
 }
@@ -2894,7 +3001,7 @@ function assetPurchasePreviewEmbed(g,u,assetId,categoryKey,ammoBoxes=1,quantity=
   return new EmbedBuilder().setColor(0xF5B942).setTitle(`🔑 ${asset.name}`).setDescription(`分類：**${assetShopCategoryLabel(categoryKey)}**\n稀有度：**${asset.rarity||'一般'}**\n商品單價：**${fmt(asset.price)}**\n數量：**${quantity}**\n總價：**${fmt(total)}**\n目前持有：**${owned}**\n目前金庫：**${fmt(balance(g,u))}**${assetSaleWindowText(asset)}${ammoText}\n\n${asset.description}\n\n${asset.combatItem?'🔫 裝備用途':'🎲 資產增益'}\n${buffPreview}\n\n${hasImage?'圖片已即時顯示於下方。':'🖼️ 此商品尚未配置圖片素材。'}確認後才會扣款；本次確認於 **5 分鐘**後失效。`);
 }
 function assetShopOverviewEmbed(categoryKey=null,page=0,sectionKey=null) {
-  if(!categoryKey) return new EmbedBuilder().setColor(0xD4AF37).setTitle('🏛️ 購買資產').setDescription('請先從下拉選單選擇分類，再選擇商品。\n\n商品被選取後，名稱、售價、用途與圖片會立即顯示；確認前不會扣除金幣。\n\n分類：**房地產／汽車／飛行器／列車／機車／船隻／武器與彈藥**');
+  if(!categoryKey) return new EmbedBuilder().setColor(0xD4AF37).setTitle('🏛️ 購買資產').setDescription('請先從下拉選單選擇分類，再選擇商品。\n\n商品被選取後，名稱、售價、用途與圖片會立即顯示；確認前不會扣除金幣。\n\n分類：**房地產／汽車／飛行器／列車／機車／船隻／武器與彈藥／限時資產拍賣**');
   if(categoryKey==='armory'&&!sectionKey) return new EmbedBuilder().setColor(0x1565C0).setTitle('🔫 武器與彈藥').setDescription('請從第二個下拉選單選擇：**突擊步槍／手槍／狙擊槍／黃金武器／黃金手槍／黃金狙擊槍／其他武器／彈藥**。\n\n選擇分類後，第三個下拉選單會顯示該分類的槍械或彈藥。');
   const info=assetShopPageInfo(categoryKey,page,sectionKey),start=info.page*ASSET_SHOP_PAGE_SIZE;
   const list=info.entries.slice(start,start+ASSET_SHOP_PAGE_SIZE).map(([,asset])=>`• ${asset.name}｜**${fmt(asset.price)}**${asset.saleEndsAt?`｜⏳ <t:${Math.floor(asset.saleEndsAt/1000)}:R>`:''}`).join('\n');
@@ -2924,6 +3031,156 @@ function assetMediaPayload(embed,assetId,asset) {
   const color=embed.data.color||0x1565C0;
   const embeds=[embed,...names.slice(1).map((name,index)=>new EmbedBuilder().setColor(color).setTitle(`${asset.name}｜空間照片 ${index+2}`).setImage(`attachment://${name}`))];
   return {embeds,files};
+}
+function assetAuctionStartPrice(asset) {
+  return Math.max(ASSET_AUCTION_MIN_START_PRICE,Math.ceil((asset.price*2)/ASSET_AUCTION_MIN_INCREMENT)*ASSET_AUCTION_MIN_INCREMENT);
+}
+function activeAssetAuction(g) {
+  return db.prepare("SELECT * FROM asset_auctions WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 1").get(g)||null;
+}
+function assetAuctionById(g,auctionId) {
+  if(!Number.isSafeInteger(auctionId)||auctionId<1) return null;
+  return db.prepare('SELECT * FROM asset_auctions WHERE id=? AND guild_id=?').get(auctionId,g)||null;
+}
+function minimumAssetAuctionBid(auction) {
+  if(!auction.current_bid) return auction.start_price;
+  const increment=Math.max(ASSET_AUCTION_MIN_INCREMENT,Math.ceil((auction.current_bid*ASSET_AUCTION_MIN_INCREMENT_RATE)/ASSET_AUCTION_MIN_INCREMENT)*ASSET_AUCTION_MIN_INCREMENT);
+  return auction.current_bid+increment;
+}
+function settleAssetAuction(auctionId,now=Date.now()) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const auction=db.prepare("SELECT * FROM asset_auctions WHERE id=? AND status='active'").get(auctionId);
+    if(!auction||auction.ends_at>now) {
+      db.exec('COMMIT');
+      return null;
+    }
+    const asset=assetCatalog[auction.asset_id];
+    if(!asset) throw new Error(`拍賣資產不存在：${auction.asset_id}`);
+    if(auction.current_bidder_id&&auction.current_bid>0) {
+      ensureWallet(auction.guild_id,auction.current_bidder_id);
+      addAssetQuantity(auction.guild_id,auction.current_bidder_id,auction.asset_id,1);
+      ensureAssetBuff(auction.guild_id,auction.current_bidder_id,auction.asset_id);
+      const current=balance(auction.guild_id,auction.current_bidder_id);
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+        .run(auction.guild_id,auction.current_bidder_id,0,current,'auction_win',auction.current_bidder_id,`限時資產拍賣得標：${asset.name}｜成交 ${fmt(auction.current_bid)}｜託管金幣直接回收`);
+      db.prepare("UPDATE asset_auctions SET status='completed',winner_id=current_bidder_id,final_price=current_bid,settled_at=? WHERE id=? AND status='active'")
+        .run(now,auction.id);
+    } else {
+      db.prepare("UPDATE asset_auctions SET status='expired',settled_at=? WHERE id=? AND status='active'").run(now,auction.id);
+    }
+    db.exec('COMMIT');
+    return db.prepare('SELECT * FROM asset_auctions WHERE id=?').get(auction.id);
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function createAssetAuction(g,now=Date.now()) {
+  const current=activeAssetAuction(g);
+  if(current) return current;
+  const previous=db.prepare('SELECT asset_id FROM asset_auctions WHERE guild_id=? ORDER BY id DESC LIMIT 1').get(g);
+  const previousIndex=previous?assetAuctionPool.indexOf(previous.asset_id):-1;
+  const assetId=assetAuctionPool[(previousIndex+1+assetAuctionPool.length)%assetAuctionPool.length],asset=assetCatalog[assetId];
+  if(!asset||!asset.image) throw new Error(`拍賣輪替資產缺少資料或圖片：${assetId}`);
+  try {
+    const result=db.prepare('INSERT INTO asset_auctions(guild_id,asset_id,start_price,starts_at,ends_at) VALUES(?,?,?,?,?)')
+      .run(g,assetId,assetAuctionStartPrice(asset),now,now+ASSET_AUCTION_DURATION_MS);
+    return assetAuctionById(g,Number(result.lastInsertRowid));
+  } catch(error) {
+    const concurrent=activeAssetAuction(g);
+    if(concurrent) return concurrent;
+    throw error;
+  }
+}
+function ensureActiveAssetAuction(g,now=Date.now()) {
+  const current=activeAssetAuction(g);
+  if(current&&current.ends_at<=now) settleAssetAuction(current.id,now);
+  return activeAssetAuction(g)||createAssetAuction(g,now);
+}
+function placeAssetAuctionBid(g,u,auctionId,amount,now=Date.now()) {
+  if(!Number.isSafeInteger(amount)||amount<1) throw new Error('出價必須是 JavaScript 安全範圍內的正整數');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const auction=db.prepare("SELECT * FROM asset_auctions WHERE id=? AND guild_id=? AND status='active'").get(auctionId,g);
+    if(!auction) throw new Error('這場拍賣已經結束，請重新整理');
+    if(auction.ends_at<=now) throw new Error('拍賣時間已結束，等待系統結標中');
+    const minimum=minimumAssetAuctionBid(auction);
+    if(amount<minimum) throw new Error(`最低出價為 ${fmt(minimum)}`);
+    const ownLeadingBid=auction.current_bidder_id===u?auction.current_bid:0;
+    const escrowNeeded=amount-ownLeadingBid;
+    if(balance(g,u)<escrowNeeded) throw new Error(`金庫不足，本次還需要託管 ${fmt(escrowNeeded)}`);
+    if(auction.current_bidder_id&&auction.current_bidder_id!==u) {
+      changeBalanceUnlocked(g,auction.current_bidder_id,auction.current_bid,'auction_bid_refund',u,`${assetCatalog[auction.asset_id].name}｜被超標，退回拍賣託管`);
+    }
+    changeBalanceUnlocked(g,u,-escrowNeeded,'auction_bid_escrow',u,`${assetCatalog[auction.asset_id].name}｜限時拍賣出價託管 ${fmt(amount)}`);
+    const extended=auction.ends_at-now<=ASSET_AUCTION_EXTENSION_MS;
+    const endsAt=extended?Math.max(auction.ends_at,now+ASSET_AUCTION_EXTENSION_MS):auction.ends_at;
+    db.prepare('UPDATE asset_auctions SET current_bid=?,current_bidder_id=?,bid_count=bid_count+1,ends_at=? WHERE id=? AND status=\'active\'')
+      .run(amount,u,endsAt,auction.id);
+    db.prepare('INSERT INTO asset_auction_bids(auction_id,guild_id,bidder_id,amount) VALUES(?,?,?,?)').run(auction.id,g,u,amount);
+    db.exec('COMMIT');
+    return {auction:assetAuctionById(g,auction.id),amount,escrowNeeded,extended,next:balance(g,u)};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function assetAuctionEmbed(g,u,auction,notice='') {
+  const asset=assetCatalog[auction.asset_id],minimum=minimumAssetAuctionBid(auction);
+  const current=auction.current_bid>0?`**${fmt(auction.current_bid)}**`:'尚無出價';
+  const leader=auction.current_bidder_id?`<@${auction.current_bidder_id}>`:'尚無領先者';
+  const walletText=u?`\n\n你的金庫：**${fmt(balance(g,u))}**`:'';
+  return new EmbedBuilder().setColor(0xFF6D00).setTitle(`🔥 限時資產拍賣｜${asset.name}`)
+    .setDescription(`${notice?`${notice}\n\n`:''}${asset.description}\n\n稀有度：**${asset.rarity||'一般'}**\n參考價值：**${fmt(asset.price)}**\n起標價：**${fmt(auction.start_price)}**\n目前最高價：${current}\n目前領先：${leader}\n累計出價：**${auction.bid_count} 次**\n最低下一標：**${fmt(minimum)}**\n結束時間：<t:${Math.floor(auction.ends_at/1000)}:F>（<t:${Math.floor(auction.ends_at/1000)}:R>）${walletText}\n\n出價會立即託管；被超標時完整退款。得標款由系統回收，不會進入賭場寶庫。最後 5 分鐘出價會延長 5 分鐘。`)
+    .setFooter({text:'每服同時只有一場系統拍賣｜請只輸入能負擔的安全整數金額'});
+}
+function assetAuctionComponents(token,u,auction) {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`asset_auction_bid:${u}:${auction.id}:${token}`).setLabel(`出價｜最低 ${fmt(minimumAssetAuctionBid(auction))}`).setEmoji('💰').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`asset_auction_refresh:${u}:${token}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`asset_auction_shop:${u}:${token}`).setLabel('返回資產商城').setEmoji('🏛️').setStyle(ButtonStyle.Secondary)
+  )];
+}
+function assetAuctionPayload(g,u,token,notice='') {
+  const auction=ensureActiveAssetAuction(g),asset=assetCatalog[auction.asset_id],embed=assetAuctionEmbed(g,u,auction,notice);
+  return {...assetMediaPayload(embed,auction.asset_id,asset),components:assetAuctionComponents(token,u,auction)};
+}
+let assetAuctionProcessing=false;
+async function processAssetAuctions() {
+  if(assetAuctionProcessing) return;
+  assetAuctionProcessing=true;
+  try {
+    const now=Date.now(),guildIds=new Set([...client.guilds.cache.keys(),...db.prepare('SELECT DISTINCT guild_id FROM asset_auctions').all().map(row=>row.guild_id)]);
+    for(const auction of db.prepare("SELECT id FROM asset_auctions WHERE status='active' AND ends_at<=? ORDER BY ends_at").all(now)) settleAssetAuction(auction.id,now);
+    for(const guildId of guildIds) ensureActiveAssetAuction(guildId,now);
+    const starts=db.prepare("SELECT * FROM asset_auctions WHERE status='active' AND announced_at IS NULL ORDER BY id").all();
+    for(const auction of starts) {
+      try {
+        const channel=await casinoAnnouncementChannel(auction.guild_id);
+        if(!channel) throw new Error('找不到賭場公告頻道');
+        const asset=assetCatalog[auction.asset_id],embed=assetAuctionEmbed(auction.guild_id,null,auction,'🔥 **全新系統拍賣已開始！**');
+        embed.setDescription(`${embed.data.description}\n\n使用 \`/購買資產\`，在分類選擇「限時資產拍賣」即可參加。`);
+        await channel.send({...assetMediaPayload(embed,auction.asset_id,asset),allowedMentions:{parse:[]}});
+        db.prepare('UPDATE asset_auctions SET announced_at=? WHERE id=? AND announced_at IS NULL').run(Date.now(),auction.id);
+      } catch(error) { console.error(`限時資產拍賣開場公告失敗 auction=${auction.id}: ${error.message}`); }
+    }
+    const closed=db.prepare("SELECT * FROM asset_auctions WHERE status IN ('completed','expired') AND closed_announced_at IS NULL ORDER BY id").all();
+    for(const auction of closed) {
+      try {
+        const channel=await casinoAnnouncementChannel(auction.guild_id);
+        if(!channel) throw new Error('找不到賭場公告頻道');
+        const asset=assetCatalog[auction.asset_id],won=auction.status==='completed'&&auction.winner_id;
+        const embed=new EmbedBuilder().setColor(won?0xFFD700:0x607D8B).setTitle(won?'🏆 限時資產拍賣結標':'⌛ 限時資產拍賣流標')
+          .setDescription(won?`得標玩家：<@${auction.winner_id}>\n得標資產：**${asset.name}**\n成交價格：**${fmt(auction.final_price)}**\n\n資產已自動登記，託管金幣已由系統回收。下一場拍賣已經開始。`:`拍賣資產：**${asset.name}**\n本場無人出價，已由系統收回。下一場拍賣已經開始。`)
+          .setTimestamp(new Date(auction.settled_at||Date.now()));
+        await channel.send({...assetMediaPayload(embed,auction.asset_id,asset),allowedMentions:won?{users:[auction.winner_id]}:{parse:[]}});
+        db.prepare('UPDATE asset_auctions SET closed_announced_at=? WHERE id=? AND closed_announced_at IS NULL').run(Date.now(),auction.id);
+      } catch(error) { console.error(`限時資產拍賣結標公告失敗 auction=${auction.id}: ${error.message}`); }
+    }
+  } finally {
+    assetAuctionProcessing=false;
+  }
 }
 function rentalSuiteSelectRow(token,selected=null) {
   const menu=new StringSelectMenuBuilder().setCustomId(`rental_suite_select:${token}`).setPlaceholder('選擇想入住的日租套房').addOptions(
@@ -6029,15 +6286,51 @@ async function handleInteraction(i) {
     const embed=new EmbedBuilder().setColor(hidden?0xFFD700:pack.color).setTitle(asset.name).setDescription(`所屬盲盒：**${pack.name}**\n稀有度：**${asset.rarity}**\n取得機率：**${chance}**\n參考價值：**${fmt(asset.price)}**\n資產增益：**${assetBuffLabel(assetId,asset.buff)}**\n${assetBuffDescription(assetId,asset.buff)}\n\n${asset.description}`);
     return i.update({...assetMediaPayload(embed,assetId,asset),components:[carBlindBoxCatalogRow(packId,assetId)],attachments:[]});
   }
+  if(i.isButton()&&i.customId.startsWith('asset_auction_bid:')&&i.guildId) {
+    const [,ownerId,auctionIdText,token]=i.customId.split(':'),session=assetShopSessions.get(token),auction=assetAuctionById(i.guildId,Number(auctionIdText));
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的資產拍賣面板出價。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId||session.userId!==ownerId) return i.reply({content:'⚠️ 這個拍賣面板已失效，請重新使用 `/購買資產`。',ephemeral:true});
+    if(!auction||auction.status!=='active'||auction.ends_at<=Date.now()) return i.reply({content:'⚠️ 這場拍賣已結束，請按重新整理。',ephemeral:true});
+    const minimum=minimumAssetAuctionBid(auction);
+    const input=new TextInputBuilder().setCustomId('amount').setLabel(`出價金額｜最低 ${fmt(minimum)}`).setPlaceholder(String(minimum)).setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(16).setRequired(true);
+    return i.showModal(new ModalBuilder().setCustomId(`asset_auction_bid_modal:${ownerId}:${auction.id}:${token}`).setTitle('🔥 限時資產拍賣出價').addComponents(new ActionRowBuilder().addComponents(input)));
+  }
+  if(i.isModalSubmit()&&i.customId.startsWith('asset_auction_bid_modal:')&&i.guildId) {
+    const [,ownerId,auctionIdText,token]=i.customId.split(':'),session=assetShopSessions.get(token);
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的資產拍賣面板出價。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId||session.userId!==ownerId) return i.reply({content:'⚠️ 這個拍賣面板已失效，請重新使用 `/購買資產`。',ephemeral:true});
+    const amount=Number(i.fields.getTextInputValue('amount').replace(/[,\s]/g,''));
+    try {
+      const result=placeAssetAuctionBid(i.guildId,ownerId,Number(auctionIdText),amount);
+      const notice=`💰 **出價成功！**\n本次最高出價：**${fmt(result.amount)}**｜新增託管：**${fmt(result.escrowNeeded)}**${result.extended?'\n⏱️ 因最後 5 分鐘出價，結束時間已延長 5 分鐘。':''}`;
+      return i.update({...assetAuctionPayload(i.guildId,ownerId,token,notice),attachments:[]});
+    } catch(error) {
+      return i.reply({content:`⚠️ 出價失敗：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('asset_auction_refresh:')&&i.guildId) {
+    const [,ownerId,token]=i.customId.split(':'),session=assetShopSessions.get(token);
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的資產拍賣面板。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId||session.userId!==ownerId) return i.reply({content:'⚠️ 這個拍賣面板已失效，請重新使用 `/購買資產`。',ephemeral:true});
+    return i.update({...assetAuctionPayload(i.guildId,ownerId,token),attachments:[]});
+  }
+  if(i.isButton()&&i.customId.startsWith('asset_auction_shop:')&&i.guildId) {
+    const [,ownerId,token]=i.customId.split(':'),session=assetShopSessions.get(token);
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的資產拍賣面板。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId||session.userId!==ownerId) return i.reply({content:'⚠️ 這個拍賣面板已失效，請重新使用 `/購買資產`。',ephemeral:true});
+    Object.assign(session,{categoryKey:null,sectionKey:null,page:0,assetId:null});
+    return i.update({embeds:[assetShopOverviewEmbed()],components:assetShopComponents(token),attachments:[],files:[]});
+  }
   if(i.isStringSelectMenu() && i.customId.startsWith('asset_shop_category:') && i.guildId) {
     const token=i.customId.split(':')[1],session=assetShopSessions.get(token),categoryKey=i.values[0];
     if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/購買資產`。',ephemeral:true});
     if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以操作這組選單。',ephemeral:true});
-    if(!assetShopCategories[categoryKey]) return i.reply({content:'⚠️ 找不到這個資產分類。',ephemeral:true});
+    if(categoryKey!=='auction'&&!assetShopCategories[categoryKey]) return i.reply({content:'⚠️ 找不到這個資產分類。',ephemeral:true});
     session.categoryKey=categoryKey;
     session.sectionKey=null;
     session.page=0;
     session.assetId=null;
+    if(categoryKey==='auction') return i.update({...assetAuctionPayload(i.guildId,i.user.id,token),attachments:[]});
     return i.update({embeds:[assetShopOverviewEmbed(categoryKey,0)],components:assetShopComponents(token,categoryKey,0),attachments:[]});
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('asset_shop_armory_section:') && i.guildId) {
@@ -6945,6 +7238,18 @@ async function handleInteraction(i) {
       return i.update({...trainBlindBoxOverviewPayload(i.guildId,ownerId,`🏗️ **列車車庫擴充完成！**\n已支付：**${fmt(result.cost)}**｜目前容量：**${result.capacity}/${TRAIN_GARAGE_MAX_CAPACITY} 格**`),attachments:[]});
     } catch(error) {
       return i.reply({content:`⚠️ 車庫擴充失敗：${error.message}`,ephemeral:true});
+    }
+  }
+  if(i.isButton()&&i.customId.startsWith('enterprise_upgrade:')&&i.guildId) {
+    const [,ownerId,businessType]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有企業擁有者可以進行升級。',ephemeral:true});
+    try {
+      const result=upgradeEnterprise(i.guildId,ownerId,businessType);
+      const notice=`🏢 **企業升級完成！**\n已支付：**${fmt(result.cost)}**｜目前等級：**Lv.${result.level}**｜營收加成：**+${Math.round((result.multiplier-1)*100)}%**\n目前金庫：**${fmt(result.next)}**`;
+      if(businessType==='airline') return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId),attachments:[]});
+      return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,notice)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType),attachments:[]});
+    } catch(error) {
+      return i.reply({content:`⚠️ 企業升級失敗：${error.message}`,ephemeral:true});
     }
   }
   if(i.isButton()&&i.customId.startsWith('airline_register:')&&i.guildId) {
@@ -8616,6 +8921,7 @@ client.once('clientReady',()=>{
   setInterval(notifyPendingAllInHeroUnlocks,60000);
   setInterval(()=>notifyPendingCasinoAllIns().catch(error=>console.error(`待補發歐印警報失敗：${error.message}`)),60000);
   setInterval(expireWebJengaGames,60000);
+  setInterval(()=>processAssetAuctions().catch(error=>console.error(`限時資產拍賣排程失敗：${error.message}`)),60000);
   announceTomorrowBank();
   announceSundayCasinoVault();
   notifyCompletedAirlineFlights();
@@ -8623,6 +8929,7 @@ client.once('clientReady',()=>{
   notifyPendingAllInHeroUnlocks();
   notifyPendingCasinoAllIns().catch(error=>console.error(`啟動補發歐印警報失敗：${error.message}`));
   expireWebJengaGames();
+  processAssetAuctions().catch(error=>console.error(`啟動限時資產拍賣失敗：${error.message}`));
 });
 function activitySignature(value) {
   return createHmac('sha256',ACTIVITY_SIGNING_SECRET).update(value).digest('base64url');

@@ -229,6 +229,77 @@ test('航空航線基礎營收下修 25% 且不影響其他交通事業',()=>{
   assert.match(groundBlock,/freight_city_distribution:\{[^\n]+baseRevenue:120000/);
 });
 
+test('四種交通企業可升至 10 級並只影響新營運收益',()=>{
+  const costsSource=source.match(/const ENTERPRISE_UPGRADE_COSTS=(\{[^\n]+\});/)?.[1];
+  assert.ok(costsSource,'缺少企業升級費用表');
+  const costs=new Function(`return ${costsSource}`)();
+  assert.equal(Object.values(costs).reduce((sum,value)=>sum+value,0),478_500_000);
+  assert.equal(costs[2],1_000_000);
+  assert.equal(costs[10],200_000_000);
+  assert.match(source,/const ENTERPRISE_MAX_LEVEL=10/);
+  assert.match(source,/const ENTERPRISE_REVENUE_BONUS_PER_LEVEL=0\.04/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS airline_companies[\s\S]+?company_level INTEGER NOT NULL DEFAULT 1/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_business_companies[\s\S]+?company_level INTEGER NOT NULL DEFAULT 1/);
+  assert.match(source,/ALTER TABLE airline_companies ADD COLUMN company_level INTEGER NOT NULL DEFAULT 1/);
+  assert.match(source,/ALTER TABLE transport_business_companies ADD COLUMN company_level INTEGER NOT NULL DEFAULT 1/);
+  const upgradeBlock=source.match(/function upgradeEnterprise\([\s\S]+?\n\}/)?.[0]||'';
+  assert.match(upgradeBlock,/BEGIN IMMEDIATE/);
+  assert.match(upgradeBlock,/'enterprise_upgrade'/);
+  assert.match(upgradeBlock,/COMMIT/);
+  assert.match(source,/route\.baseRevenue\*airport\.airlineMultiplier\*airlinerRevenueMultiplier\(company\.aircraft_id\)\*enterpriseRevenueMultiplier\(company\)\*demandMultiplier/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*enterpriseRevenueMultiplier\(company\)\*demandMultiplier/);
+  assert.match(source,/enterprise_upgrade:\$\{u\}:airline/);
+  assert.match(source,/setCustomId\(`enterprise_upgrade:\$\{u\}:\$\{businessType\}`\)/);
+  assert.match(source,/INSERT INTO airline_flights\([^\n]+gross_revenue/,'航空收益必須在起飛時保存');
+  assert.match(source,/INSERT INTO transport_business_operations\([^\n]+gross_revenue/,'陸路收益必須在出發時保存');
+});
+
+test('限時資產拍賣使用安全託管、退款、延時與自動結標',()=>{
+  assert.match(source,/CREATE TABLE IF NOT EXISTS asset_auctions/);
+  assert.match(source,/CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_auctions_active_guild[\s\S]+?WHERE status='active'/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS asset_auction_bids/);
+  assert.match(source,/const ASSET_AUCTION_DURATION_MS=12\*60\*60\*1000/);
+  assert.match(source,/const ASSET_AUCTION_EXTENSION_MS=5\*60\*1000/);
+  assert.match(source,/const ASSET_AUCTION_MIN_INCREMENT_RATE=0\.05/);
+  assert.match(source,/const ASSET_AUCTION_MIN_START_PRICE=5000000/);
+  assert.match(source,/const assetAuctionPool=\[[\s\S]+?'mystery_huayra'[\s\S]+?'ford_mustang_1964_hidden'[\s\S]+?'blind_totoro_catbus'/);
+
+  const startPriceBlock=source.match(/function assetAuctionStartPrice\(asset\) \{[\s\S]+?\n\}/)?.[0]||'';
+  const minimumBidBlock=source.match(/function minimumAssetAuctionBid\(auction\) \{[\s\S]+?\n\}/)?.[0]||'';
+  const auctionMath=new Function(`const ASSET_AUCTION_MIN_START_PRICE=5000000,ASSET_AUCTION_MIN_INCREMENT=100000,ASSET_AUCTION_MIN_INCREMENT_RATE=0.05;${startPriceBlock};${minimumBidBlock};return {assetAuctionStartPrice,minimumAssetAuctionBid};`)();
+  assert.equal(auctionMath.assetAuctionStartPrice({price:900_000}),5_000_000);
+  assert.equal(auctionMath.assetAuctionStartPrice({price:5_500_000}),11_000_000);
+  assert.equal(auctionMath.minimumAssetAuctionBid({start_price:5_000_000,current_bid:0}),5_000_000);
+  assert.equal(auctionMath.minimumAssetAuctionBid({start_price:5_000_000,current_bid:10_000_000}),10_500_000);
+
+  const bidBlock=source.match(/function placeAssetAuctionBid\([\s\S]+?\n\}/)?.[0]||'';
+  assert.match(bidBlock,/Number\.isSafeInteger\(amount\).*amount<1/);
+  assert.match(bidBlock,/BEGIN IMMEDIATE/);
+  assert.match(bidBlock,/'auction_bid_refund'/);
+  assert.match(bidBlock,/'auction_bid_escrow'/);
+  assert.match(bidBlock,/auction\.ends_at-now<=ASSET_AUCTION_EXTENSION_MS/);
+  assert.match(bidBlock,/COMMIT/);
+  const trigger=source.match(/CREATE TRIGGER ledger_collect_casino_vault[\s\S]+?END;/)?.[0]||'';
+  assert.match(trigger,/'enterprise_upgrade','auction_bid_escrow'/,'升級費與拍賣託管不可流入賭場寶庫');
+  assert.match(source,/ECONOMY_TRANSFER_KINDS=new Set\([^\n]+auction_bid_escrow[^\n]+auction_bid_refund/,'可退款託管不可誤算成產生或銷毀');
+  assert.match(source,/SUM\(final_price\)[^\n]+asset_auctions[^\n]+status='completed'/,'經濟監控需按成交價計算真正回收');
+  assert.match(source,/setInterval\(\(\)=>processAssetAuctions\(\)\.catch/);
+  assert.match(source,/label:'限時資產拍賣',value:'auction'/);
+  assert.match(source,/asset_auction_bid_modal:/);
+  assert.doesNotMatch(source,/setName\('資產拍賣'\)/,'拍賣應整合既有資產入口，不新增斜線指令');
+});
+
+test('企業升級與限時拍賣公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-enterprise-upgrades-asset-auctions.json',import.meta.url),'utf8'));
+  assert.equal(update.version,'2026.08.01.9');
+  assert.match(update.summary,/企業升級/);
+  assert.match(update.summary,/限時資產拍賣/);
+  assert.ok(update.changes.some(change=>change.includes('478,500,000')));
+  assert.ok(update.changes.some(change=>change.includes('託管')&&change.includes('退款')));
+  assert.ok(update.changes.some(change=>change.includes('最後 5 分鐘')&&change.includes('延長')));
+  assert.deepEqual(update.channelNames,['賭場公告']);
+});
+
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
   const block=source.match(/async function publishLatestHeistResult\(interaction,payload\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少搶劫最終結果發布函式');
