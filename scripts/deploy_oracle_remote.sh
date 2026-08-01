@@ -23,7 +23,7 @@ BACKUP_DIR="/home/ubuntu/release-backups/$SHORT_COMMIT"
 
 is_deploy_path() {
   case "$1" in
-    .dockerignore|Dockerfile|docker-compose.yml|package.json|package-lock.json|CHANGELOG.md) return 0 ;;
+    .dockerignore|.gitattributes|Dockerfile|docker-compose.yml|package.json|package-lock.json|CHANGELOG.md) return 0 ;;
     src/*|assets/*|activity/public/*|scripts/*|updates/*|tests/*) return 0 ;;
     *) return 1 ;;
   esac

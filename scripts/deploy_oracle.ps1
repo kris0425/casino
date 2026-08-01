@@ -45,7 +45,7 @@ function Write-LfFile([string]$Path,[string[]]$Lines) {
 
 function Test-DeployPath([string]$Path) {
   $Path = Normalize-RepoPath $Path
-  $rootFiles = @('.dockerignore','Dockerfile','docker-compose.yml','package.json','package-lock.json','CHANGELOG.md')
+  $rootFiles = @('.dockerignore','.gitattributes','Dockerfile','docker-compose.yml','package.json','package-lock.json','CHANGELOG.md')
   if($rootFiles -contains $Path) { return $true }
   foreach($prefix in @('src/','assets/','activity/public/','scripts/','updates/','tests/')) {
     if($Path.StartsWith($prefix,[StringComparison]::Ordinal)) { return $true }
@@ -197,6 +197,8 @@ try {
   Assert-ExitCode 'upload deletion manifest'
   & ssh.exe @SshArgs "tar -xf $RemoteStage/changes.tar -C $RemoteStage/source"
   Assert-ExitCode 'extract Oracle deployment archive'
+  & ssh.exe @SshArgs "sed -i 's/\r$//' $RemoteStage/source/scripts/deploy_oracle_remote.sh"
+  Assert-ExitCode 'normalize remote deployment script line endings'
 
   if($UpdateFile) { $UpdateArgument = $UpdateFile } else { $UpdateArgument = '-' }
   Write-Step 'Backing up, building, testing, restarting and verifying Oracle'

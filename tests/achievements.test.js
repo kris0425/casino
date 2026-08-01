@@ -576,6 +576,7 @@ test('Oracle 一鍵部署腳本具備增量、備份、測試與安全清理',()
   assert.match(local,/node\.exe --check src\/index\.js/);
   assert.match(local,/npm\.cmd test/);
   assert.match(local,/git push origin HEAD:main/);
+  assert.match(local,/sed -i 's\/\\r\$\/\/'.*deploy_oracle_remote\.sh/);
   assert.match(local,/Copy-Item -LiteralPath \$SshKey -Destination \$TempKey/);
   assert.match(local,/Remove-Item -LiteralPath \$ResolvedTemp -Recurse -Force/);
   assert.doesNotMatch(local,/BEGIN (?:OPENSSH|RSA|EC) PRIVATE KEY/);
