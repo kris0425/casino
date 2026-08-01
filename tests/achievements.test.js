@@ -408,6 +408,31 @@ test('火車站配給基礎列車並支援最多 20 格車庫',()=>{
   assert.match(source,/火車站必須至少持有一輛列車才能發車/);
   assert.match(source,/系統配給.*不占車庫/s);
   assert.match(source,/train_garage_upgrade:\$\{ownerId\}/);
+  const grantBlock=source.match(/function ensureStarterTrain\(g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.ok(grantBlock,'缺少基礎列車配給函式');
+  assert.doesNotMatch(grantBlock,/db\.transaction\(/,'Node DatabaseSync 不支援 db.transaction()');
+  assert.match(grantBlock,/db\.exec\('BEGIN IMMEDIATE'\)/);
+  assert.match(grantBlock,/db\.exec\('COMMIT'\)/);
+  assert.match(grantBlock,/db\.exec\('ROLLBACK'\)/);
+
+  const db=new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE ledger (
+    guild_id TEXT, user_id TEXT, delta INTEGER, balance_after INTEGER,
+    kind TEXT, actor_id TEXT, reason TEXT
+  )`);
+  let quantity=0,buffCount=0;
+  const grantStarterTrain=new Function(
+    'db','ownsRailStation','assetQuantity','ensureWallet','addAssetQuantity','ensureAssetBuff','balance',
+    'TRAIN_STARTER_ASSET_ID','assetCatalog',`${grantBlock}; return ensureStarterTrain;`
+  )(
+    db,()=>true,()=>quantity,()=>{},(_g,_u,_id,amount)=>{quantity+=amount;},()=>{buffCount+=1;},()=>123456,
+    'train_starter_service_commuter',{train_starter_service_commuter:{name:'銀灣基礎通勤列車'}}
+  );
+  assert.equal(grantStarterTrain('guild','player'),true,'首次應成功配給');
+  assert.equal(grantStarterTrain('guild','player'),false,'再次呼叫不得重複配給');
+  assert.equal(quantity,1);
+  assert.equal(buffCount,1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ledger').get().count,1);
 });
 
 test('搶劫備援與貨運站圖片修復公告完整',()=>{
@@ -478,6 +503,15 @@ test('萌犬豪華客機與闖空門平衡公告完整',()=>{
   assert.match(update.summary,/萌犬豪華客機/);
   assert.match(update.changes.join('\n'),/15%～30%/);
   assert.match(update.changes.join('\n'),/賭場公告/);
+});
+
+test('交通事業基礎列車交易錯誤修正公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-starter-train-transaction-fix.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-01-starter-train-transaction-fix');
+  assert.equal(update.version,'2026.08.01.4');
+  assert.match(update.summary,/db\.transaction is not a function/);
+  assert.match(update.changes.join('\n'),/BEGIN IMMEDIATE.*COMMIT.*ROLLBACK/s);
+  assert.match(update.changes.join('\n'),/既有.*不會重複/s);
 });
 
 test('13 款機車資產已全面換用新版圖片',()=>{

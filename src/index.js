@@ -1565,14 +1565,22 @@ function ensureStarterTrain(g,u) {
   if(!ownsRailStation(g,u)) return false;
   if(assetQuantity(g,u,TRAIN_STARTER_ASSET_ID)>0) return false;
   ensureWallet(g,u);
-  db.transaction(()=>{
-    if(assetQuantity(g,u,TRAIN_STARTER_ASSET_ID)>0) return;
-    addAssetQuantity(g,u,TRAIN_STARTER_ASSET_ID,1);
-    ensureAssetBuff(g,u,TRAIN_STARTER_ASSET_ID,'transport');
-    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
-      .run(g,u,0,balance(g,u),'asset_prize',u,`火車站業主系統配給：${assetCatalog[TRAIN_STARTER_ASSET_ID].name}`);
-  })();
-  return true;
+  let granted=false;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if(assetQuantity(g,u,TRAIN_STARTER_ASSET_ID)<1) {
+      addAssetQuantity(g,u,TRAIN_STARTER_ASSET_ID,1);
+      ensureAssetBuff(g,u,TRAIN_STARTER_ASSET_ID,'transport');
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+        .run(g,u,0,balance(g,u),'asset_prize',u,`火車站業主系統配給：${assetCatalog[TRAIN_STARTER_ASSET_ID].name}`);
+      granted=true;
+    }
+    db.exec('COMMIT');
+    return granted;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 function ownedBlindBoxTrainRows(g,u) {
   return assetsOf(g,u).filter(row=>trainBlindBoxIds.includes(row.asset_id));
