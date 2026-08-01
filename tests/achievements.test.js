@@ -563,6 +563,40 @@ test('交通事業公開面板更新公告完整',()=>{
   assert.match(update.changes.join('\n'),/事業擁有者/);
 });
 
+test('Oracle 一鍵部署腳本具備增量、備份、測試與安全清理',()=>{
+  const local=readFileSync(new URL('../scripts/deploy_oracle.ps1',import.meta.url),'utf8');
+  const remote=readFileSync(new URL('../scripts/deploy_oracle_remote.sh',import.meta.url),'utf8');
+  const backup=readFileSync(new URL('../scripts/backup_sqlite.mjs',import.meta.url),'utf8');
+  assert.match(local,/git diff --name-status --find-renames/);
+  assert.match(local,/\.deployed_commit/);
+  assert.match(local,/tar\.exe -cf \$BundlePath .* -T \$CopyListPath/);
+  assert.match(local,/deployment files have uncommitted changes/);
+  assert.match(local,/git ls-files --others --exclude-standard/);
+  assert.match(local,/git cat-file -e "\$\{HeadCommit\}:\$relative"/);
+  assert.match(local,/node\.exe --check src\/index\.js/);
+  assert.match(local,/npm\.cmd test/);
+  assert.match(local,/git push origin HEAD:main/);
+  assert.match(local,/Copy-Item -LiteralPath \$SshKey -Destination \$TempKey/);
+  assert.match(local,/Remove-Item -LiteralPath \$ResolvedTemp -Recurse -Force/);
+  assert.doesNotMatch(local,/BEGIN (?:OPENSSH|RSA|EC) PRIVATE KEY/);
+
+  assert.match(remote,/VACUUM INTO|backup_sqlite\.mjs/);
+  assert.match(remote,/discord-casino-backup:pre-\$SHORT_COMMIT/);
+  assert.match(remote,/DOCKER_BUILDKIT=1 docker compose build/);
+  assert.match(remote,/docker run --rm .* npm test/s);
+  assert.match(remote,/COMMAND_BUILD_ONLY=1/);
+  assert.match(remote,/docker compose up -d --no-deps/);
+  assert.match(remote,/grep -Fq '已登入：'/);
+  assert.match(remote,/running_image.*expected_image/s);
+  assert.match(remote,/publish_update\.js/);
+  assert.match(remote,/refusing non-deploy deletion/);
+  assert.match(remote,/ORACLE_DEPLOY_OK/);
+
+  assert.match(backup,/new DatabaseSync\(source\)/);
+  assert.match(backup,/PRAGMA integrity_check/);
+  assert.match(backup,/BACKUP_OK/);
+});
+
 test('13 款機車資產已全面換用新版圖片',()=>{
   const motorcycleIds=[
     'purple_street_scooter','orange_dirtbike','blue_naked','bosozoku','wasteland_raider',
