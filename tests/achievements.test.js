@@ -404,3 +404,31 @@ test('列車盲盒更新公告包含售價、十抽與營收規則',()=>{
   assert.match(update.changes.join('\n'),/傳說/);
   assert.match(update.changes.join('\n'),/最高.*營收加成/s);
 });
+
+test('13 款機車資產已全面換用新版圖片',()=>{
+  const motorcycleIds=[
+    'purple_street_scooter','orange_dirtbike','blue_naked','bosozoku','wasteland_raider',
+    'electric_scooter','red_touring','purple_chopper','red_falcon','silver_cruiser',
+    'platinum_tourer','neon_nuclear','shadow_hoverbike'
+  ];
+  assert.equal(motorcycleIds.length,13);
+  for(const assetId of motorcycleIds) {
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(assetBlock,/category:'機車'/,`${assetId} 不是機車資產`);
+    const image=assetBlock.match(/image:'([^']+)'/)?.[1];
+    assert.equal(image,`motorcycles/${assetId}.png`,`${assetId} 圖片路徑不正確`);
+    const file=readFileSync(new URL(`../assets/${image}`,import.meta.url));
+    assert.equal(file.subarray(1,4).toString(),'PNG',`${image} 不是有效 PNG`);
+    const width=file.readUInt32BE(16),height=file.readUInt32BE(20);
+    assert.ok(width>=1500&&height>=900&&width>height,`${image} 解析度或方向不符合新版規格：${width}x${height}`);
+  }
+});
+
+test('機車資產美術重製公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-motorcycle-art-redesign.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-01-motorcycle-art-redesign');
+  assert.equal(update.version,'2026.08.01.1');
+  assert.match(update.summary,/13 款機車/);
+  assert.match(update.changes.join('\n'),/永久移除/);
+  assert.match(update.changes.join('\n'),/價格、稀有度.*持有資料/s);
+});
