@@ -246,12 +246,67 @@ test('四種交通企業可升至 10 級並只影響新營運收益',()=>{
   assert.match(upgradeBlock,/BEGIN IMMEDIATE/);
   assert.match(upgradeBlock,/'enterprise_upgrade'/);
   assert.match(upgradeBlock,/COMMIT/);
-  assert.match(source,/route\.baseRevenue\*airport\.airlineMultiplier\*airlinerRevenueMultiplier\(company\.aircraft_id\)\*enterpriseRevenueMultiplier\(company\)\*demandMultiplier/);
-  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*enterpriseRevenueMultiplier\(company\)\*demandMultiplier/);
+  assert.match(source,/route\.baseRevenue\*airport\.airlineMultiplier\*airlinerRevenueMultiplier\(company\.aircraft_id\)\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
   assert.match(source,/enterprise_upgrade:\$\{u\}:airline/);
   assert.match(source,/setCustomId\(`enterprise_upgrade:\$\{u\}:\$\{businessType\}`\)/);
   assert.match(source,/INSERT INTO airline_flights\([^\n]+gross_revenue/,'航空收益必須在起飛時保存');
   assert.match(source,/INSERT INTO transport_business_operations\([^\n]+gross_revenue/,'陸路收益必須在出發時保存');
+});
+
+test('交通維修保險牌照、每日遞減及高額賭局抽成完整',()=>{
+  assert.match(source,/const TRANSPORT_LICENSE_TERM_MS=7\*24\*60\*60\*1000/);
+  assert.match(source,/const TRANSPORT_DAILY_FULL_REVENUE_RUNS=3/);
+  assert.match(source,/const TRANSPORT_DAILY_REVENUE_STEP=0\.05/);
+  assert.match(source,/const TRANSPORT_DAILY_MIN_REVENUE_MULTIPLIER=0\.50/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_daily_operations/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS airline_companies[\s\S]+?upkeep_day TEXT[\s\S]+?license_expires_at INTEGER/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_business_companies[\s\S]+?upkeep_day TEXT[\s\S]+?license_expires_at INTEGER/);
+  assert.match(source,/ALTER TABLE airline_companies ADD COLUMN upkeep_day TEXT/);
+  assert.match(source,/ALTER TABLE airline_companies ADD COLUMN license_expires_at INTEGER/);
+  assert.match(source,/ALTER TABLE transport_business_companies ADD COLUMN upkeep_day TEXT/);
+  assert.match(source,/ALTER TABLE transport_business_companies ADD COLUMN license_expires_at INTEGER/);
+
+  const diminishingBlock=source.match(/function transportDailyRevenueMultiplier\(completedToday\) \{[\s\S]+?\n\}/)?.[0]||'';
+  const diminishing=new Function('TRANSPORT_DAILY_FULL_REVENUE_RUNS','TRANSPORT_DAILY_REVENUE_STEP','TRANSPORT_DAILY_MIN_REVENUE_MULTIPLIER',`${diminishingBlock};return transportDailyRevenueMultiplier;`)(3,0.05,0.50);
+  assert.equal(diminishing(0),1);
+  assert.equal(diminishing(2),1);
+  assert.equal(diminishing(3),0.95);
+  assert.equal(diminishing(12),0.50);
+
+  const airlineStart=source.match(/function startAirlineFlight\([\s\S]+?\n\}/)?.[0]||'';
+  const groundStart=source.match(/function startTransportBusinessOperation\([\s\S]+?\n\}/)?.[0]||'';
+  for(const block of [airlineStart,groundStart]) {
+    assert.match(block,/settleTransportUpkeepUnlocked/);
+    assert.match(block,/recordTransportDailyOperationUnlocked/);
+    assert.match(block,/requiredFunds=route\.operatingCost\+upkeepQuote\.totalDue/);
+  }
+  const trigger=source.match(/CREATE TRIGGER ledger_collect_casino_vault[\s\S]+?END;/)?.[0]||'';
+  assert.match(trigger,/'transport_maintenance','transport_insurance','transport_license'/,'交通維持費應永久回收，不流入賭場寶庫');
+
+  assert.match(source,/\{minimum:100_000_000,rate:0\.03\}[\s\S]+\{minimum:10_000_000,rate:0\.02\}[\s\S]+\{minimum:1_000_000,rate:0\.01\}/);
+  const rateBlock=source.match(/function highStakeRakeRate\(bet\) \{[\s\S]+?\n\}/)?.[0]||'';
+  const rate=new Function('HIGH_STAKE_RAKE_TIERS',`${rateBlock};return highStakeRakeRate;`)([
+    {minimum:100_000_000,rate:0.03},{minimum:10_000_000,rate:0.02},{minimum:1_000_000,rate:0.01}
+  ]);
+  assert.equal(rate(999_999),0);
+  assert.equal(rate(1_000_000),0.01);
+  assert.equal(rate(10_000_000),0.02);
+  assert.equal(rate(100_000_000),0.03);
+  const payoutBlock=source.match(/function settleGamePayout\([\s\S]+?\n\}/)?.[0]||'';
+  assert.match(payoutBlock,/grossProfit-rake\.amount/,'一般賭局只應從獲利扣抽成');
+  assert.match(payoutBlock,/collectHighStakeRake/);
+  assert.match(source,/creditPvpPrize\(session\.guildId,ranking\[0\]\.id/);
+  assert.match(source,/creditPvpPrize\(session\.guildId,winnerId,session\.bet/);
+  assert.match(source,/creditPvpPrize\(i\.guildId,otherId,duel\.bet/);
+
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-transport-upkeep-diminishing-rake.json',import.meta.url),'utf8'));
+  assert.equal(update.version,'2026.08.01.10');
+  assert.match(update.summary,/維修、保險與牌照續期/);
+  assert.match(update.summary,/1%～3%/);
+  assert.ok(update.changes.some(change=>change.includes('前 3 趟')&&change.includes('最低 50%')));
+  assert.ok(update.changes.some(change=>change.includes('1,000,000')&&change.includes('100,000,000')));
+  assert.deepEqual(update.channelNames,['賭場公告']);
 });
 
 test('限時資產拍賣使用安全託管、退款、延時與自動結標',()=>{

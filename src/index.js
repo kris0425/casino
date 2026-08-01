@@ -59,6 +59,9 @@ const ECONOMY_SINK_LABELS={
   airline_slot:'航空公司額外機位',
   transport_registration:'交通公司行號註冊費',
   transport_operation:'交通事業營運成本',
+  transport_maintenance:'交通事業維修費',
+  transport_insurance:'交通事業保險費',
+  transport_license:'交通公司牌照續期',
   enterprise_upgrade:'交通企業升級',
   auction_payment:'限時資產拍賣得標款',
   train_blind_box:'列車盲盒',
@@ -210,6 +213,40 @@ function dealerReaction(playerWon) {
   ];
   return reactions[Math.floor(Math.random()*reactions.length)];
 }
+function highStakeRakeRate(bet) {
+  if(!Number.isSafeInteger(bet)||bet<1) return 0;
+  return HIGH_STAKE_RAKE_TIERS.find(tier=>bet>=tier.minimum)?.rate||0;
+}
+function highStakeRakeAmount(bet,grossProfit) {
+  const rate=highStakeRakeRate(bet);
+  return {rate,amount:rate>0?Math.max(0,Math.floor(grossProfit*rate)):0};
+}
+function collectHighStakeRake(g,u,bet,grossProfit,game,{unlocked=false}={}) {
+  const rake=highStakeRakeAmount(bet,grossProfit);
+  if(rake.amount>0) {
+    const changeVault=unlocked?changeCasinoVaultUnlocked:changeCasinoVault;
+    changeVault(g,rake.amount,'high_stake_rake',u,`${game}｜高額賭局獲利抽成 ${Math.round(rake.rate*100)}%`);
+  }
+  return rake;
+}
+function creditPvpPrize(g,u,bet,grossPayout,kind,actor,reason,{unlocked=false}={}) {
+  if(!unlocked) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const result=creditPvpPrize(g,u,bet,grossPayout,kind,actor,reason,{unlocked:true});
+      db.exec('COMMIT');
+      return result;
+    } catch(error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  const grossProfit=Math.max(0,grossPayout-bet),rake=highStakeRakeAmount(bet,grossProfit);
+  const netPayout=Math.max(0,grossPayout-rake.amount);
+  const before=balance(g,u),after=changeBalanceUnlocked(g,u,netPayout,kind,actor,reason);
+  if(rake.amount>0) collectHighStakeRake(g,u,bet,grossProfit,reason,{unlocked:true});
+  return {credited:after-before,grossPayout,netPayout,rake:rake.amount,rakeRate:rake.rate};
+}
 function settleGamePayout(g,u,bet,payout,game,{balanceChanger=changeBalance,allIn=false}={}) {
   const allInProgress=allIn?recordCasinoAllIn(g,u,game,bet):null;
   let titleMultiplier=1,titleInitialMultiplier=1,titleActive=false,titleSkillTriggered=false,titleId='';
@@ -233,14 +270,16 @@ function settleGamePayout(g,u,bet,payout,game,{balanceChanger=changeBalance,allI
     const regularMultiplier=game==='麻將'?1:weeklyCasinoMultiplier()*assetCasinoBonus(g,u)*(1+petBonus(g,u,'casino'));
     payout=Math.floor(payout*regularMultiplier*titleMultiplier);
   }
-  if(!payout) return {credited:0,dog:false,titleMultiplier,titleInitialMultiplier,titleActive,titleSkillTriggered,titleId,allInProgress};
+  if(!payout) return {credited:0,dog:false,rake:0,rakeRate:0,titleMultiplier,titleInitialMultiplier,titleActive,titleSkillTriggered,titleId,allInProgress};
   const dog=payout>bet && Math.random()<0.10;
   const amount=dog?bet:payout;
   // The wager was removed before the game started. Record the returned stake
   // separately from profit so economy reports do not count it as newly minted
   // income.
   const principal=Math.min(Math.max(0,bet),amount);
-  const profit=Math.max(0,amount-principal);
+  const grossProfit=Math.max(0,amount-principal);
+  const rake=highStakeRakeAmount(bet,grossProfit);
+  const profit=Math.max(0,grossProfit-rake.amount);
   let credited=0;
   if(principal>0) {
     const before=balance(g,u);
@@ -250,7 +289,8 @@ function settleGamePayout(g,u,bet,payout,game,{balanceChanger=changeBalance,allI
     const before=balance(g,u);
     credited+=balanceChanger(g,u,profit,'payout',u,dog?`${game}：博美犬叼走本局獲利`:game)-before;
   }
-  return {credited,dog,stolen:dog?payout-bet:0,principal,profitCredited:Math.max(0,credited-principal),titleMultiplier,titleInitialMultiplier,titleActive,titleSkillTriggered,titleId,allInProgress};
+  if(rake.amount>0) collectHighStakeRake(g,u,bet,grossProfit,game,{unlocked:balanceChanger===changeBalanceUnlocked});
+  return {credited,dog,stolen:dog?payout-bet:0,principal,grossProfit,rake:rake.amount,rakeRate:rake.rate,profitCredited:Math.max(0,credited-principal),titleMultiplier,titleInitialMultiplier,titleActive,titleSkillTriggered,titleId,allInProgress};
 }
 const dogChases=new Map();
 const scratchTickets=new Map();
@@ -639,6 +679,8 @@ db.exec(`
     route_id TEXT,
     flight_slots INTEGER NOT NULL DEFAULT 1,
     company_level INTEGER NOT NULL DEFAULT 1,
+    upkeep_day TEXT,
+    license_expires_at INTEGER,
     registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id,user_id)
@@ -694,6 +736,8 @@ db.exec(`
     station_id TEXT,
     route_id TEXT,
     company_level INTEGER NOT NULL DEFAULT 1,
+    upkeep_day TEXT,
+    license_expires_at INTEGER,
     registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id,user_id,business_type)
@@ -715,6 +759,15 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_transport_business_operations_completion
     ON transport_business_operations(completes_at,dm_notified_at,channel_notified_at);
+  CREATE TABLE IF NOT EXISTS transport_daily_operations (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    business_type TEXT NOT NULL CHECK (business_type IN ('airline','rail','coach','freight')),
+    operation_day TEXT NOT NULL,
+    operation_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id,business_type,operation_day)
+  );
   CREATE TABLE IF NOT EXISTS train_garages (
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
@@ -788,7 +841,8 @@ db.exec(`
   WHEN NEW.delta < 0 AND NEW.kind NOT IN (
     'asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return',
     'admin_adjust','bank_deposit','bank_withdraw','loan_repayment','casino_vault_heist',
-    'player_transfer','transfer_mizi_theft','enterprise_upgrade','auction_bid_escrow'
+    'player_transfer','transfer_mizi_theft','enterprise_upgrade','auction_bid_escrow',
+    'transport_maintenance','transport_insurance','transport_license'
   )
   BEGIN
     INSERT INTO casino_vault(guild_id,balance) VALUES(NEW.guild_id,ABS(NEW.delta))
@@ -817,8 +871,20 @@ if(!db.prepare('PRAGMA table_info(airline_companies)').all().some(column=>column
 if(!db.prepare('PRAGMA table_info(airline_companies)').all().some(column=>column.name==='company_level')) {
   db.exec('ALTER TABLE airline_companies ADD COLUMN company_level INTEGER NOT NULL DEFAULT 1');
 }
+if(!db.prepare('PRAGMA table_info(airline_companies)').all().some(column=>column.name==='upkeep_day')) {
+  db.exec('ALTER TABLE airline_companies ADD COLUMN upkeep_day TEXT');
+}
+if(!db.prepare('PRAGMA table_info(airline_companies)').all().some(column=>column.name==='license_expires_at')) {
+  db.exec('ALTER TABLE airline_companies ADD COLUMN license_expires_at INTEGER');
+}
 if(!db.prepare('PRAGMA table_info(transport_business_companies)').all().some(column=>column.name==='company_level')) {
   db.exec('ALTER TABLE transport_business_companies ADD COLUMN company_level INTEGER NOT NULL DEFAULT 1');
+}
+if(!db.prepare('PRAGMA table_info(transport_business_companies)').all().some(column=>column.name==='upkeep_day')) {
+  db.exec('ALTER TABLE transport_business_companies ADD COLUMN upkeep_day TEXT');
+}
+if(!db.prepare('PRAGMA table_info(transport_business_companies)').all().some(column=>column.name==='license_expires_at')) {
+  db.exec('ALTER TABLE transport_business_companies ADD COLUMN license_expires_at INTEGER');
 }
 if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='dm_notified_at')) {
   db.exec('ALTER TABLE airline_flights ADD COLUMN dm_notified_at INTEGER');
@@ -1565,6 +1631,15 @@ const AIRLINE_SLOT_COSTS={2:1000000,3:2500000,4:5000000,5:10000000};
 const ENTERPRISE_MAX_LEVEL=10;
 const ENTERPRISE_REVENUE_BONUS_PER_LEVEL=0.04;
 const ENTERPRISE_UPGRADE_COSTS={2:1000000,3:2500000,4:5000000,5:10000000,6:20000000,7:40000000,8:75000000,9:125000000,10:200000000};
+const TRANSPORT_LICENSE_TERM_MS=7*24*60*60*1000;
+const TRANSPORT_DAILY_FULL_REVENUE_RUNS=3;
+const TRANSPORT_DAILY_REVENUE_STEP=0.05;
+const TRANSPORT_DAILY_MIN_REVENUE_MULTIPLIER=0.50;
+const HIGH_STAKE_RAKE_TIERS=[
+  {minimum:100_000_000,rate:0.03},
+  {minimum:10_000_000,rate:0.02},
+  {minimum:1_000_000,rate:0.01}
+];
 const ASSET_AUCTION_DURATION_MS=12*60*60*1000;
 const ASSET_AUCTION_EXTENSION_MS=5*60*1000;
 const ASSET_AUCTION_MIN_INCREMENT=100000;
@@ -1916,6 +1991,97 @@ function upgradeEnterprise(g,u,businessType) {
     throw error;
   }
 }
+function transportOperationDay() {
+  return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+}
+function transportDailyOperationCount(g,u,businessType,day=transportOperationDay()) {
+  return db.prepare('SELECT operation_count FROM transport_daily_operations WHERE guild_id=? AND user_id=? AND business_type=? AND operation_day=?')
+    .get(g,u,businessType,day)?.operation_count||0;
+}
+function transportDailyRevenueMultiplier(completedToday) {
+  const reducedRuns=Math.max(0,Number(completedToday||0)-TRANSPORT_DAILY_FULL_REVENUE_RUNS+1);
+  return Math.max(TRANSPORT_DAILY_MIN_REVENUE_MULTIPLIER,1-reducedRuns*TRANSPORT_DAILY_REVENUE_STEP);
+}
+function recordTransportDailyOperationUnlocked(g,u,businessType,day=transportOperationDay()) {
+  db.prepare(`INSERT INTO transport_daily_operations(guild_id,user_id,business_type,operation_day,operation_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(guild_id,user_id,business_type,operation_day)
+    DO UPDATE SET operation_count=operation_count+1,updated_at=CURRENT_TIMESTAMP`).run(g,u,businessType,day);
+  return transportDailyOperationCount(g,u,businessType,day);
+}
+function transportBillingTable(businessType) {
+  return businessType==='airline'?'airline_companies':'transport_business_companies';
+}
+function transportUpkeepQuote(g,u,businessType,company) {
+  const level=enterpriseLevel(company),now=Date.now(),day=transportOperationDay();
+  let maintenance,insurance,license,scaleText;
+  if(businessType==='airline') {
+    const slots=Math.max(1,Math.min(AIRLINE_MAX_FLIGHT_SLOTS,Number(company?.flight_slots)||1));
+    maintenance=20_000+level*10_000+slots*10_000;
+    insurance=15_000+level*5_000+slots*5_000;
+    license=100_000+level*25_000+slots*25_000;
+    scaleText=`Lv.${level}／${slots} 個機位`;
+  } else {
+    requireTransportBusinessType(businessType);
+    const maintenanceBase={rail:15_000,coach:10_000,freight:20_000}[businessType];
+    const licenseBase={rail:100_000,coach:80_000,freight:120_000}[businessType];
+    const licenseStep={rail:20_000,coach:15_000,freight:25_000}[businessType];
+    const garageCapacity=businessType==='rail'?ensureTrainGarage(g,u).capacity:1;
+    maintenance=Math.round(maintenanceBase*(1+(level-1)*0.35)+(businessType==='rail'?(garageCapacity-1)*2_500:0));
+    insurance=Math.round(maintenanceBase*0.60+maintenanceBase*(level-1)*0.20+(businessType==='rail'?(garageCapacity-1)*1_500:0));
+    license=licenseBase+level*licenseStep+(businessType==='rail'?(garageCapacity-1)*10_000:0);
+    scaleText=businessType==='rail'?`Lv.${level}／車庫 ${garageCapacity} 格`:`Lv.${level}`;
+  }
+  const billingActive=Boolean(company?.upkeep_day&&company?.license_expires_at);
+  const dailyDue=billingActive&&company.upkeep_day!==day;
+  const licenseDue=billingActive&&Number(company.license_expires_at)<=now;
+  return {
+    day,now,billingActive,dailyDue,licenseDue,maintenance,insurance,license,scaleText,
+    dailyTotal:maintenance+insurance,
+    totalDue:(dailyDue?maintenance+insurance:0)+(licenseDue?license:0),
+    licenseExpiresAt:Number(company?.license_expires_at)||now+TRANSPORT_LICENSE_TERM_MS
+  };
+}
+function settleTransportUpkeepUnlocked(g,u,businessType,company) {
+  const quote=transportUpkeepQuote(g,u,businessType,company),table=transportBillingTable(businessType);
+  const where=businessType==='airline'?'guild_id=? AND user_id=?':'guild_id=? AND user_id=? AND business_type=?';
+  const args=businessType==='airline'?[g,u]:[g,u,businessType];
+  if(!quote.billingActive) {
+    db.prepare(`UPDATE ${table} SET upkeep_day=?,license_expires_at=?,updated_at=CURRENT_TIMESTAMP WHERE ${where}`)
+      .run(quote.day,quote.now+TRANSPORT_LICENSE_TERM_MS,...args);
+    return {...quote,maintenancePaid:0,insurancePaid:0,licensePaid:0,totalPaid:0,graceActivated:true};
+  }
+  if(balance(g,u)<quote.totalDue) throw new Error(`維持費不足：本次需先支付 ${fmt(quote.totalDue)}（維修、保險與牌照）`);
+  if(quote.dailyDue) {
+    changeBalanceUnlocked(g,u,-quote.maintenance,'transport_maintenance',u,`${company.company_name}｜每日維修費｜${quote.scaleText}`);
+    changeBalanceUnlocked(g,u,-quote.insurance,'transport_insurance',u,`${company.company_name}｜每日保險費｜${quote.scaleText}`);
+    db.prepare(`UPDATE ${table} SET upkeep_day=?,updated_at=CURRENT_TIMESTAMP WHERE ${where}`).run(quote.day,...args);
+  }
+  if(quote.licenseDue) {
+    changeBalanceUnlocked(g,u,-quote.license,'transport_license',u,`${company.company_name}｜公司牌照續期 7 天｜${quote.scaleText}`);
+    db.prepare(`UPDATE ${table} SET license_expires_at=?,updated_at=CURRENT_TIMESTAMP WHERE ${where}`)
+      .run(quote.now+TRANSPORT_LICENSE_TERM_MS,...args);
+  }
+  return {
+    ...quote,
+    maintenancePaid:quote.dailyDue?quote.maintenance:0,
+    insurancePaid:quote.dailyDue?quote.insurance:0,
+    licensePaid:quote.licenseDue?quote.license:0,
+    totalPaid:quote.totalDue,
+    graceActivated:false
+  };
+}
+function transportUpkeepText(g,u,businessType,company) {
+  const quote=transportUpkeepQuote(g,u,businessType,company);
+  if(!quote.billingActive) return `新制寬限：首次營運啟用計費，當次不收維持費；牌照自啟用日起 7 天有效`;
+  const daily=quote.dailyDue
+    ? `今日待繳：維修 **${fmt(quote.maintenance)}**＋保險 **${fmt(quote.insurance)}**`
+    : `今日維修與保險已繳清`;
+  const license=quote.licenseDue
+    ? `牌照已到期，待續期 **${fmt(quote.license)}**`
+    : `牌照有效至 <t:${Math.floor(quote.licenseExpiresAt/1000)}:F>`;
+  return `${daily}\n${license}｜規模：${quote.scaleText}`;
+}
 function normalizeAirlineName(value) {
   return String(value||'').trim().replace(/\s+/g,' ').replace(/@/g,'＠');
 }
@@ -1927,7 +2093,8 @@ function registerAirlineCompany(g,u,name) {
   try {
     if(airlineCompany(g,u)) throw new Error('你已經註冊過航空公司');
     changeBalanceUnlocked(g,u,-AIRLINE_REGISTRATION_FEE,'airline_registration',u,`註冊航空公司：${name}`);
-    db.prepare('INSERT INTO airline_companies(guild_id,user_id,company_name) VALUES(?,?,?)').run(g,u,name);
+    db.prepare('INSERT INTO airline_companies(guild_id,user_id,company_name,upkeep_day,license_expires_at) VALUES(?,?,?,?,?)')
+      .run(g,u,name,transportOperationDay(),Date.now()+TRANSPORT_LICENSE_TERM_MS);
     db.exec('COMMIT');
   } catch(error) {
     db.exec('ROLLBACK');
@@ -1949,6 +2116,8 @@ function airlineDashboardEmbed(g,u,notice='') {
   const flights=airlineFlights(g,u);
   const slots=Math.max(1,Math.min(AIRLINE_MAX_FLIGHT_SLOTS,Number(company.flight_slots)||1));
   const companyLevel=enterpriseLevel(company),companyMultiplier=enterpriseRevenueMultiplier(company);
+  const dailyRuns=transportDailyOperationCount(g,u,'airline'),nextDailyMultiplier=transportDailyRevenueMultiplier(dailyRuns);
+  const upkeepText=transportUpkeepText(g,u,'airline',company);
   const airport=assetCatalog[company.airport_id],aircraft=assetCatalog[company.aircraft_id],route=airlineRoutes[company.route_id];
   const flightText=Array.from({length:slots},(_,index)=>{
     const flight=flights.find(row=>row.flight_slot===index+1);
@@ -1959,13 +2128,13 @@ function airlineDashboardEmbed(g,u,notice='') {
     return `**機位 #${flight.flight_slot}**｜${status}\n└ ${airlineSelectionName(flight.aircraft_id)}｜${airlineSelectionName(flight.route_id)}｜**${fmt(flight.gross_revenue)}**`;
   }).join('\n');
   const routeEstimate=airport&&aircraft&&route
-    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*companyMultiplier))}**（另有市場需求浮動）\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜航程：**${airlineDurationLabel(route.durationMs)}**`
+    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*companyMultiplier*nextDailyMultiplier))}**（已套用今日第 ${dailyRuns+1} 趟 ×${nextDailyMultiplier.toFixed(2)}，另有市場需求浮動）\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜航程：**${airlineDurationLabel(route.durationMs)}**`
     : '';
   const nextCost=nextAirlineSlotCost(company);
   const slotText=nextCost?`下一機位：**${fmt(nextCost)}**`:'機位已擴充至上限';
   const nextUpgrade=nextEnterpriseUpgrade(company);
   const upgradeText=nextUpgrade?`下一級：**${fmt(nextUpgrade.cost)}**`:'已升至最高等級';
-  return new EmbedBuilder().setColor(flights.some(flight=>Date.now()>=flight.completes_at)?0x35C46A:0x0288D1).setTitle(`✈️ ${company.company_name}`).setDescription(`${notice?`${notice}\n\n`:''}**企業等級**\nLv.**${companyLevel}**｜營收加成 **+${Math.round((companyMultiplier-1)*100)}%**｜${upgradeText}\n\n**營運配置**\n機場：${airlineSelectionName(company.airport_id)}\n客機：${airlineSelectionName(company.aircraft_id)}\n航線：${airlineSelectionName(company.route_id)}\n\n**航班與機位（${flights.length}/${slots}）**\n${flightText}${routeEstimate}\n\n持有客機種類：**${airliners.length} 種**｜${slotText}\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+  return new EmbedBuilder().setColor(flights.some(flight=>Date.now()>=flight.completes_at)?0x35C46A:0x0288D1).setTitle(`✈️ ${company.company_name}`).setDescription(`${notice?`${notice}\n\n`:''}**企業等級**\nLv.**${companyLevel}**｜營收加成 **+${Math.round((companyMultiplier-1)*100)}%**｜${upgradeText}\n\n**維修・保險・牌照**\n${upkeepText}\n今日已派遣：**${dailyRuns} 趟**｜下一趟收益：**×${nextDailyMultiplier.toFixed(2)}**\n\n**營運配置**\n機場：${airlineSelectionName(company.airport_id)}\n客機：${airlineSelectionName(company.aircraft_id)}\n航線：${airlineSelectionName(company.route_id)}\n\n**航班與機位（${flights.length}/${slots}）**\n${flightText}${routeEstimate}\n\n持有客機種類：**${airliners.length} 種**｜${slotText}\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
 }
 function airlineDashboardComponents(g,u) {
   const airports=ownedAirports(g,u),company=airlineCompany(g,u);
@@ -2039,25 +2208,30 @@ function startAirlineFlight(g,u) {
   if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理航空公司');
   const staminaUsed=staminaCost(g,u,route.stamina),currentStamina=stamina(g,u);
   if(currentStamina<staminaUsed) throw new Error(`體力不足，需要 ${staminaUsed} 點`);
-  if(balance(g,u)<route.operatingCost) throw new Error(`營運資金不足，需要 ${fmt(route.operatingCost)}`);
+  const dailyRuns=transportDailyOperationCount(g,u,'airline'),dailyMultiplier=transportDailyRevenueMultiplier(dailyRuns);
+  const upkeepQuote=transportUpkeepQuote(g,u,'airline',company),requiredFunds=route.operatingCost+upkeepQuote.totalDue;
+  if(balance(g,u)<requiredFunds) throw new Error(`營運資金不足，需要 ${fmt(requiredFunds)}（含本次到期維持費 ${fmt(upkeepQuote.totalDue)}）`);
   const demandMultiplier=0.90+Math.random()*0.21;
-  const grossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*enterpriseRevenueMultiplier(company)*demandMultiplier);
+  const grossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
   const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
   const flightSlot=Array.from({length:slots},(_,index)=>index+1).find(slot=>!flights.some(flight=>flight.flight_slot===slot));
   let flightId=0;
+  let upkeep;
   db.exec('BEGIN IMMEDIATE');
   try {
+    upkeep=settleTransportUpkeepUnlocked(g,u,'airline',company);
     changeBalanceUnlocked(g,u,-route.operatingCost,'airline_operation',u,`${company.company_name}｜${route.name} 營運成本`);
     db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(staminaUsed,g,u);
     const inserted=db.prepare('INSERT INTO airline_flights(guild_id,user_id,flight_slot,airport_id,aircraft_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
       .run(g,u,flightSlot,company.airport_id,company.aircraft_id,company.route_id,grossRevenue,route.operatingCost,startedAt,completesAt);
+    recordTransportDailyOperationUnlocked(g,u,'airline');
     flightId=Number(inserted.lastInsertRowid);
     db.exec('COMMIT');
   } catch(error) {
     db.exec('ROLLBACK');
     throw error;
   }
-  return {company,airport,aircraft,route,grossRevenue,staminaUsed,startedAt,completesAt,flightId,flightSlot};
+  return {company,airport,aircraft,route,grossRevenue,staminaUsed,startedAt,completesAt,flightId,flightSlot,dailyRunNumber:dailyRuns+1,dailyMultiplier,upkeep};
 }
 function buyAdditionalAirlineSlot(g,u) {
   const company=airlineCompany(g,u);
@@ -2412,8 +2586,8 @@ function registerTransportBusinessCompany(g,u,businessType,name) {
   try {
     if(businessTransportCompany(g,u,businessType)) throw new Error(`你已經註冊過${transportBusinessTypes[businessType].name}公司行號`);
     changeBalanceUnlocked(g,u,-TRANSPORT_REGISTRATION_FEE,'transport_registration',u,`註冊${transportBusinessTypes[businessType].name}公司行號：${name}`);
-    db.prepare('INSERT INTO transport_business_companies(guild_id,user_id,business_type,company_name,station_id) VALUES(?,?,?,?,?)')
-      .run(g,u,businessType,name,stations[0]);
+    db.prepare('INSERT INTO transport_business_companies(guild_id,user_id,business_type,company_name,station_id,upkeep_day,license_expires_at) VALUES(?,?,?,?,?,?,?)')
+      .run(g,u,businessType,name,stations[0],transportOperationDay(),Date.now()+TRANSPORT_LICENSE_TERM_MS);
     db.exec('COMMIT');
   } catch(error) {
     db.exec('ROLLBACK');
@@ -2462,6 +2636,8 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
   }
   const station=assetCatalog[company.station_id],route=transportRoutes[company.route_id];
   const companyLevel=enterpriseLevel(company),companyMultiplier=enterpriseRevenueMultiplier(company);
+  const dailyRuns=transportDailyOperationCount(g,u,businessType),nextDailyMultiplier=transportDailyRevenueMultiplier(dailyRuns);
+  const upkeepText=transportUpkeepText(g,u,businessType,company);
   const operationText=operation
     ? Date.now()>=operation.completes_at
       ? `✅ **${type.operationLabel}已完成，可以領取營收**\n${transportSelectionName(operation.route_id)}｜可領營收 **${fmt(operation.gross_revenue)}**`
@@ -2475,7 +2651,7 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
       : `${activeTrainAsset.name}｜營收 **+${Math.round(activeTrainAsset.trainRevenueBonus*100)}%**`
     : '沒有列車，無法發車';
   const routeEstimate=station&&route&&station.transportType===route.type
-    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*companyMultiplier))}**（另有市場需求浮動）${businessType==='rail'?`\n執行列車：${activeTrainText}`:''}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
+    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*companyMultiplier*nextDailyMultiplier))}**（已套用今日第 ${dailyRuns+1} 趟 ×${nextDailyMultiplier.toFixed(2)}，另有市場需求浮動）${businessType==='rail'?`\n執行列車：${activeTrainText}`:''}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
     : '';
   const garage=businessType==='rail'?ensureTrainGarage(g,u):null;
   const garageText=garage?`\n列車車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**（配給列車不計）`:'';
@@ -2483,7 +2659,7 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
   return new EmbedBuilder()
     .setColor(operation&&Date.now()>=operation.completes_at?0x35C46A:type.color)
     .setTitle(`${type.emoji} ${company.company_name}`)
-    .setDescription(`${notice?`${notice}\n\n`:''}**企業等級**\nLv.**${companyLevel}**｜營收加成 **+${Math.round((companyMultiplier-1)*100)}%**｜${upgradeText}\n\n**${type.name}營運配置**\n公司行號：**${company.company_name}**\n營運場站：${transportSelectionName(company.station_id)}\n營運路線：${transportSelectionName(company.route_id)}\n\n**營運狀態**\n${operationText}${routeEstimate}${garageText}\n\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+    .setDescription(`${notice?`${notice}\n\n`:''}**企業等級**\nLv.**${companyLevel}**｜營收加成 **+${Math.round((companyMultiplier-1)*100)}%**｜${upgradeText}\n\n**維修・保險・牌照**\n${upkeepText}\n今日已營運：**${dailyRuns} 趟**｜下一趟收益：**×${nextDailyMultiplier.toFixed(2)}**\n\n**${type.name}營運配置**\n公司行號：**${company.company_name}**\n營運場站：${transportSelectionName(company.station_id)}\n營運路線：${transportSelectionName(company.route_id)}\n\n**營運狀態**\n${operationText}${routeEstimate}${garageText}\n\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
 }
 function transportBusinessDashboardComponents(g,u,businessType) {
   requireTransportBusinessType(businessType);
@@ -2553,23 +2729,28 @@ function startTransportBusinessOperation(g,u,businessType) {
   if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理交通事業');
   const staminaUsed=staminaCost(g,u,route.stamina),currentStamina=stamina(g,u);
   if(currentStamina<staminaUsed) throw new Error(`體力不足，需要 ${staminaUsed} 點`);
-  if(balance(g,u)<route.operatingCost) throw new Error(`營運資金不足，需要 ${fmt(route.operatingCost)}`);
+  const dailyRuns=transportDailyOperationCount(g,u,businessType),dailyMultiplier=transportDailyRevenueMultiplier(dailyRuns);
+  const upkeepQuote=transportUpkeepQuote(g,u,businessType,company),requiredFunds=route.operatingCost+upkeepQuote.totalDue;
+  if(balance(g,u)<requiredFunds) throw new Error(`營運資金不足，需要 ${fmt(requiredFunds)}（含本次到期維持費 ${fmt(upkeepQuote.totalDue)}）`);
   const trainMultiplier=trainAsset?1+trainAsset.trainRevenueBonus:1;
   const demandMultiplier=0.90+Math.random()*0.21;
-  const grossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*enterpriseRevenueMultiplier(company)*demandMultiplier);
+  const grossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
   const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
+  let upkeep;
   db.exec('BEGIN IMMEDIATE');
   try {
+    upkeep=settleTransportUpkeepUnlocked(g,u,businessType,company);
     changeBalanceUnlocked(g,u,-route.operatingCost,'transport_operation',u,`${company.company_name}｜${route.name} 營運成本`);
     db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(staminaUsed,g,u);
     db.prepare('INSERT INTO transport_business_operations(guild_id,user_id,business_type,station_id,route_id,train_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
       .run(g,u,businessType,company.station_id,company.route_id,train?.asset_id||null,grossRevenue,route.operatingCost,startedAt,completesAt);
+    recordTransportDailyOperationUnlocked(g,u,businessType);
     db.exec('COMMIT');
   } catch(error) {
     db.exec('ROLLBACK');
     throw error;
   }
-  return {company,station,route,type:transportBusinessTypes[businessType],train:trainAsset,trainMultiplier,grossRevenue,staminaUsed,startedAt,completesAt};
+  return {company,station,route,type:transportBusinessTypes[businessType],train:trainAsset,trainMultiplier,grossRevenue,staminaUsed,startedAt,completesAt,dailyRunNumber:dailyRuns+1,dailyMultiplier,upkeep};
 }
 function claimTransportBusinessRevenue(g,u,businessType) {
   const company=businessTransportCompany(g,u,businessType),operation=businessTransportOperation(g,u,businessType);
@@ -3870,11 +4051,21 @@ function claimAllInHeroDaily(g,u) {
       AND (hero_trigger_day IS NULL OR hero_trigger_day<>?)`).run(today,g,u,today).changes===1;
 }
 function titleLuckNotice(settlement) {
-  if(!settlement.titleActive) return '';
-  if(settlement.titleId==='all_in_hero') return '\n\n🔥 **傳奇稱號「歐印勇者」發動：歐印勝利派彩 ×3！**';
-  const title=profileTitles[settlement.titleId],skill=returnTitleSkillNames[settlement.titleId];
-  if(settlement.titleSkillTriggered) return `\n\n${title.split(' ')[0]} **特殊技能「${skill}」發動！**\n第一次抽到 ×${settlement.titleInitialMultiplier}，重抽後本局派彩 **×${settlement.titleMultiplier}**`;
-  return `\n\n**${title}：本局派彩 ×${settlement.titleMultiplier}**`;
+  let notice='';
+  if(settlement.titleActive) {
+    if(settlement.titleId==='all_in_hero') notice='🔥 **傳奇稱號「歐印勇者」發動：歐印勝利派彩 ×3！**';
+    else {
+      const title=profileTitles[settlement.titleId],skill=returnTitleSkillNames[settlement.titleId];
+      notice=settlement.titleSkillTriggered
+        ? `${title.split(' ')[0]} **特殊技能「${skill}」發動！**\n第一次抽到 ×${settlement.titleInitialMultiplier}，重抽後本局派彩 **×${settlement.titleMultiplier}**`
+        : `**${title}：本局派彩 ×${settlement.titleMultiplier}**`;
+    }
+  }
+  if(settlement.rake>0) {
+    const rakeNotice=`🏦 高額賭局獲利抽成 **${Math.round(settlement.rakeRate*100)}%**：**${fmt(settlement.rake)}** 已進入賭場寶庫`;
+    notice=notice?`${notice}\n${rakeNotice}`:rakeNotice;
+  }
+  return notice?`\n\n${notice}`:'';
 }
 function playerTitle(g,u) {
   const id=equippedTitleId(g,u),name=profileTitles[id]||'尚未設定特殊稱號';
@@ -5345,7 +5536,11 @@ async function runPvpCompetition(i,token,session) {
   const ranking=[...entrants].sort((a,b)=>b.distance-a.distance),draw=Math.abs(ranking[0].distance-ranking[1].distance)<1;
   let result;
   if(draw){for(const id of ids) changeBalance(session.guildId,id,session.bet,'pvp_wager',id,'PVP 平手退款');result='雙方幾乎同時衝線，下注已全數退回。';}
-  else {changeBalance(session.guildId,ranking[0].id,session.bet*2,'pvp_wager',ranking[1].id,'PVP 勝者獎池');result=`🏆 **${session.names[ranking[0].id]}** 奪得勝利並拿走 **${fmt(session.bet*2)}** 獎池！`;}
+  else {
+    const settlement=creditPvpPrize(session.guildId,ranking[0].id,session.bet,session.bet*2,'pvp_wager',ranking[1].id,'PVP 勝者獎池');
+    const rakeText=settlement.rake?`（高額賭局抽成 ${Math.round(settlement.rakeRate*100)}%：${fmt(settlement.rake)}）`:'';
+    result=`🏆 **${session.names[ranking[0].id]}** 奪得勝利並入帳 **${fmt(settlement.credited)}**！${rakeText}`;
+  }
   session.settled=true;session.status='done';pvpRaceSessions.delete(token);
   return i.editReply({embeds:[new EmbedBuilder().setColor(draw?0xC0C0C0:0xFFD700).setTitle(session.type==='vehicle'?'🏁 競速 PVP 完成':'🐾 寵物競速 PVP 完成').setDescription(`${ranking.map((e,n)=>`${n+1}. ${e.icon} **${e.name}**`).join('\n')}\n\n${result}\n\n${ids.map(id=>`${session.names[id]}：**${fmt(balance(session.guildId,id))}**`).join('\n')}`)],components:[],attachments:[],files:[]});
 }
@@ -5404,13 +5599,11 @@ function lockLiarDiceWagers(session) {
   }
 }
 function settleLiarDiceWagers(session,winnerId=null) {
+  let settlement=null;
   db.exec('BEGIN IMMEDIATE');
   try {
     if(winnerId) {
-      const prize=session.bet*2,next=ensureWallet(session.guildId,winnerId)+prize;
-      db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,session.guildId,winnerId);
-      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
-        .run(session.guildId,winnerId,prize,next,'pvp_wager',liarDiceOtherPlayer(session,winnerId),'骰盅吹牛 PVP 勝者獎池');
+      settlement=creditPvpPrize(session.guildId,winnerId,session.bet,session.bet*2,'pvp_wager',liarDiceOtherPlayer(session,winnerId),'骰盅吹牛 PVP 勝者獎池',{unlocked:true});
     } else {
       for(const id of liarDicePlayerIds(session)) {
         const next=ensureWallet(session.guildId,id)+session.bet;
@@ -5420,6 +5613,7 @@ function settleLiarDiceWagers(session,winnerId=null) {
       }
     }
     db.exec('COMMIT');
+    return settlement;
   } catch(error) {
     db.exec('ROLLBACK');
     throw error;
@@ -5683,7 +5877,7 @@ const gameHelpDetails={
   heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
   money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/日常 領取\` 取得每日獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。可用 \`/日常 體力\` 查看狀態，並從 \`/補給\` 購買及使用恢復用品。`},
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具與 **5 款可直接購買的列車**，購買前可先看圖片。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。`},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具與 **5 款可直接購買的列車**，購買前可先看圖片。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
   playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、成就與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 成就` 與 `/玩家 稱號`，集中管理角色資訊。'},
   dailyHub:{label:'日常中心',emoji:'📅',hint:'每日獎勵、增益與體力',title:'📅 日常中心',body:'使用 `/日常 領取` 領每日獎勵；`/日常 增益` 查看輪替效果；`/日常 體力` 與 `/日常 回體力` 管理每日體力。'},
@@ -7066,8 +7260,9 @@ async function handleInteraction(i) {
     const otherId=duel.turnId===duel.challengerId?duel.opponentId:duel.challengerId;
     if(dangerous) {
       activeDuels.delete(token);
-      const before=balance(i.guildId,otherId), after=changeBalance(i.guildId,otherId,duel.bet*2,'payout',otherId,'PvP 決鬥獲勝'), actual=after-before;
-      return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('💥 決鬥結束！').setDescription(`<@${duel.turnId}> 抽中危險彈，卡通角色倒下了！\n🏆 <@${otherId}> 獲勝，實際獲得 **${fmt(actual)}**。\n\n*純屬虛構遊戲效果。*`)],components:[duelTurnRow(token,true)]});
+      const settlement=creditPvpPrize(i.guildId,otherId,duel.bet,duel.bet*2,'payout',otherId,'PvP 決鬥獲勝');
+      const rakeText=settlement.rake?`\n🏦 高額賭局抽成 ${Math.round(settlement.rakeRate*100)}%：**${fmt(settlement.rake)}**`:'';
+      return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('💥 決鬥結束！').setDescription(`<@${duel.turnId}> 抽中危險彈，卡通角色倒下了！\n🏆 <@${otherId}> 獲勝，實際獲得 **${fmt(settlement.credited)}**。${rakeText}\n\n*純屬虛構遊戲效果。*`)],components:[duelTurnRow(token,true)]});
     }
     duel.turnId=otherId;
     return i.update({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('💨 安全！').setDescription(`<@${i.user.id}> 抽到安全彈。\n剩餘格數：**${duel.chambers.length-duel.shot}**\n\n輪到 <@${duel.turnId}>。`)],components:[duelTurnRow(token)]});
@@ -7286,7 +7481,10 @@ async function handleInteraction(i) {
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以開啟航線。',ephemeral:true});
     try {
       const result=startAirlineFlight(i.guildId,ownerId);
-      const notice=`🛫 **機位 #${result.flightSlot}｜${result.route.name} 已起飛！**\n客機：${result.aircraft.name}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n抵達時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+      const upkeepNotice=result.upkeep.graceActivated
+        ? '\n🆕 維持費新制寬限已啟用，本次免收；牌照 7 天後續期。'
+        : result.upkeep.totalPaid>0?`\n🧾 本次另繳維修／保險／牌照：**${fmt(result.upkeep.totalPaid)}**`:'';
+      const notice=`🛫 **機位 #${result.flightSlot}｜${result.route.name} 已起飛！**\n客機：${result.aircraft.name}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n今日第 **${result.dailyRunNumber}** 趟｜收益係數：**×${result.dailyMultiplier.toFixed(2)}**${upkeepNotice}\n抵達時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
       return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法開啟航線：${error.message}`,ephemeral:true});
@@ -7370,7 +7568,10 @@ async function handleInteraction(i) {
     try {
       const result=startTransportBusinessOperation(i.guildId,ownerId,businessType);
       const trainText=result.train?`\n執行列車：${result.train.name}｜營收 **+${Math.round(result.train.trainRevenueBonus*100)}%**`:'';
-      const notice=`${result.type.emoji} **${result.route.name} 已開始營運！**\n場站：${result.station.name}${trainText}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n完成時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+      const upkeepNotice=result.upkeep.graceActivated
+        ? '\n🆕 維持費新制寬限已啟用，本次免收；牌照 7 天後續期。'
+        : result.upkeep.totalPaid>0?`\n🧾 本次另繳維修／保險／牌照：**${fmt(result.upkeep.totalPaid)}**`:'';
+      const notice=`${result.type.emoji} **${result.route.name} 已開始營運！**\n場站：${result.station.name}${trainText}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n今日第 **${result.dailyRunNumber}** 趟｜收益係數：**×${result.dailyMultiplier.toFixed(2)}**${upkeepNotice}\n完成時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
       return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,notice)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法開始營運：${error.message}`,ephemeral:true});
@@ -7509,11 +7710,12 @@ async function handleInteraction(i) {
     const winnerId=bidTrue?bidderId:callerId,loserId=liarDiceOtherPlayer(session,winnerId);
     session.status='done';
     if(session.timer) clearTimeout(session.timer);
-    settleLiarDiceWagers(session,winnerId);
+    const settlement=settleLiarDiceWagers(session,winnerId);
     session.settled=true;
     liarDiceSessions.delete(token);
     const diceLines=liarDicePlayerIds(session).map(id=>`**${session.names[id]}**：${session.dice[id].map(value=>liarDiceFaces[value-1]).join(' ')}　（${session.dice[id].join('、')}）`).join('\n');
-    const resultText=`${diceLines}\n\n最後喊注：**${session.bid.quantity} 顆 ${session.bid.face} 點**\n實際符合：**${actual} 顆**（包含百搭 1 點）\n\n${bidTrue?`✅ 喊注成立，抓吹牛失敗！`:`🫵 喊注不足，成功抓到吹牛！`}\n🏆 **${session.names[winnerId]}** 擊敗 **${session.names[loserId]}**，取得 **${fmt(session.bet*2)}** 獎池。\n\n${liarDicePlayerIds(session).map(id=>`${session.names[id]} 金庫：**${fmt(balance(session.guildId,id))}**`).join('\n')}`;
+    const rakeText=settlement?.rake?`\n🏦 高額賭局抽成 ${Math.round(settlement.rakeRate*100)}%：**${fmt(settlement.rake)}**`:'';
+    const resultText=`${diceLines}\n\n最後喊注：**${session.bid.quantity} 顆 ${session.bid.face} 點**\n實際符合：**${actual} 顆**（包含百搭 1 點）\n\n${bidTrue?`✅ 喊注成立，抓吹牛失敗！`:`🫵 喊注不足，成功抓到吹牛！`}\n🏆 **${session.names[winnerId]}** 擊敗 **${session.names[loserId]}**，實際入帳 **${fmt(settlement.credited)}**。${rakeText}\n\n${liarDicePlayerIds(session).map(id=>`${session.names[id]} 金庫：**${fmt(balance(session.guildId,id))}**`).join('\n')}`;
     return i.update({embeds:[liarDiceGameEmbed(session,resultText)],components:[]});
   }
   if(i.isStringSelectMenu()&&i.customId.startsWith('race_select:')&&i.guildId) {
