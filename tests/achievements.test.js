@@ -514,6 +514,55 @@ test('交通事業基礎列車交易錯誤修正公告完整',()=>{
   assert.match(update.changes.join('\n'),/既有.*不會重複/s);
 });
 
+test('交通事業面板公開顯示並於閒置三分鐘後刪除',async()=>{
+  assert.match(source,/const TRANSPORT_PANEL_IDLE_MS=3\*60\*1000/);
+  assert.match(source,/const transportPanelDeletionTimers=new Map\(\)/);
+  const scheduleBlock=source.match(/function scheduleTransportPanelDeletion\(message\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.ok(scheduleBlock,'缺少交通事業閒置刪除排程');
+  assert.match(scheduleBlock,/clearTimeout\(previous\)/,'每次操作必須取消舊計時器');
+  assert.match(scheduleBlock,/message\.delete\(\)/,'閒置後必須刪除公開訊息');
+  assert.match(scheduleBlock,/transportPanelDeletionTimers\.set\(message\.id,timer\)/);
+  const timers=new Map(),scheduled=[],cleared=[];
+  const schedule=new Function(
+    'transportPanelDeletionTimers','setTimeout','clearTimeout','TRANSPORT_PANEL_IDLE_MS','console',
+    `${scheduleBlock}; return scheduleTransportPanelDeletion;`
+  )(
+    timers,
+    (callback,delay)=>{const timer={callback,delay,unref(){}};scheduled.push(timer);return timer;},
+    timer=>cleared.push(timer),
+    180000,
+    {error() {}}
+  );
+  let deletions=0;
+  const message={id:'transport-message',delete:async()=>{deletions+=1;}};
+  assert.equal(schedule(message),true);
+  assert.equal(schedule(message),true);
+  assert.equal(scheduled.length,2);
+  assert.equal(cleared.length,1,'重新操作必須取消第一個計時器');
+  assert.equal(scheduled[1].delay,180000);
+  await scheduled[0].callback();
+  assert.equal(deletions,0,'被取消的舊計時器不得刪除面板');
+  await scheduled[1].callback();
+  assert.equal(deletions,1,'最新計時器到期時必須刪除面板');
+  assert.match(source,/function touchTransportPanelInteraction\(i\)/);
+  assert.match(source,/i\.user\?\.id!==ownerId/,'其他玩家操作不得延長面板存活時間');
+  assert.match(source,/async function handleInteraction\(i\) \{\n  touchTransportPanelInteraction\(i\);/);
+  const commandBlock=source.match(/if\(i\.commandName==='交通事業'\) \{[\s\S]+?\n    \}/)?.[0]||'';
+  assert.match(commandBlock,/return replyTransportPanel\(i,/,'交通事業必須使用公開面板回覆');
+  assert.doesNotMatch(commandBlock,/ephemeral:true/,'交通事業面板不可設為只有本人可見');
+  assert.match(source,/公開面板｜只有事業擁有者可操作｜最後一次操作 3 分鐘後自動刪除/);
+});
+
+test('交通事業公開面板更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-transport-public-idle-delete.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-01-transport-public-idle-delete');
+  assert.equal(update.version,'2026.08.01.5');
+  assert.match(update.summary,/所有人/);
+  assert.match(update.changes.join('\n'),/3 分鐘/);
+  assert.match(update.changes.join('\n'),/重新計時/);
+  assert.match(update.changes.join('\n'),/事業擁有者/);
+});
+
 test('13 款機車資產已全面換用新版圖片',()=>{
   const motorcycleIds=[
     'purple_street_scooter','orange_dirtbike','blue_naked','bosozoku','wasteland_raider',

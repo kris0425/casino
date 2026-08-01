@@ -270,6 +270,42 @@ const liarDiceSessions=new Map();
 const jengaGames=new Map();
 const vehicleModSessions=new Map();
 const activeHideoutRaids=new Map();
+const TRANSPORT_PANEL_IDLE_MS=3*60*1000;
+const transportPanelDeletionTimers=new Map();
+const transportPanelCustomIdPrefixes=[
+  'transport_hub_','transport_business:','transport_register:','transport_register_modal:',
+  'transport_station:','transport_route:','transport_start:','transport_claim:','transport_refresh:',
+  'train_blind_box_','train_garage_upgrade:','airline_register:','airline_register_modal:',
+  'airline_airport:','airline_aircraft:','airline_route:','airline_start:','airline_buy_slot:',
+  'airline_claim_select:','airline_claim:','airline_refresh:'
+];
+function scheduleTransportPanelDeletion(message) {
+  if(!message?.id||typeof message.delete!=='function') return false;
+  const previous=transportPanelDeletionTimers.get(message.id);
+  if(previous) clearTimeout(previous);
+  const timer=setTimeout(async()=>{
+    if(transportPanelDeletionTimers.get(message.id)!==timer) return;
+    transportPanelDeletionTimers.delete(message.id);
+    try { await message.delete(); }
+    catch(error) { if(error?.code!==10008) console.error(`交通事業閒置訊息刪除失敗 message=${message.id}: ${error.message}`); }
+  },TRANSPORT_PANEL_IDLE_MS);
+  timer.unref?.();
+  transportPanelDeletionTimers.set(message.id,timer);
+  return true;
+}
+function touchTransportPanelInteraction(i) {
+  if(!(i.isButton?.()||i.isStringSelectMenu?.()||i.isModalSubmit?.())) return false;
+  if(!transportPanelCustomIdPrefixes.some(prefix=>i.customId?.startsWith(prefix))) return false;
+  const ownerId=i.customId.split(':')[1];
+  if(!ownerId||i.user?.id!==ownerId) return false;
+  return scheduleTransportPanelDeletion(i.message);
+}
+async function replyTransportPanel(i,payload) {
+  await i.reply(payload);
+  const message=await i.fetchReply();
+  scheduleTransportPanelDeletion(message);
+  return message;
+}
 function dogChaseRow(userId,stolen) {
   const token=Math.random().toString(36).slice(2,10);
   dogChases.set(token,{userId,stolen,used:false});
@@ -2079,7 +2115,7 @@ function transportHubEmbed(g,u,notice='') {
     .setColor(0x0D47A1)
     .setTitle('🧭 交通事業營運總部')
     .setDescription(`${notice?`${notice}\n\n`:''}機場航空、鐵路、城際客運與物流貨運集中在同一個入口；火車與客運公司已分開，可同時運行。\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路運輸**\n${groundStatus}\n\n**🚆 列車車庫・每日盲盒**\n盲盒收藏：**${trainKinds}/12 種**｜車庫：**${ownedBlindBoxTrainCount(g,u)}/${garage.capacity} 格**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
-    .setFooter({text:'列車盲盒每日限購一盒；系統配給列車不占車庫格數'});
+    .setFooter({text:'公開面板｜只有事業擁有者可操作｜最後一次操作 3 分鐘後自動刪除'});
 }
 function transportHubComponents(g,u) {
   return [new ActionRowBuilder().addComponents(
@@ -5660,6 +5696,7 @@ process.on('unhandledRejection',error=>console.error('Unhandled promise rejectio
 const daily = new Map();
 
 async function handleInteraction(i) {
+  touchTransportPanelInteraction(i);
   if(i.isAutocomplete()) {
     const focused=i.options.getFocused(true),query=String(focused.value||'').trim().toLowerCase();
     if(i.commandName==='稱號設定'&&focused.name==='稱號') {
@@ -7509,7 +7546,7 @@ async function handleInteraction(i) {
       return i.reply({embeds:[airlineDashboardEmbed(g,u,'ℹ️ 機場系統已整合至 `/交通事業`；此指令保留為航空運輸捷徑。')],components:airlineDashboardComponents(g,u),ephemeral:true});
     }
     if(i.commandName==='交通事業') {
-      return i.reply({embeds:[transportHubEmbed(g,u)],components:transportHubComponents(g,u),ephemeral:true});
+      return replyTransportPanel(i,{embeds:[transportHubEmbed(g,u)],components:transportHubComponents(g,u)});
     }
     if(i.commandName==='改裝') {
       let assetId=i.options.getString('車輛');
