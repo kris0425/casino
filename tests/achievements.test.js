@@ -257,7 +257,7 @@ test('機場整合交通事業並支援最多五個同時航班機位',()=>{
   assert.ok(migrated.id>0);
 });
 
-test('三種交通場站可註冊公司行號並營運收益',()=>{
+test('三種交通場站分開註冊公司並可同時營運',()=>{
   const stationAssets=[
     ['grand_bay_high_speed_rail_terminal','properties/stations/grand_bay_high_speed_rail_terminal.png','rail'],
     ['lotus_metropolitan_coach_terminal','properties/stations/lotus_metropolitan_coach_terminal.png','coach'],
@@ -268,37 +268,42 @@ test('三種交通場站可註冊公司行號並營運收益',()=>{
     assert.ok(existsSync(new URL(`../assets/${image}`,import.meta.url)),`缺少交通場站圖片 ${image}`);
   }
   assert.match(source,/const TRANSPORT_REGISTRATION_FEE=300000/);
-  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_companies/);
-  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_operations/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_business_companies/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_business_operations/);
+  assert.match(source,/PRIMARY KEY \(guild_id,user_id,business_type\)/);
   assert.match(source,/setName\('交通事業'\)/);
-  assert.match(source,/registerTransportCompany\(g,u,name\)/);
+  assert.match(source,/registerTransportBusinessCompany\(g,u,businessType,name\)/);
   assert.match(source,/changeBalanceUnlocked\(g,u,-TRANSPORT_REGISTRATION_FEE,'transport_registration'/);
-  assert.match(source,/station\.transportType!==route\.type/);
+  assert.match(source,/transport_register_modal:\$\{ownerId\}:\$\{businessType\}/);
+  assert.match(source,/transport_business:\$\{u\}:\$\{businessType\}/);
   assert.match(source,/changeBalanceUnlocked\(g,u,-route\.operatingCost,'transport_operation'/);
   assert.match(source,/changeBalanceUnlocked\(g,u,operation\.gross_revenue,'transport_revenue'/);
   assert.match(source,/setInterval\(notifyCompletedTransportOperations,60000\)/);
 
   const db=new DatabaseSync(':memory:');
-  db.exec(`CREATE TABLE transport_companies (
-    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, company_name TEXT NOT NULL,
-    station_id TEXT, route_id TEXT,
-    PRIMARY KEY (guild_id,user_id)
+  db.exec(`CREATE TABLE transport_business_companies (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, business_type TEXT NOT NULL,
+    company_name TEXT NOT NULL, station_id TEXT, route_id TEXT,
+    PRIMARY KEY (guild_id,user_id,business_type)
   );
-  CREATE TABLE transport_operations (
-    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, station_id TEXT NOT NULL,
+  CREATE TABLE transport_business_operations (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, business_type TEXT NOT NULL, station_id TEXT NOT NULL,
     route_id TEXT NOT NULL, gross_revenue INTEGER NOT NULL, operating_cost INTEGER NOT NULL,
     started_at INTEGER NOT NULL, completes_at INTEGER NOT NULL,
     dm_notified_at INTEGER, channel_notified_at INTEGER,
-    PRIMARY KEY (guild_id,user_id)
+    PRIMARY KEY (guild_id,user_id,business_type)
   );`);
-  db.prepare('INSERT INTO transport_companies(guild_id,user_id,company_name,station_id,route_id) VALUES(?,?,?,?,?)')
-    .run('guild','player','金運交通','grand_bay_high_speed_rail_terminal','rail_intercity_business');
-  db.prepare('INSERT INTO transport_operations(guild_id,user_id,station_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?)')
-    .run('guild','player','grand_bay_high_speed_rail_terminal','rail_intercity_business',270000,80000,1000,2000);
-  const operation=db.prepare('SELECT * FROM transport_operations WHERE guild_id=? AND user_id=?').get('guild','player');
-  assert.equal(operation.gross_revenue-operation.operating_cost,190000);
-  assert.equal(operation.dm_notified_at,null);
-  assert.equal(operation.channel_notified_at,null);
+  db.prepare('INSERT INTO transport_business_companies(guild_id,user_id,business_type,company_name,station_id,route_id) VALUES(?,?,?,?,?,?)')
+    .run('guild','player','rail','金運鐵路','grand_bay_high_speed_rail_terminal','rail_intercity_business');
+  db.prepare('INSERT INTO transport_business_companies(guild_id,user_id,business_type,company_name,station_id,route_id) VALUES(?,?,?,?,?,?)')
+    .run('guild','player','coach','金運客運','lotus_metropolitan_coach_terminal','coach_intercity_line');
+  const insertOperation=db.prepare('INSERT INTO transport_business_operations(guild_id,user_id,business_type,station_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?)');
+  insertOperation.run('guild','player','rail','grand_bay_high_speed_rail_terminal','rail_intercity_business',270000,80000,1000,2000);
+  insertOperation.run('guild','player','coach','lotus_metropolitan_coach_terminal','coach_intercity_line',130000,40000,1100,2100);
+  const operations=db.prepare('SELECT * FROM transport_business_operations WHERE guild_id=? AND user_id=? ORDER BY business_type').all('guild','player');
+  assert.equal(operations.length,2);
+  assert.deepEqual(operations.map(row=>row.business_type),['coach','rail']);
+  assert.equal(operations.find(row=>row.business_type==='rail').gross_revenue-80000,190000);
 });
 
 test('公告檔案包含成就與轉帳規則',()=>{
@@ -348,13 +353,31 @@ test('列車盲盒整合交通事業並套用鐵路營收加成',()=>{
   assert.equal(rates.length,12);
   assert.equal(rates.reduce((sum,value)=>sum+value,0),100);
   assert.match(source,/const TRAIN_BLIND_BOX_SINGLE_PRICE=50000/);
-  assert.match(source,/const TRAIN_BLIND_BOX_TEN_PRICE=480000/);
+  assert.doesNotMatch(source,/TRAIN_BLIND_BOX_TEN_PRICE/);
   assert.match(source,/setCustomId\(`transport_hub_train_box:\$\{u\}`\)/);
-  assert.match(source,/setCustomId\(`train_blind_box_open:\$\{ownerId\}:10`\)/);
+  assert.match(source,/每天限購一盒，不提供十抽/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS train_blind_box_daily/);
+  assert.match(source,/purchase_day===trainBlindBoxDay\(\)/);
   assert.match(source,/bestOwnedTrain\(g,u\)/);
   assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*demandMultiplier/);
   const commandStart=source.indexOf('const commands = ['),commandEnd=source.indexOf('].map(c=>c.toJSON());',commandStart);
   assert.doesNotMatch(source.slice(commandStart,commandEnd),/setName\('列車盲盒'\)/,'列車盲盒應整合在 /交通事業，不新增獨立指令');
+});
+
+test('火車站配給基礎列車並支援最多 20 格車庫',()=>{
+  const starterBlock=source.match(/train_starter_service_commuter:\{[^\n]+/)?.[0]||'';
+  assert.match(starterBlock,/systemGranted:true/);
+  assert.match(starterBlock,/nonTransferable:true/);
+  assert.match(starterBlock,/image:'trains\/starter_service_commuter\.png'/);
+  const image=readFileSync(new URL('../assets/trains/starter_service_commuter.png',import.meta.url));
+  assert.equal(image.subarray(1,4).toString(),'PNG');
+  assert.ok(image.readUInt32BE(16)>image.readUInt32BE(20),'基礎列車圖片必須為橫向');
+  assert.match(source,/const TRAIN_GARAGE_BASE_CAPACITY=1/);
+  assert.match(source,/const TRAIN_GARAGE_MAX_CAPACITY=20/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS train_garages/);
+  assert.match(source,/火車站必須至少持有一輛列車才能發車/);
+  assert.match(source,/系統配給.*不占車庫/s);
+  assert.match(source,/train_garage_upgrade:\$\{ownerId\}/);
 });
 
 test('搶劫備援與貨運站圖片修復公告完整',()=>{
@@ -403,6 +426,18 @@ test('列車盲盒更新公告包含售價、十抽與營收規則',()=>{
   assert.match(update.changes.join('\n'),/50,000.*480,000/s);
   assert.match(update.changes.join('\n'),/傳說/);
   assert.match(update.changes.join('\n'),/最高.*營收加成/s);
+});
+
+test('列車營運、每日盲盒與公司分流公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-train-operations-garage.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-01-train-operations-garage');
+  assert.equal(update.version,'2026.08.01.2');
+  assert.equal(update.changes.length,7);
+  assert.match(update.summary,/基礎列車/);
+  assert.match(update.changes.join('\n'),/20 格/);
+  assert.match(update.changes.join('\n'),/每日限購 1 盒/);
+  assert.match(update.changes.join('\n'),/同時進行鐵路與客運/);
+  assert.match(update.changes.join('\n'),/自動遷移/);
 });
 
 test('13 款機車資產已全面換用新版圖片',()=>{
