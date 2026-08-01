@@ -262,7 +262,7 @@ test('限時資產拍賣使用安全託管、退款、延時與自動結標',()=
   assert.match(source,/const ASSET_AUCTION_EXTENSION_MS=5\*60\*1000/);
   assert.match(source,/const ASSET_AUCTION_MIN_INCREMENT_RATE=0\.05/);
   assert.match(source,/const ASSET_AUCTION_MIN_START_PRICE=5000000/);
-  assert.match(source,/const assetAuctionPool=\[[\s\S]+?'mystery_huayra'[\s\S]+?'ford_mustang_1964_hidden'[\s\S]+?'blind_totoro_catbus'/);
+  assert.match(source,/const assetAuctionPool=\[[\s\S]+?'toyota_supra_mk4'[\s\S]+?'ford_mustang_1964_hidden'[\s\S]+?'ford_gt_heritage'[\s\S]+?'ford_shelby_gt500'/);
 
   const startPriceBlock=source.match(/function assetAuctionStartPrice\(asset\) \{[\s\S]+?\n\}/)?.[0]||'';
   const minimumBidBlock=source.match(/function minimumAssetAuctionBid\(auction\) \{[\s\S]+?\n\}/)?.[0]||'';

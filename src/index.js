@@ -1571,7 +1571,7 @@ const ASSET_AUCTION_MIN_INCREMENT=100000;
 const ASSET_AUCTION_MIN_INCREMENT_RATE=0.05;
 const ASSET_AUCTION_MIN_START_PRICE=5000000;
 const assetAuctionPool=[
-  'mystery_huayra','toyota_supra_mk4','ford_mustang_1964_hidden','blind_totoro_catbus','ford_gt_2017'
+  'toyota_supra_mk4','ford_mustang_1964_hidden','ford_gt_2017','ford_gt_heritage','ford_shelby_gt500'
 ];
 const TRANSPORT_REGISTRATION_FEE=300000;
 const TRANSPORT_COMPLETION_CHANNEL_ID=AIRLINE_COMPLETION_CHANNEL_ID;
