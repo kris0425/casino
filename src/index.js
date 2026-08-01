@@ -40,6 +40,9 @@ const PLAYER_TRANSFER_EXTRA_ZERO_CHANCE = 0.05;
 const K_CAR_WASH_BASE_REWARD = 12_000;
 const K_CAR_WASH_SCRATCH_CHANCE = 0.10;
 const K_CAR_WASH_SCRATCH_COMPENSATION = 20_000;
+const BURGLARY_BASE_SUCCESS_RATE = 0.15;
+const BURGLARY_MEMBER_SUCCESS_BONUS = 0.05;
+const BURGLARY_MAX_SUCCESS_RATE = 0.30;
 const ECONOMY_SINK_LABELS={
   asset_purchase:'房地產／永久資產',
   asset_rental:'套房／限時租賃',
@@ -1296,7 +1299,8 @@ const assetCatalog={
   embraer_e195_e2_midnight:{name:'🌌 Embraer E195-E2 暗夜星線',category:'飛行器',price:2200000,description:'全黑支線客機靈活串聯城市航點，穩定擴張區域商務版圖。',image:'aircraft/passenger/three_airliners/embraer_e195_e2_midnight_side.png',images:['aircraft/passenger/three_airliners/embraer_e195_e2_midnight_side.png','aircraft/passenger/three_airliners/embraer_e195_e2_midnight_top.png','aircraft/passenger/three_airliners/embraer_e195_e2_midnight_front.png'],randomImage:true,rarity:'傳說',buff:'work',buffMultiplier:1.7},
   boeing_787_9_snow:{name:'🤍 Boeing 787-9 雪翼夢航',category:'飛行器',price:5200000,description:'全白雪翼塗裝搭配舒適長程客艙，能顯著提高每日體力上限。',image:'aircraft/passenger/three_airliners/boeing_787_9_snow_side.png',images:['aircraft/passenger/three_airliners/boeing_787_9_snow_side.png','aircraft/passenger/three_airliners/boeing_787_9_snow_top.png','aircraft/passenger/three_airliners/boeing_787_9_snow_front.png'],randomImage:true,rarity:'神話',buff:'stamina',buffMultiplier:2.3},
   airbus_a350_1000_snow:{name:'🪽 Airbus A350-1000 白羽旗艦',category:'飛行器',price:5900000,description:'純白塗裝的碳纖維廣體旗艦，以尊榮採購網絡降低商城消費成本。',image:'aircraft/passenger/three_airliners/airbus_a350_1000_snow_side.png',images:['aircraft/passenger/three_airliners/airbus_a350_1000_snow_side.png','aircraft/passenger/three_airliners/airbus_a350_1000_snow_top.png','aircraft/passenger/three_airliners/airbus_a350_1000_snow_front.png'],randomImage:true,rarity:'限定',buff:'discount',buffMultiplier:2.4},
-  embraer_e195_e2_snow:{name:'☁️ Embraer E195-E2 白雲快線',category:'飛行器',price:1950000,description:'純白新世代支線客機，以快速周轉航班提供可靠的工作收益。',image:'aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png',images:['aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_top.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_front.png'],randomImage:true,rarity:'史詩',buff:'work',buffMultiplier:1.5}
+  embraer_e195_e2_snow:{name:'☁️ Embraer E195-E2 白雲快線',category:'飛行器',price:1950000,description:'純白新世代支線客機，以快速周轉航班提供可靠的工作收益。',image:'aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png',images:['aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_top.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_front.png'],randomImage:true,rarity:'史詩',buff:'work',buffMultiplier:1.5},
+  puppy_luxury_airliner:{name:'🐶 萌犬豪華客機',category:'飛行器',price:7880000,description:'粉金珍珠塗裝、萌犬主題套房與雲端甜點吧組成的夢幻廣體客機；限定級舒適客艙可大幅提升每日體力，並以頂級機隊價值提高航空公司航線營收。',image:'aircraft/passenger/puppy_luxury_airliner.png',rarity:'限定',buff:'stamina',buffMultiplier:2.8}
 };
 const shotgunSeries=[
   {key:'classic_pump',name:'經典泵動霰彈槍',price:65000,robber:3,police:3,image:'01-classic-pump.png'},
@@ -1485,7 +1489,7 @@ const passengerAirlinerIds=new Set([
   'boeing_747_400','airbus_a380_800','boeing_777_300er','airbus_a350_1000','boeing_787_9_dreamliner',
   'airbus_a321neo','boeing_737_max_8','airbus_a320neo','embraer_e190_e2','bombardier_crj900',
   'boeing_787_9_midnight','airbus_a350_1000_midnight','embraer_e195_e2_midnight',
-  'boeing_787_9_snow','airbus_a350_1000_snow','embraer_e195_e2_snow'
+  'boeing_787_9_snow','airbus_a350_1000_snow','embraer_e195_e2_snow','puppy_luxury_airliner'
 ]);
 const airlineRoutes={
   regional:{name:'🏝️ 港澳台區域快線',description:'高頻短程航班，適合剛成立的航空公司。',durationMs:10*60*1000,baseRevenue:85000,operatingCost:25000,stamina:10,minTier:1},
@@ -4270,17 +4274,21 @@ function burglaryLobbyRow(token,disabled=false) {
   );
 }
 function burglaryLobbyEmbed(lobby) {
-  const chance=Math.min(75,45+(lobby.members.size-1)*10);
+  const chance=Math.round(burglarySuccessRate(lobby.members.size)*100);
   const target=lobby.targetId?`<@${lobby.targetId}> 的住處`:'隨機無人住宅';
   return new EmbedBuilder().setColor(0x455A64).setTitle('🏚️ 多人闖空門｜集合中').setDescription(
     `隊長：<@${lobby.leaderId}>\n目標：**${target}**\n成員：${[...lobby.members].map(id=>`<@${id}>`).join('、')}\n人數：**${lobby.members.size}/4**\n目前成功率：**${chance}%**\n\n每名成員開始時消耗 **10 體力**；成功後平均分贓，失敗則全員關進迷子的小黑屋 2 分鐘。`
   );
 }
+function burglarySuccessRate(memberCount=1) {
+  const members=Math.max(1,Math.min(4,Math.floor(Number(memberCount)||1)));
+  return Math.min(BURGLARY_MAX_SUCCESS_RATE,BURGLARY_BASE_SUCCESS_RATE+(members-1)*BURGLARY_MEMBER_SUCCESS_BONUS);
+}
 function randomBurglaryTheft(targetCoins,random=Math.random) {
   if(!Number.isSafeInteger(targetCoins)||targetCoins<=0) return 0;
-  const maximum=Math.floor(targetCoins*0.50);
+  const maximum=Math.floor(targetCoins*0.30);
   if(maximum<1) return 0;
-  const minimum=Math.min(maximum,Math.max(1,Math.floor(targetCoins*0.10)));
+  const minimum=Math.min(maximum,Math.max(1,Math.floor(targetCoins*0.15)));
   const roll=Math.min(0.9999999999999999,Math.max(0,Number(random())||0));
   return minimum+Math.floor(roll*(maximum-minimum+1));
 }
@@ -7189,7 +7197,7 @@ async function handleInteraction(i) {
     for(const id of members) consumeStamina(i.guildId,id,10);
     await i.update({embeds:[new EmbedBuilder().setColor(0x455A64).setTitle('🏚️ 多人闖空門行動中…').setDescription(`${members.map(id=>`<@${id}>`).join('、')} 悄悄潛入目標，正在搜索值錢物品……`)],components:[burglaryLobbyRow(token,true)]});
     await sleep(1600);
-    const success=Math.random()<Math.min(0.75,0.45+(members.length-1)*0.10);
+    const success=Math.random()<burglarySuccessRate(members.length);
     if(success) {
       let total=0;
       if(lobby.targetId) {
@@ -8085,7 +8093,7 @@ async function handleInteraction(i) {
         const targetText=target?`<@${target.id}> 的住處`:'一間無人住宅';
         await i.reply({embeds:[new EmbedBuilder().setColor(0x455A64).setTitle('🏚️ 闖空門行動中…').setDescription(`你確認四下無人，悄悄摸進 **${targetText}**……\n體力：${staminaAfter}/${staminaMax(g,u)}`)]});
         await sleep(1600);
-        if(Math.random()<0.45) {
+        if(Math.random()<burglarySuccessRate(1)) {
           if(target) {
             const targetCoins=balance(g,target.id);
             if(targetCoins<=0) return i.editReply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🕸️ 撲了個空！').setDescription(`<@${target.id}> 的金庫空空如也，你只好兩手空空離開。`)]});

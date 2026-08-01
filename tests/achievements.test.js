@@ -156,22 +156,52 @@ test('幫 K 佬洗車提供 12000 工資並有 10% 豪車刮傷賠償事件',()=
   assert.match(source,/Math\.min\(K_CAR_WASH_SCRATCH_COMPENSATION,next\)/);
 });
 
-test('指定玩家闖空門隨機偷取 10% 至 50% 並移除固定金額上限',()=>{
+test('闖空門成功率與指定玩家收益皆下修為 15% 至 30%',()=>{
+  const chanceBlock=source.match(/function burglarySuccessRate\(memberCount=1\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.ok(chanceBlock,'缺少闖空門成功率函式');
+  const successRate=new Function(
+    'BURGLARY_BASE_SUCCESS_RATE','BURGLARY_MEMBER_SUCCESS_BONUS','BURGLARY_MAX_SUCCESS_RATE',
+    `${chanceBlock}; return burglarySuccessRate;`
+  )(0.15,0.05,0.30);
+  assert.equal(successRate(1),0.15);
+  assert.equal(successRate(2),0.20);
+  assert.equal(successRate(3),0.25);
+  assert.equal(successRate(4),0.30);
+  assert.equal(successRate(99),0.30);
+  assert.match(source,/Math\.random\(\)<burglarySuccessRate\(1\)/);
+  assert.match(source,/Math\.random\(\)<burglarySuccessRate\(members\.length\)/);
+
   const block=source.match(/function randomBurglaryTheft\(targetCoins,random=Math\.random\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少闖空門隨機金額函式');
   const steal=new Function(`${block}; return randomBurglaryTheft;`)();
-  assert.equal(steal(100_000,()=>0),10_000);
-  assert.equal(steal(100_000,()=>0.5),30_000);
-  assert.equal(steal(100_000,()=>0.999999),50_000);
-  assert.equal(steal(1,()=>0.5),0,'不可從只有 1 金幣的玩家偷走超過 50%');
-  assert.equal(steal(2,()=>0.5),1);
+  assert.equal(steal(100_000,()=>0),15_000);
+  assert.equal(steal(100_000,()=>0.5),22_500);
+  assert.equal(steal(100_000,()=>0.999999),30_000);
+  assert.equal(steal(1,()=>0.5),0,'不可從只有 1 金幣的玩家偷走超過 30%');
+  assert.equal(steal(4,()=>0.5),1);
   for(let index=0;index<100;index++) {
     const amount=steal(987_654,()=>index/100);
-    assert.ok(amount>=98_765&&amount<=493_827,`偷竊金額超出 10%～50%：${amount}`);
+    assert.ok(amount>=148_148&&amount<=296_296,`偷竊金額超出 15%～30%：${amount}`);
   }
   assert.ok((source.match(/randomBurglaryTheft\(targetCoins\)/g)||[]).length>=2,'單人與多人指定目標都必須使用新規則');
   assert.doesNotMatch(source,/Math\.min\(3000,targetCoins/);
   assert.doesNotMatch(source,/Math\.min\(5000,3000\*members\.length,targetCoins/);
+});
+
+test('萌犬豪華客機已加入商城、航空營運及圖片資產',()=>{
+  const assetBlock=source.match(/puppy_luxury_airliner:\{[^\n]+/)?.[0]||'';
+  assert.match(assetBlock,/name:'🐶 萌犬豪華客機'/);
+  assert.match(assetBlock,/category:'飛行器'/);
+  assert.match(assetBlock,/price:7880000/);
+  assert.match(assetBlock,/rarity:'限定'/);
+  assert.match(assetBlock,/buff:'stamina',buffMultiplier:2\.8/);
+  assert.match(assetBlock,/image:'aircraft\/passenger\/puppy_luxury_airliner\.png'/);
+  const airliners=source.match(/const passengerAirlinerIds=new Set\(\[[\s\S]+?\n\]\);/)?.[0]||'';
+  assert.match(airliners,/'puppy_luxury_airliner'/);
+  const image=readFileSync(new URL('../assets/aircraft/passenger/puppy_luxury_airliner.png',import.meta.url));
+  assert.equal(image.subarray(1,4).toString(),'PNG');
+  const width=image.readUInt32BE(16),height=image.readUInt32BE(20);
+  assert.ok(width>=1500&&height>=800&&width>height,`萌犬豪華客機圖片規格錯誤：${width}x${height}`);
 });
 
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
@@ -438,6 +468,16 @@ test('列車營運、每日盲盒與公司分流公告完整',()=>{
   assert.match(update.changes.join('\n'),/每日限購 1 盒/);
   assert.match(update.changes.join('\n'),/同時進行鐵路與客運/);
   assert.match(update.changes.join('\n'),/自動遷移/);
+});
+
+test('萌犬豪華客機與闖空門平衡公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-puppy-airliner-burglary-balance.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-01-puppy-airliner-burglary-balance');
+  assert.equal(update.version,'2026.08.01.3');
+  assert.equal(update.changes.length,7);
+  assert.match(update.summary,/萌犬豪華客機/);
+  assert.match(update.changes.join('\n'),/15%～30%/);
+  assert.match(update.changes.join('\n'),/賭場公告/);
 });
 
 test('13 款機車資產已全面換用新版圖片',()=>{
