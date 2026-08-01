@@ -344,6 +344,37 @@ test('限時資產拍賣使用安全託管、退款、延時與自動結標',()=
   assert.doesNotMatch(source,/setName\('資產拍賣'\)/,'拍賣應整合既有資產入口，不新增斜線指令');
 });
 
+test('賭場強化保全與限時拍賣每六小時提醒',()=>{
+  assert.match(source,/const CASINO_VAULT_LOOT_RATE=0\.50/);
+  assert.match(source,/const CASINO_VAULT_MAX_SUCCESS_RATE=25/);
+  assert.match(source,/const CASINO_SECURITY_BASE_HP=24/);
+  assert.match(source,/const CASINO_SECURITY_HP_PER_MEMBER=5/);
+  assert.match(source,/const CASINO_SECURITY_ESCAPE_PENALTY=10/);
+  assert.match(source,/casino_vault:\{name:'🎰 賭場中央寶庫（週日限定）',baseChance:2/);
+  assert.match(source,/casinoSecurityMaxHp=heist=>CASINO_SECURITY_BASE_HP\+heist\.members\.length\*CASINO_SECURITY_HP_PER_MEMBER/);
+  assert.match(source,/successRateCap=heist\.casinoSecurityRequired\?CASINO_VAULT_MAX_SUCCESS_RATE:normalSuccessCap/);
+  assert.match(source,/combat\.policePressure-casinoSecurityPenalty/);
+  assert.match(source,/casinoVaultBalance\(i\.guildId\)\*CASINO_VAULT_LOOT_RATE/);
+  assert.doesNotMatch(source,/casinoVaultBalance\([^\n]+\*0\.8/);
+
+  assert.match(source,/last_reminder_at INTEGER/);
+  assert.match(source,/ALTER TABLE asset_auctions ADD COLUMN last_reminder_at INTEGER/);
+  assert.match(source,/const ASSET_AUCTION_REMINDER_MS=6\*60\*60\*1000/);
+  const scheduler=source.match(/async function processAssetAuctions\(\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(scheduler,/COALESCE\(last_reminder_at,announced_at\)<=\?/);
+  assert.match(scheduler,/now-ASSET_AUCTION_REMINDER_MS/);
+  assert.match(scheduler,/每 6 小時即時提醒/);
+  assert.match(scheduler,/UPDATE asset_auctions SET last_reminder_at=\?/);
+
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-casino-security-auction-reminders.json',import.meta.url),'utf8'));
+  assert.equal(update.version,'2026.08.01.11');
+  assert.match(update.summary,/重裝保全/);
+  assert.match(update.summary,/每 6 小時/);
+  assert.ok(update.changes.some(change=>change.includes('4%')&&change.includes('2%')));
+  assert.ok(update.changes.some(change=>change.includes('50%')&&change.includes('80%')));
+  assert.deepEqual(update.channelNames,['賭場公告']);
+});
+
 test('企業升級與限時拍賣公告完整',()=>{
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-enterprise-upgrades-asset-auctions.json',import.meta.url),'utf8'));
   assert.equal(update.version,'2026.08.01.9');
