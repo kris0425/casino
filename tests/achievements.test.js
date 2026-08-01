@@ -546,7 +546,7 @@ test('交通事業面板公開顯示並於閒置三分鐘後刪除',async()=>{
   assert.equal(deletions,1,'最新計時器到期時必須刪除面板');
   assert.match(source,/function touchTransportPanelInteraction\(i\)/);
   assert.match(source,/i\.user\?\.id!==ownerId/,'其他玩家操作不得延長面板存活時間');
-  assert.match(source,/async function handleInteraction\(i\) \{\n  touchTransportPanelInteraction\(i\);/);
+  assert.match(source,/async function handleInteraction\(i\) \{\r?\n  touchTransportPanelInteraction\(i\);/);
   const commandBlock=source.match(/if\(i\.commandName==='交通事業'\) \{[\s\S]+?\n    \}/)?.[0]||'';
   assert.match(commandBlock,/return replyTransportPanel\(i,/,'交通事業必須使用公開面板回覆');
   assert.doesNotMatch(commandBlock,/ephemeral:true/,'交通事業面板不可設為只有本人可見');
