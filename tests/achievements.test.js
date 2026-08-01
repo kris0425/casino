@@ -598,6 +598,48 @@ test('Oracle 一鍵部署腳本具備增量、備份、測試與安全清理',()
   assert.match(backup,/BACKUP_OK/);
 });
 
+test('5 款商城列車附有橫向圖片、價格、營收加成與車庫限制',()=>{
+  const trainIds=[
+    'train_silverwing_metropolitan_express','train_coral_coast_panorama','train_emerald_titan_freight',
+    'train_royal_blue_diamond_sleeper','train_crimson_phoenix_high_speed'
+  ];
+  const expected={
+    train_silverwing_metropolitan_express:{image:'silverwing_metropolitan_express.png',price:180000,bonus:'0.05'},
+    train_coral_coast_panorama:{image:'coral_coast_panorama.png',price:420000,bonus:'0.09'},
+    train_emerald_titan_freight:{image:'emerald_titan_freight.png',price:850000,bonus:'0.14'},
+    train_royal_blue_diamond_sleeper:{image:'royal_blue_diamond_sleeper.png',price:1800000,bonus:'0.22'},
+    train_crimson_phoenix_high_speed:{image:'crimson_phoenix_high_speed.png',price:3600000,bonus:'0.32'}
+  };
+  assert.equal(trainIds.length,5);
+  for(const assetId of trainIds) {
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(assetBlock,/category:'列車'/,`${assetId} 不是列車資產`);
+    assert.match(assetBlock,new RegExp(`price:${expected[assetId].price}(?:,|})`),`${assetId} 售價錯誤`);
+    assert.match(assetBlock,new RegExp(`trainRevenueBonus:${expected[assetId].bonus}(?:,|})`),`${assetId} 營收加成錯誤`);
+    assert.doesNotMatch(assetBlock,/forSale:false/,`${assetId} 不應被商城隱藏`);
+    const imagePath=`trains/${expected[assetId].image}`;
+    assert.match(assetBlock,new RegExp(`image:'${imagePath.replaceAll('/','\\/')}'`));
+    const image=readFileSync(new URL(`../assets/${imagePath}`,import.meta.url));
+    assert.equal(image.subarray(1,4).toString(),'PNG',`${imagePath} 不是有效 PNG`);
+    assert.equal(image.readUInt32BE(16),1536,`${imagePath} 寬度錯誤`);
+    assert.equal(image.readUInt32BE(20),1024,`${imagePath} 高度錯誤`);
+  }
+  assert.match(source,/train:\{label:'列車',emoji:'🚆',catalog:\['列車'\]\}/);
+  assert.match(source,/const trainShopAssetIds=\[[\s\S]+?train_crimson_phoenix_high_speed[\s\S]+?\];/);
+  assert.match(source,/const trainAssetIds=\[TRAIN_STARTER_ASSET_ID,\.\.\.trainBlindBoxIds,\.\.\.trainShopAssetIds\]/);
+  assert.match(source,/function ownedGarageTrainCount\(g,u\)/);
+  assert.match(source,/if\(used\+quantity>garage\.capacity\) throw new Error\(`列車車庫空間不足/);
+  assert.match(source,/buffId==='transport'.*trainRevenueBonus/s);
+
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-train-shop-five-models.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-01-train-shop-five-models');
+  assert.equal(update.version,'2026.08.01.7');
+  assert.match(update.summary,/5 款/);
+  assert.match(update.changes.join('\n'),/180,000.*3,600,000/s);
+  assert.match(update.changes.join('\n'),/5%.*32%/s);
+  assert.match(update.changes.join('\n'),/車庫/);
+});
+
 test('13 款機車資產已全面換用新版圖片',()=>{
   const motorcycleIds=[
     'purple_street_scooter','orange_dirtbike','blue_naked','bosozoku','wasteland_raider',
