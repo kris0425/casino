@@ -8,8 +8,8 @@ COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 RUN mkdir -p /app/data/renders
 
-# Keep large, rarely changed media in cache layers before frequently changed code.
-COPY assets ./assets
+# Runtime media is mounted read-only by docker-compose. It intentionally does
+# not belong in the image or Docker build context.
 COPY activity/public ./activity/public
 COPY scripts ./scripts
 COPY updates ./updates

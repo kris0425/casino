@@ -54,10 +54,49 @@ while IFS= read -r relative || [[ -n "$relative" ]]; do
 done < "$STAGE/delete-files.txt"
 
 cd "$PROJECT"
-sudo DOCKER_BUILDKIT=1 docker compose build "$CONTAINER"
-sudo docker run --rm -v "$PROJECT/tests:/app/tests:ro" "$IMAGE" npm test
-sudo docker run --rm --env-file .env -e COMMAND_BUILD_ONLY=1 "$IMAGE"
-sudo docker compose up -d --no-deps "$CONTAINER"
+requires_image_build_path() {
+  case "$1" in
+    .dockerignore|Dockerfile|docker-compose.yml|package.json|package-lock.json|src/*) return 0 ;;
+    assets/*|activity/public/*|scripts/*|updates/*|tests/*|CHANGELOG.md|.gitattributes) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+IMAGE_BUILD_REQUIRED=false
+while IFS= read -r relative; do
+  [[ -z "$relative" ]] && continue
+  if requires_image_build_path "$relative"; then
+    IMAGE_BUILD_REQUIRED=true
+    break
+  fi
+done < <(find "$STAGE/source" -type f -printf '%P\n')
+if [[ "$IMAGE_BUILD_REQUIRED" != true ]]; then
+  while IFS= read -r relative || [[ -n "$relative" ]]; do
+    [[ -z "$relative" ]] && continue
+    if requires_image_build_path "$relative"; then
+      IMAGE_BUILD_REQUIRED=true
+      break
+    fi
+  done < "$STAGE/delete-files.txt"
+fi
+
+if [[ "$IMAGE_BUILD_REQUIRED" == true ]]; then
+  echo "IMAGE_BUILD_REQUIRED source-or-dependency changes detected"
+  sudo DOCKER_BUILDKIT=1 docker compose build "$CONTAINER"
+else
+  echo "IMAGE_BUILD_SKIPPED runtime-mounted files only"
+fi
+
+RUNTIME_MOUNTS=(
+  -v "$PROJECT/src:/app/src:ro"
+  -v "$PROJECT/assets:/app/assets:ro"
+  -v "$PROJECT/activity/public:/app/activity/public:ro"
+  -v "$PROJECT/scripts:/app/scripts:ro"
+  -v "$PROJECT/updates:/app/updates:ro"
+)
+sudo docker run --rm -v "$PROJECT/tests:/app/tests:ro" "${RUNTIME_MOUNTS[@]}" "$IMAGE" npm test
+sudo docker run --rm --env-file .env -e COMMAND_BUILD_ONLY=1 "${RUNTIME_MOUNTS[@]}" "$IMAGE"
+sudo docker compose up -d --no-deps --force-recreate "$CONTAINER"
 
 logged_in=false
 for _ in $(seq 1 12); do

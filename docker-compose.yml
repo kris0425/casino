@@ -8,6 +8,11 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
+      - ./assets:/app/assets:ro
+      - ./activity/public:/app/activity/public:ro
+      - ./scripts:/app/scripts:ro
+      - ./updates:/app/updates:ro
+      - ./src:/app/src:ro
 
   activity-tunnel:
     image: cloudflare/cloudflared:latest

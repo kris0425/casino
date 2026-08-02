@@ -16,8 +16,9 @@
 
 !CHANGELOG.md
 
-!assets/
-!assets/**
+# Runtime media is bind-mounted from the Oracle project directory. Keeping it
+# out of the build context prevents every Docker build from uploading all
+# assets, even when only source code changes.
 
 !activity/
 !activity/public/

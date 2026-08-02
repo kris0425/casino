@@ -889,3 +889,19 @@ test('20 款卡車加入物流貨運並套用最高收益加成',()=>{
   assert.match(update.changes.join('\n'),/物流貨運/);
   assert.match(update.changes.join('\n'),/最高.*加成/s);
 });
+
+test('Oracle 部署將大型素材改用掛載並支援跳過 Docker 重建',()=>{
+  const dockerignore=readFileSync(new URL('../.dockerignore',import.meta.url),'utf8');
+  const dockerfile=readFileSync(new URL('../Dockerfile',import.meta.url),'utf8');
+  const compose=readFileSync(new URL('../docker-compose.yml',import.meta.url),'utf8');
+  const remote=readFileSync(new URL('../scripts/deploy_oracle_remote.sh',import.meta.url),'utf8');
+  assert.doesNotMatch(dockerignore,/!assets\//,'assets 不應重新加入 Docker build context');
+  assert.doesNotMatch(dockerfile,/COPY assets \.\/assets/,'Dockerfile 不應打包整個 assets');
+  assert.match(compose,/\.\/assets:\/app\/assets:ro/);
+  assert.match(compose,/\.\/src:\/app\/src:ro/);
+  assert.match(compose,/\.\/updates:\/app\/updates:ro/);
+  assert.match(remote,/IMAGE_BUILD_REQUIRED/);
+  assert.match(remote,/IMAGE_BUILD_SKIPPED/);
+  assert.match(remote,/assets\/\*\|activity\/public\/\*\|scripts\/\*\|updates\/\*\|tests\/\*/);
+  assert.match(remote,/--force-recreate/);
+});
