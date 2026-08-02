@@ -1728,12 +1728,21 @@ const transportRoutes={
   rail_metro_commuter:{name:'🚆 都會通勤快線',type:'rail',description:'高密度城市通勤列車，週轉快速且收益穩定。',durationMs:10*60*1000,baseRevenue:72000,operatingCost:22000,stamina:8},
   rail_intercity_business:{name:'🚄 城際商務特快',type:'rail',description:'串聯主要商業城市的高鐵班次。',durationMs:30*60*1000,baseRevenue:245000,operatingCost:80000,stamina:18},
   rail_night_express:{name:'🌙 跨區夜行特快',type:'rail',description:'長距離夜間列車，提供臥鋪與高價商務運輸。',durationMs:60*60*1000,baseRevenue:620000,operatingCost:220000,stamina:32},
+  rail_harbor_coastal_liner:{name:'🚆 海灣沿岸城際線',type:'rail',description:'連接港口與沿岸城市的中程鐵路，兼顧通勤與商務客流。',durationMs:20*60*1000,baseRevenue:155000,operatingCost:52000,stamina:12},
+  rail_alpine_scenic_express:{name:'🏔️ 雪嶺景觀特快',type:'rail',description:'穿越山谷與湖區的觀光特快，景觀座席帶來更高票價。',durationMs:45*60*1000,baseRevenue:410000,operatingCost:145000,stamina:24},
+  rail_aurora_interregional:{name:'🌌 極光跨區長途線',type:'rail',description:'橫跨北境與多座樞紐城市的長途旗艦班次。',durationMs:90*60*1000,baseRevenue:900000,operatingCost:330000,stamina:38},
   coach_city_shuttle:{name:'🏙️ 都會接駁客運',type:'coach',description:'往返市中心與觀光區的高頻短程班次。',durationMs:8*60*1000,baseRevenue:45000,operatingCost:14000,stamina:6},
   coach_intercity_line:{name:'🛣️ 城際豪華客運',type:'coach',description:'以豪華巴士連結鄰近城市與轉運中心。',durationMs:20*60*1000,baseRevenue:125000,operatingCost:40000,stamina:12},
   coach_resort_tour:{name:'🎡 海灣觀光專線',type:'coach',description:'承接大型旅行團與度假區包車需求。',durationMs:45*60*1000,baseRevenue:360000,operatingCost:120000,stamina:24},
+  coach_airport_connector:{name:'✈️ 機場接駁專線',type:'coach',description:'往返機場、火車站與市中心的高頻接駁客運。',durationMs:12*60*1000,baseRevenue:70000,operatingCost:22000,stamina:8},
+  coach_mountain_scenic_loop:{name:'🏔️ 山城觀光環線',type:'coach',description:'串聯山城景點與溫泉度假區的季節觀光環線。',durationMs:35*60*1000,baseRevenue:220000,operatingCost:70000,stamina:18},
+  coach_night_vip_sleeper:{name:'🌙 夜航尊榮客運',type:'coach',description:'提供臥躺座椅與夜間接駁服務的高級長途客運。',durationMs:75*60*1000,baseRevenue:560000,operatingCost:190000,stamina:30},
   freight_city_distribution:{name:'📦 城市配送專案',type:'freight',description:'處理商圈、倉庫與門市間的快速配送。',durationMs:15*60*1000,baseRevenue:120000,operatingCost:38000,stamina:10},
   freight_port_logistics:{name:'🏗️ 港區貨櫃聯運',type:'freight',description:'整合貨櫃場、鐵路與卡車的港區物流任務。',durationMs:50*60*1000,baseRevenue:440000,operatingCost:150000,stamina:24},
-  freight_continental_contract:{name:'🌐 跨境物流合約',type:'freight',description:'承攬高價值跨境貨物與長途供應鏈合約。',durationMs:2*60*60*1000,baseRevenue:1300000,operatingCost:500000,stamina:42}
+  freight_continental_contract:{name:'🌐 跨境物流合約',type:'freight',description:'承攬高價值跨境貨物與長途供應鏈合約。',durationMs:2*60*60*1000,baseRevenue:1300000,operatingCost:500000,stamina:42},
+  freight_cold_chain_network:{name:'❄️ 冷鏈生鮮配送網',type:'freight',description:'維持低溫品質、串聯農場與城市倉儲的冷鏈物流。',durationMs:25*60*1000,baseRevenue:210000,operatingCost:68000,stamina:14},
+  freight_rail_intermodal:{name:'🚆 鐵公聯運幹線',type:'freight',description:'以鐵路長途幹線搭配卡車接駁的高容量貨運任務。',durationMs:75*60*1000,baseRevenue:780000,operatingCost:280000,stamina:32},
+  freight_ocean_bridge_contract:{name:'🌊 海陸跨境合約',type:'freight',description:'承接港口、鐵路與公路聯運的高價值跨境供應鏈。',durationMs:3*60*60*1000,baseRevenue:1900000,operatingCost:760000,stamina:50}
 };
 const TRAIN_BLIND_BOX_SINGLE_PRICE=50000;
 const TRAIN_STARTER_ASSET_ID='train_starter_service_commuter';

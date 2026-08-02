@@ -905,3 +905,33 @@ test('Oracle 部署將大型素材改用掛載並支援跳過 Docker 重建',()=
   assert.match(remote,/assets\/\*\|activity\/public\/\*\|scripts\/\*\|updates\/\*\|tests\/\*/);
   assert.match(remote,/--force-recreate/);
 });
+
+test('鐵路、客運與貨運各新增三條可運行路線',()=>{
+  const routeSource=source.match(/const transportRoutes=(\{[\s\S]+?\n\});/)?.[1];
+  assert.ok(routeSource,'缺少陸路交通路線表');
+  const routes=new Function(`return ${routeSource}`)();
+  const expected={
+    rail_harbor_coastal_liner:['rail',155000,52000,20*60*1000,12],
+    rail_alpine_scenic_express:['rail',410000,145000,45*60*1000,24],
+    rail_aurora_interregional:['rail',900000,330000,90*60*1000,38],
+    coach_airport_connector:['coach',70000,22000,12*60*1000,8],
+    coach_mountain_scenic_loop:['coach',220000,70000,35*60*1000,18],
+    coach_night_vip_sleeper:['coach',560000,190000,75*60*1000,30],
+    freight_cold_chain_network:['freight',210000,68000,25*60*1000,14],
+    freight_rail_intermodal:['freight',780000,280000,75*60*1000,32],
+    freight_ocean_bridge_contract:['freight',1900000,760000,3*60*60*1000,50]
+  };
+  for(const [routeId,[type,baseRevenue,operatingCost,durationMs,stamina]] of Object.entries(expected)) {
+    const route=routes[routeId];
+    assert.ok(route,`${routeId} 未加入路線表`);
+    assert.equal(route.type,type,`${routeId} 類型不正確`);
+    assert.equal(route.durationMs,durationMs,`${routeId} 時間不正確`);
+    assert.equal(route.baseRevenue,baseRevenue,`${routeId} 基礎營收不正確`);
+    assert.equal(route.operatingCost,operatingCost,`${routeId} 營運成本不正確`);
+    assert.equal(route.stamina,stamina,`${routeId} 體力不正確`);
+  }
+  assert.equal(Object.values(routes).filter(route=>route.type==='rail').length,6,'鐵路路線數量不正確');
+  assert.equal(Object.values(routes).filter(route=>route.type==='coach').length,6,'客運路線數量不正確');
+  assert.equal(Object.values(routes).filter(route=>route.type==='freight').length,6,'貨運路線數量不正確');
+  assert.match(source,/Object\.entries\(transportRoutes\)\.filter\(\(\[,route\]\)=>route\.type===businessType\)/,'路線選單應自動包含新增路線');
+});
