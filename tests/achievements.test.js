@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { summarizeWebAssets } from '../src/game-data/web-game.js';
 
 const source=readFileSync(new URL('../src/index.js',import.meta.url),'utf8');
+const cosmeticsSource=readFileSync(new URL('../src/game-data/cosmetics.js',import.meta.url),'utf8');
+const webGameDataSource=readFileSync(new URL('../src/game-data/web-game.js',import.meta.url),'utf8');
 
 test('玩家轉帳移除自訂上限但保留安全規則',()=>{
   assert.doesNotMatch(source,/PLAYER_TRANSFER_MAX/);
@@ -61,7 +64,7 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   for(const name of removed) {
     assert.doesNotMatch(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${name}'\\)`),`舊指令 /${name} 仍在註冊`);
   }
-  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',成就:'成就',造型:'個人造型',稱號:'稱號'\}/);
+  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',稱號:'稱號'\}/);
   assert.match(source,/日常:\{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'\}/);
   assert.match(source,/補給:\{商城:'商城',背包:'背包',購買:'購買',使用:'使用'\}/);
   assert.match(source,/寵物:\{商店:'寵物店',我的:'我的寵物'\}/);
@@ -75,8 +78,9 @@ test('網站版個人造型具備人物大廳、商城、衣櫃、預設與發�
   const html=readFileSync(new URL('../activity/public/appearance.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../activity/public/appearance.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/appearance.js',import.meta.url),'utf8');
-  assert.match(source,/const COSMETIC_SLOTS=\['character','background','outfit','headwear','face','handheld','aura'\]/);
-  const catalogBlock=source.match(/const cosmeticCatalog=\[[\s\S]+?\n\];/)?.[0]||'';
+  assert.match(source,/from '\.\/game-data\/cosmetics\.js'/);
+  assert.match(cosmeticsSource,/export const COSMETIC_SLOTS=\['character','background','outfit','headwear','face','handheld','aura'\]/);
+  const catalogBlock=cosmeticsSource.match(/export const cosmeticCatalog=\[[\s\S]+?\n\];/)?.[0]||'';
   assert.equal((catalogBlock.match(/\{id:'/g)||[]).length,28,'人物大廳版必須提供 28 件造型');
   assert.match(source,/CREATE TABLE IF NOT EXISTS player_cosmetics/);
   assert.match(source,/CREATE TABLE IF NOT EXISTS player_appearance/);
@@ -114,7 +118,7 @@ test('人物大廳四名全身角色使用透明 PNG 並加入商城',()=>{
     assert.ok(data.length>500_000,`${file} 不是完整角色素材`);
     assert.equal(data[25],6,`${file} 必須是具有 alpha 通道的 RGBA PNG`);
   }
-  for(const id of ['casino_character','transport_character','heist_character','pomeranian_character']) assert.match(source,new RegExp(`id:'${id}',slot:'character'`));
+  for(const id of ['casino_character','transport_character','heist_character','pomeranian_character']) assert.match(cosmeticsSource,new RegExp(`id:'${id}',slot:'character'`));
   assert.match(source,/setThumbnail\(`\$\{ACTIVITY_PUBLIC_URL\}\/appearance\/characters\/\$\{character\.image\}`\)/);
 });
 
@@ -142,6 +146,48 @@ test('人物展示大廳更新公告完整',()=>{
   assert.equal(update.version,'2026.08.02.5');
   assert.deepEqual(update.channelNames,['賭場公告']);
   for(const required of ['人物展示大廳','4 名','全身角色','28 件','原有衣櫃']) assert.match(text,new RegExp(required));
+});
+
+test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
+  const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
+  assert.match(source,/from '\.\/game-data\/web-game\.js'/);
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.02\.7'/);
+  for(const id of ['appearance','transport','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
+  assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
+  assert.match(source,/function parseGameActivityToken\(token\)/);
+  assert.match(source,/session\.kind!=='game'/);
+  assert.match(source,/\/game':'game\.html'/);
+  assert.match(source,/url\.pathname==='\/activity\/game'/);
+  assert.match(source,/url\.pathname==='\/activity\/game\/stamina-restore'/);
+  assert.match(source,/setName\('遊戲'\)\.setDescription\('開啟網頁遊戲大廳與個人經營總覽'\)/);
+  assert.match(source,/routedCommand==='網頁遊戲'/);
+  for(const id of ['playerBalance','restoreStamina','moduleGrid','transportGrid','assetGrid','achievementGrid']) assert.match(html,new RegExp(`id="${id}"`));
+  assert.match(css,/\.hero-character/);
+  assert.match(css,/@media\(max-width:620px\)/);
+  assert.match(js,/api\('\/api\/game'\)/);
+  assert.match(js,/api\('\/api\/game\/stamina-restore',\{method:'POST'\}\)/);
+});
+
+test('網頁遊戲第一版更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-02-web-game-v1.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.02.7');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['/玩家 遊戲','金庫','資產','交通事業','成就','每日免費體力','Oracle']) assert.match(text,new RegExp(required.replace('/','\\/')));
+});
+
+test('網頁遊戲資產摘要由獨立資料模組正確計算',()=>{
+  const summary=summarizeWebAssets(
+    [{asset_id:'airport',quantity:2},{asset_id:'train',quantity:3}],
+    {airport:{name:'國際機場',category:'房地產',rarity:'傳說',price:1_000_000},train:{name:'高速列車',category:'列車',rarity:'史詩',price:200_000}},
+    1
+  );
+  assert.equal(summary.count,5);
+  assert.equal(summary.value,2_600_000);
+  assert.equal(summary.featured.length,1);
+  assert.equal(summary.featured[0].id,'airport');
 });
 
 test('成就累加資料表可安全累計與取最大值',()=>{

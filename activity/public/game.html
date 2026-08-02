@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#09070f">
+  <title>網頁遊戲大廳｜澳門最大賭場</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/game.css?v=20260802.7">
+</head>
+<body>
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
+  <header class="topbar">
+    <a class="brand" href="#top"><span class="brand-mark">♠</span><span><strong>澳門最大賭場</strong><small>WEB GAME · PHASE ONE</small></span></a>
+    <div class="top-actions"><span class="session" id="sessionTime">安全連結</span><button class="ghost-button" id="refreshData">重新整理</button></div>
+  </header>
+
+  <main id="top">
+    <section class="hero shell">
+      <img class="hero-background" id="heroBackground" alt="目前造型背景">
+      <div class="hero-shade"></div>
+      <div class="hero-copy">
+        <span class="eyebrow">PLAYER COMMAND CENTER</span>
+        <div class="player-line"><img id="playerAvatar" alt="玩家頭像"><div><small>歡迎回來</small><h1 id="playerName">讀取中…</h1></div></div>
+        <p class="rank" id="playerRank">—</p>
+        <p class="title" id="playerTitle">—</p>
+        <div class="wallet"><small>目前金庫</small><strong id="playerBalance">—</strong><span>金幣</span></div>
+        <div class="energy-copy"><span>每日體力</span><strong id="staminaText">—</strong></div>
+        <div class="energy-track"><i id="staminaBar"></i></div>
+        <div class="hero-actions"><button class="primary-button" id="restoreStamina">每日免費回體力</button><a class="secondary-button" id="appearanceLink">進入造型工作室</a></div>
+      </div>
+      <img class="hero-character" id="heroCharacter" alt="目前展示人物">
+      <div class="buff-card"><span id="buffIcon">✨</span><div><small>今日伺服器增益</small><strong id="buffName">—</strong><p id="buffText">—</p></div></div>
+    </section>
+
+    <section class="stats shell" aria-label="玩家數據">
+      <article><small>銀行負債</small><strong id="playerDebt">—</strong><span>金幣</span></article>
+      <article><small>資產收藏</small><strong id="assetCount">—</strong><span>件資產</span></article>
+      <article><small>資產原價總值</small><strong id="assetValue">—</strong><span>金幣</span></article>
+      <article><small>成就進度</small><strong id="achievementCount">—</strong><span>已解鎖</span></article>
+    </section>
+
+    <section class="section shell" id="modules">
+      <div class="section-heading"><div><span class="eyebrow">GAME MODULES</span><h2>遊戲功能</h2></div><p>網站與 Discord 共用同一份即時資料</p></div>
+      <div class="module-grid" id="moduleGrid"></div>
+    </section>
+
+    <section class="section shell" id="transport">
+      <div class="section-heading"><div><span class="eyebrow">TRANSPORT EMPIRE</span><h2>交通事業總部</h2></div><p>四種事業可同時經營，網站顯示即時狀態</p></div>
+      <div class="transport-grid" id="transportGrid"></div>
+      <p class="section-note">開始營運、配置路線與領取收入目前仍由 Discord `/交通事業` 執行；下一階段會搬入網站。</p>
+    </section>
+
+    <section class="section shell" id="assets">
+      <div class="section-heading"><div><span class="eyebrow">COLLECTION</span><h2>高價值資產</h2></div><p id="assetSummary">—</p></div>
+      <div class="asset-grid" id="assetGrid"></div>
+    </section>
+
+    <section class="section shell" id="achievements">
+      <div class="section-heading"><div><span class="eyebrow">ACHIEVEMENTS</span><h2>成就收藏</h2></div><p>達成條件後會自動同步解鎖</p></div>
+      <div class="achievement-grid" id="achievementGrid"></div>
+    </section>
+  </main>
+
+  <footer><span>澳門最大賭場 · 網頁遊戲第一階段</span><span id="versionLabel">—</span></footer>
+  <div class="loading" id="loading"><div class="spinner"></div><strong>正在連線到你的遊戲資料…</strong><p>所有餘額由 Oracle 伺服器即時驗證</p></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/game.js?v=20260802.7" defer></script>
+</body>
+</html>

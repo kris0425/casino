@@ -12,6 +12,8 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { COSMETIC_SLOTS, COSMETIC_SLOT_LABELS, cosmeticCatalog, cosmeticById, defaultAppearance } from './game-data/cosmetics.js';
+import { WEB_GAME_VERSION, WEB_GAME_MODULES, WEB_TRANSPORT_TYPES, summarizeWebAssets } from './game-data/web-game.js';
 
 const execFileAsync=promisify(execFile);
 
@@ -71,40 +73,6 @@ const ECONOMY_SINK_LABELS={
 const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund']);
 const BASE_STAMINA = 800;
 const assetPath=name=>resolve(process.cwd(),'assets',name);
-const COSMETIC_SLOTS=['character','background','outfit','headwear','face','handheld','aura'];
-const COSMETIC_SLOT_LABELS={character:'人物',background:'背景',outfit:'服裝',headwear:'頭飾',face:'臉部',handheld:'手持物',aura:'光環／邊框'};
-const cosmeticCatalog=[
-  {id:'casino_character',slot:'character',theme:'賭場之王',name:'黑金首席荷官',icon:'♦️',price:0,starter:true,image:'casino-host.png',style:'casino'},
-  {id:'transport_character',slot:'character',theme:'交通大亨',name:'銀翼運輸指揮官',icon:'🛫',price:20_000_000,image:'transport-commander.png',style:'transport'},
-  {id:'heist_character',slot:'character',theme:'暗夜劫案',name:'紫影情報專員',icon:'🌙',price:30_000_000,image:'night-agent.png',style:'heist'},
-  {id:'pomeranian_character',slot:'character',theme:'萌犬航空',name:'粉雲萌犬機長',icon:'🐾',price:40_000_000,image:'pomeranian-captain.png',style:'pomeranian'},
-  {id:'casino_background',slot:'background',theme:'賭場之王',name:'黑金至尊廳',icon:'♠️',price:0,starter:true,image:'casino-king.png',style:'casino'},
-  {id:'casino_outfit',slot:'outfit',theme:'賭場之王',name:'黑金晚宴西裝',icon:'🤵',price:0,starter:true,style:'casino'},
-  {id:'casino_headwear',slot:'headwear',theme:'賭場之王',name:'籌碼王冠',icon:'👑',price:0,starter:true,style:'casino'},
-  {id:'casino_face',slot:'face',theme:'賭場之王',name:'金框墨鏡',icon:'😎',price:0,starter:true,style:'casino'},
-  {id:'casino_handheld',slot:'handheld',theme:'賭場之王',name:'至尊籌碼',icon:'🎰',price:0,starter:true,style:'casino'},
-  {id:'casino_aura',slot:'aura',theme:'賭場之王',name:'黃金派彩光環',icon:'✨',price:0,starter:true,style:'casino'},
-  {id:'transport_background',slot:'background',theme:'交通大亨',name:'未來轉運總站',icon:'🌐',price:5_000_000,image:'transport-mogul.png',style:'transport'},
-  {id:'transport_outfit',slot:'outfit',theme:'交通大亨',name:'企業總裁制服',icon:'🧥',price:8_000_000,style:'transport'},
-  {id:'transport_headwear',slot:'headwear',theme:'交通大亨',name:'銀翼站長帽',icon:'🧢',price:3_000_000,style:'transport'},
-  {id:'transport_face',slot:'face',theme:'交通大亨',name:'航線分析鏡',icon:'🥽',price:2_000_000,style:'transport'},
-  {id:'transport_handheld',slot:'handheld',theme:'交通大亨',name:'企業調度平板',icon:'📱',price:4_000_000,style:'transport'},
-  {id:'transport_aura',slot:'aura',theme:'交通大亨',name:'環球航線光環',icon:'🛰️',price:6_000_000,style:'transport'},
-  {id:'heist_background',slot:'background',theme:'暗夜劫案',name:'雨夜撤離天台',icon:'🌃',price:8_000_000,image:'night-heist.png',style:'heist'},
-  {id:'heist_outfit',slot:'outfit',theme:'暗夜劫案',name:'幽影戰術風衣',icon:'🥷',price:12_000_000,style:'heist'},
-  {id:'heist_headwear',slot:'headwear',theme:'暗夜劫案',name:'無聲夜行帽',icon:'🕶️',price:4_000_000,style:'heist'},
-  {id:'heist_face',slot:'face',theme:'暗夜劫案',name:'霓虹變裝面罩',icon:'🎭',price:3_000_000,style:'heist'},
-  {id:'heist_handheld',slot:'handheld',theme:'暗夜劫案',name:'加密撤離箱',icon:'💼',price:6_000_000,style:'heist'},
-  {id:'heist_aura',slot:'aura',theme:'暗夜劫案',name:'紅藍追緝殘影',icon:'🚨',price:10_000_000,style:'heist'},
-  {id:'pomeranian_background',slot:'background',theme:'萌犬航空',name:'粉紅雲端客艙',icon:'☁️',price:12_000_000,image:'pomeranian-air.png',style:'pomeranian'},
-  {id:'pomeranian_outfit',slot:'outfit',theme:'萌犬航空',name:'萌犬機長禮服',icon:'🎀',price:18_000_000,style:'pomeranian'},
-  {id:'pomeranian_headwear',slot:'headwear',theme:'萌犬航空',name:'博美雲朵耳',icon:'🐶',price:6_000_000,style:'pomeranian'},
-  {id:'pomeranian_face',slot:'face',theme:'萌犬航空',name:'蜜桃愛心妝',icon:'💖',price:5_000_000,style:'pomeranian'},
-  {id:'pomeranian_handheld',slot:'handheld',theme:'萌犬航空',name:'迷你萌犬行李箱',icon:'🧳',price:8_000_000,style:'pomeranian'},
-  {id:'pomeranian_aura',slot:'aura',theme:'萌犬航空',name:'雲朵愛心光環',icon:'💕',price:14_000_000,style:'pomeranian'}
-];
-const cosmeticById=Object.fromEntries(cosmeticCatalog.map(item=>[item.id,item]));
-const defaultAppearance=Object.fromEntries(COSMETIC_SLOTS.map(slot=>[slot,cosmeticCatalog.find(item=>item.slot===slot&&item.starter)?.id||null]));
 const petCatalog={
   golden_retriever:{name:'黃金獵犬｜阿金',emoji:'🐕',price:18000,image:'pets/golden_retriever.jpg',petType:'dog',bonusType:'work',bonusValue:0.05,bonusText:'工作收入最高 +5%',description:'熱情可靠的工作夥伴，心情越好，工作收入加成越高。'},
   siamese_cat:{name:'暹羅貓｜小藍',emoji:'🐈',price:22000,image:'pets/siamese_cat.jpg',petType:'cat',bonusType:'casino',bonusValue:0.03,bonusText:'賭場獲勝派彩最高 +3%',description:'神祕又機靈的幸運夥伴，會替贏牌帶來一點好運。'},
@@ -6225,11 +6193,12 @@ const playerTitleChoices=[
   {name:'❌ 取消目前稱號',value:'clear'}
 ];
 const commands = [
-  new SlashCommandBuilder().setName('玩家').setDescription('統一查看金庫、資料、成就、造型與設定稱號')
+  new SlashCommandBuilder().setName('玩家').setDescription('統一查看金庫、資料、成就、造型、網頁遊戲與稱號')
     .addSubcommand(s=>s.setName('金庫').setDescription('查看自己或其他玩家的金幣').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('資料').setDescription('查看類似 Tatsu 的玩家資料卡').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('成就').setDescription('查看自己或其他玩家的成就進度').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('造型').setDescription('開啟個人造型商城、衣櫃與預設網站'))
+    .addSubcommand(s=>s.setName('遊戲').setDescription('開啟網頁遊戲大廳與個人經營總覽'))
     .addSubcommand(s=>s.setName('稱號').setDescription('裝備由成就解鎖的個人稱號').addStringOption(o=>o.setName('選擇').setDescription('選擇已解鎖的稱號').setRequired(true).addChoices(...playerTitleChoices))),
   new SlashCommandBuilder().setName('轉帳').setDescription('轉帳金幣給其他玩家（收取 2% 手續費）')
     .addUserOption(o=>o.setName('收款人').setDescription('選擇要收款的玩家').setRequired(true))
@@ -8090,7 +8059,7 @@ async function handleInteraction(i) {
   if (!i.isChatInputCommand() || !i.guildId) return;
   const g=i.guildId, u=i.user.id;
   const hubRoutes={
-    玩家:{金庫:'金庫',資料:'個人資料',成就:'成就',造型:'個人造型',稱號:'稱號'},
+    玩家:{金庫:'金庫',資料:'個人資料',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',稱號:'稱號'},
     日常:{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'},
     補給:{商城:'商城',背包:'背包',購買:'購買',使用:'使用'},
     寵物:{商店:'寵物店',我的:'我的寵物'}
@@ -8187,6 +8156,18 @@ async function handleInteraction(i) {
           {name:'🎁 首次使用',value:'「賭場之王」角色與六件基本套裝已免費開放。'}
         )],
         components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('開啟造型網站').setEmoji('👗').setStyle(ButtonStyle.Link).setURL(url))]
+      });
+    }
+    if(routedCommand==='網頁遊戲') {
+      const url=gameActivityUrl(g,u,i.channelId);
+      if(!url) throw new Error('網頁遊戲尚未完成設定，請稍後再試');
+      return i.reply({
+        ephemeral:true,
+        embeds:[new EmbedBuilder().setColor(0x8B5CF6).setTitle('🎮 澳門最大賭場｜網頁遊戲大廳').setDescription('進入網站即可查看即時金庫、體力、資產、成就與四種交通事業；也能直接前往人物造型、網頁麻將，並領取每日免費體力恢復。').addFields(
+          {name:'🔐 玩家專屬連結',value:'連結綁定你的 Discord 帳號與目前伺服器，30 分鐘後失效。'},
+          {name:'🛡️ 安全規則',value:'所有金幣、資產與體力操作仍由 Oracle 伺服器驗證，瀏覽器不會自行計算餘額。'}
+        )],
+        components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('進入網頁遊戲').setEmoji('🎮').setStyle(ButtonStyle.Link).setURL(url))]
       });
     }
     if(routedCommand==='個人資料') {
@@ -9384,6 +9365,15 @@ function appearanceActivityUrl(guildId,userId,channelId) {
   const token=appearanceActivityToken(guildId,userId,channelId);
   return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/appearance?session=${encodeURIComponent(token)}`:null;
 }
+function gameActivityToken(guildId,userId,channelId) {
+  if(!ACTIVITY_SIGNING_SECRET) return null;
+  const payload=Buffer.from(JSON.stringify({kind:'game',guildId,userId,channelId,exp:Date.now()+30*60*1000})).toString('base64url');
+  return `${payload}.${activitySignature(payload)}`;
+}
+function gameActivityUrl(guildId,userId,channelId) {
+  const token=gameActivityToken(guildId,userId,channelId);
+  return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/game?session=${encodeURIComponent(token)}`:null;
+}
 function scratchActivityToken(guildId,userId,ticketId,expiresAt) {
   if(!ACTIVITY_SIGNING_SECRET) return null;
   const payload=Buffer.from(JSON.stringify({kind:'scratch',guildId,userId,ticketId,exp:expiresAt})).toString('base64url');
@@ -9442,6 +9432,16 @@ function parseAppearanceActivityToken(token) {
   if(session.kind!=='appearance'||!session.guildId||!session.userId||!session.channelId||!session.exp||session.exp<Date.now()) throw new Error('造型網站連結已過期，請回到 Discord 重新使用 `/玩家 造型`');
   return session;
 }
+function parseGameActivityToken(token) {
+  if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('網頁遊戲連結無效');
+  const [payload,signature,...extra]=token.split('.');
+  if(!payload||!signature||extra.length) throw new Error('網頁遊戲連結格式錯誤');
+  const expected=Buffer.from(activitySignature(payload)),received=Buffer.from(signature);
+  if(expected.length!==received.length||!timingSafeEqual(expected,received)) throw new Error('網頁遊戲連結驗證失敗');
+  const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
+  if(session.kind!=='game'||!session.guildId||!session.userId||!session.channelId||!session.exp||session.exp<Date.now()) throw new Error('網頁遊戲連結已過期，請回到 Discord 重新使用 `/玩家 遊戲`');
+  return session;
+}
 function activityCatalog(category,assetId) {
   return Object.entries(vehicleModCatalog[category].options).map(([id,option])=>({id,name:vehicleModOptionName(assetId,category,id),price:option.price||0}));
 }
@@ -9475,6 +9475,64 @@ async function appearancePayload(session) {
     })),
     appearance:playerAppearance(session.guildId,session.userId),
     presets:appearancePresets(session.guildId,session.userId),
+    expiresAt:session.exp
+  };
+}
+function webGameTransportPayload(g,u) {
+  const now=Date.now(),airline=airlineCompany(g,u),flights=airlineFlights(g,u);
+  const airlineCompleted=flights.filter(flight=>flight.completes_at<=now).length;
+  const businesses=WEB_TRANSPORT_TYPES.map(type=>{
+    if(type.id==='airline') {
+      return {
+        ...type,registered:Boolean(airline),companyName:airline?.company_name||null,
+        level:airline?enterpriseLevel(airline):0,
+        status:!airline?'尚未註冊':airlineCompleted?'有航班可領取':flights.length?`${flights.length} 架航班執飛中`:'待命中',
+        active:flights.length,completed:airlineCompleted
+      };
+    }
+    const company=businessTransportCompany(g,u,type.id),operation=businessTransportOperation(g,u,type.id);
+    return {
+      ...type,registered:Boolean(company),companyName:company?.company_name||null,
+      level:company?enterpriseLevel(company):0,
+      station:company?.station_id?assetCatalog[company.station_id]?.name||company.station_id:null,
+      route:operation?.route_id?transportRoutes[operation.route_id]?.name||operation.route_id:company?.route_id?transportRoutes[company.route_id]?.name||company.route_id:null,
+      status:!company?'尚未註冊':operation?(operation.completes_at<=now?'營運完成，可領取':'營運中'):'待命中',
+      completesAt:operation?.completes_at||null
+    };
+  });
+  return businesses;
+}
+async function webGamePayload(session) {
+  const g=session.guildId,u=session.userId,user=await client.users.fetch(u);
+  const coins=ensureWallet(g,u),currentStamina=stamina(g,u),maxStamina=staminaMax(g,u);
+  const achievementState=syncAchievements(g,u),assetSummary=summarizeWebAssets(assetsOf(g,u),assetCatalog);
+  const appearance=playerAppearance(g,u),character=cosmeticById[appearance.character],background=cosmeticById[appearance.background];
+  const achievements=achievementDefinitions.map(item=>{
+    const done=achievementState.unlocked.has(item.id);
+    if(item.hidden&&!done) return {id:item.id,name:'❔ 隱藏成就',description:'達成特殊條件後才會揭曉',done:false,hidden:true,progress:null};
+    const current=Math.min(achievementState.stats[item.metric]||0,item.target);
+    return {id:item.id,name:item.name,description:item.description,rarity:item.rarity||'一般',done,hidden:false,current,target:item.target,progress:item.progressText?item.progressText(achievementState.stats):`${fmt(current)}/${fmt(item.target)}`};
+  });
+  return {
+    version:WEB_GAME_VERSION,
+    player:{
+      userId:u,name:user.globalName||user.username,avatar:user.displayAvatarURL({extension:'png',size:256}),
+      balance:coins,debt:debt(g,u),title:playerTitle(g,u),rank:profileRank(coins),
+      stamina:currentStamina,maxStamina,dailyStaminaAvailable:!dailyStaminaRestoreClaimed(g,u)
+    },
+    appearance:{
+      character:character?.name||'黑金首席荷官',characterImage:character?.image?`/appearance/characters/${character.image}`:null,
+      background:background?.name||'黑金至尊廳',backgroundImage:background?.image?`/appearance/backgrounds/${background.image}`:null,
+      summary:appearanceSummary(g,u)
+    },
+    assets:assetSummary,
+    achievements:{unlocked:achievementState.unlocked.size,total:achievementDefinitions.length,items:achievements},
+    transport:webGameTransportPayload(g,u),
+    dailyBuff:todayBuff(),
+    modules:WEB_GAME_MODULES.map(module=>({
+      ...module,
+      href:module.id==='appearance'?appearanceActivityUrl(g,u,session.channelId):module.id==='mahjong'?`${ACTIVITY_PUBLIC_URL}/mahjong`:`#${module.id}`
+    })),
     expiresAt:session.exp
   };
 }
@@ -9527,7 +9585,7 @@ const activityStaticTypes={
 };
 function serveActivityStatic(request,response,url) {
   if(!['GET','HEAD'].includes(request.method||'')) return false;
-  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/appearance':'appearance.html'};
+  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/appearance':'appearance.html','/game':'game.html'};
   const relative=routeFiles[url.pathname]||decodeURIComponent(url.pathname).replace(/^\/+/,'');
   if(!relative||relative.startsWith('api/')||relative.startsWith('activity/')) return false;
   const file=resolve(ACTIVITY_STATIC_ROOT,relative);
@@ -10120,6 +10178,15 @@ if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
         const body=await activityRequestBody(request),session=parseAppearanceActivityToken(body.session);
         const result=await publishAppearance(session);
         return activityJson(response,200,{ok:true,message:'造型名片已發布到原本的 Discord 頻道',...result});
+      }
+      if(request.method==='GET'&&url.pathname==='/activity/game') {
+        const session=parseGameActivityToken(url.searchParams.get('session'));
+        return activityJson(response,200,{ok:true,...await webGamePayload(session)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/game/stamina-restore') {
+        const body=await activityRequestBody(request),session=parseGameActivityToken(body.session);
+        const result=claimDailyStaminaRestore(session.guildId,session.userId);
+        return activityJson(response,200,{ok:true,message:`已免費恢復 ${result.restored} 點體力`,result,...await webGamePayload(session)});
       }
       if(request.method==='POST'&&url.pathname==='/activity/mahjong/create') {
         return activityJson(response,200,{ok:true,game:webMahjongCreate(await activityRequestBody(request))});
