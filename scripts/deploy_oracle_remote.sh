@@ -88,6 +88,9 @@ else
 fi
 
 RUNTIME_MOUNTS=(
+  -v "$PROJECT/.dockerignore:/app/.dockerignore:ro"
+  -v "$PROJECT/Dockerfile:/app/Dockerfile:ro"
+  -v "$PROJECT/docker-compose.yml:/app/docker-compose.yml:ro"
   -v "$PROJECT/src:/app/src:ro"
   -v "$PROJECT/assets:/app/assets:ro"
   -v "$PROJECT/activity/public:/app/activity/public:ro"
