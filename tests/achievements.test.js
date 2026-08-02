@@ -92,9 +92,16 @@ test('網站版個人造型具備人物大廳、商城、衣櫃、預設與發�
   assert.match(source,/\/activity\/appearance\/publish/);
   assert.match(html,/id="characterLineup"/);
   assert.match(html,/id="previewCharacter"/);
+  assert.match(html,/id="previewStage"/);
   assert.match(css,/\.character-card\.active/);
   assert.match(css,/\.character-model/);
+  assert.match(css,/\.avatar-stage\[data-character=transport\]/);
+  assert.match(css,/\.avatar-stage\[data-character=heist\]/);
+  assert.match(css,/\.avatar-stage\[data-character=pomeranian\]/);
+  assert.match(css,/\.headwear\{[^}]*transform:translate\(-50%,-100%\)/);
+  assert.match(css,/\.handheld\{[^}]*left:var\(--handheld-x\)[^}]*right:auto[^}]*bottom:auto/);
   assert.match(js,/function renderLobby\(\)/);
+  assert.match(js,/previewStage'\)\.dataset\.character=chosen\.character\?\.style/);
   assert.match(js,/尚未擁有|owned\(entry\)/);
   assert.match(js,/請先按「穿上這套」再發布/);
 });

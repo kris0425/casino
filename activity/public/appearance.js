@@ -49,6 +49,7 @@ function renderPreview(){
   const chosen=Object.fromEntries(state.data.slots.map(({id})=>[id,item(state.draft[id])]));
   const bg=chosen.background;$('#previewBackground').src=bg?.image||'';$('#previewBackground').style.opacity=bg?'1':'0';
   $('#previewCharacter').src=chosen.character?.image||'';$('#previewCharacter').style.opacity=chosen.character?'1':'0';
+  $('#previewStage').dataset.character=chosen.character?.style||'casino';
   $('#previewHeadwear').textContent=chosen.headwear?.icon||'';
   $('#previewFace').textContent=chosen.face?.icon||'';
   $('#previewHandheld').textContent=chosen.handheld?.icon||'';
