@@ -247,7 +247,7 @@ test('四種交通企業可升至 10 級並只影響新營運收益',()=>{
   assert.match(upgradeBlock,/'enterprise_upgrade'/);
   assert.match(upgradeBlock,/COMMIT/);
   assert.match(source,/route\.baseRevenue\*airport\.airlineMultiplier\*airlinerRevenueMultiplier\(company\.aircraft_id\)\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
-  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
   assert.match(source,/enterprise_upgrade:\$\{u\}:airline/);
   assert.match(source,/setCustomId\(`enterprise_upgrade:\$\{u\}:\$\{businessType\}`\)/);
   assert.match(source,/INSERT INTO airline_flights\([^\n]+gross_revenue/,'航空收益必須在起飛時保存');
@@ -848,4 +848,44 @@ test('機車資產美術重製公告完整',()=>{
   assert.match(update.summary,/13 款機車/);
   assert.match(update.changes.join('\n'),/永久移除/);
   assert.match(update.changes.join('\n'),/價格、稀有度.*持有資料/s);
+});
+
+test('20 款卡車加入物流貨運並套用最高收益加成',()=>{
+  const truckIds=[
+    'truck_copper_canyon_hauler','truck_azure_tide_refrigerated','truck_emerald_city_delivery','truck_royal_crown_logistics',
+    'truck_crimson_mountain_climber','truck_sapphire_coastal_freighter','truck_golden_sun_bulkmaster','truck_midnight_stealth_carrier',
+    'truck_jade_river_tanker','truck_silver_frost_express','truck_neon_lotus_cityrunner','truck_ironwood_heavy_lifter',
+    'truck_coral_reef_logistics','truck_violet_comet_courier','truck_emberforge_armored','truck_aurora_polar_freighter',
+    'truck_harbor_blue_containerliner','truck_sunset_peach_foodliner','truck_obsidian_titan_transporter','truck_starlight_silver_longhaul'
+  ];
+  assert.equal(truckIds.length,20);
+  for(const assetId of truckIds) {
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(assetBlock,/category:'卡車'/,`${assetId} 不是卡車資產`);
+    assert.match(assetBlock,/buff:'freight'/,`${assetId} 未綁定物流車隊增益`);
+    assert.match(assetBlock,/truckRevenueBonus:0\.\d+/,`${assetId} 缺少貨運營收加成`);
+    const image=assetBlock.match(/image:'([^']+)'/)?.[1];
+    assert.equal(image,`trucks/${assetId.replace(/^truck_/,'')}.png`,`${assetId} 圖片路徑不正確`);
+    const file=readFileSync(new URL(`../assets/${image}`,import.meta.url));
+    assert.equal(file.subarray(1,4).toString(),'PNG',`${image} 不是有效 PNG`);
+    assert.equal(file.readUInt32BE(16),1536,`${image} 寬度錯誤`);
+    assert.equal(file.readUInt32BE(20),1024,`${image} 高度錯誤`);
+  }
+  assert.match(source,/const assetCategories=\[[^\]]*'卡車'/);
+  assert.match(source,/truck:\{label:'卡車',emoji:'🚛',catalog:\['卡車'\]\}/);
+  assert.match(source,/const freightTruckIds=\[[\s\S]+?truck_starlight_silver_longhaul[\s\S]+?\];/);
+  assert.match(source,/function bestOwnedFreightTruck\(g,u\)/);
+  assert.match(source,/businessType==='freight'\?bestOwnedFreightTruck\(g,u\)/);
+  assert.match(source,/truckMultiplier=truckAsset\?1\+truckAsset\.truckRevenueBonus:1/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier/);
+  assert.match(source,/truck_id TEXT/);
+  assert.match(source,/ALTER TABLE transport_business_operations ADD COLUMN truck_id TEXT/);
+  assert.match(source,/truck_id,gross_revenue/);
+  assert.match(source,/operation\.business_type==='freight'\s*\?\s*assetCatalog\[operation\.truck_id\]/);
+
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-02-freight-trucks.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-02-freight-trucks');
+  assert.match(update.summary,/20 輛卡車/);
+  assert.match(update.changes.join('\n'),/物流貨運/);
+  assert.match(update.changes.join('\n'),/最高.*加成/s);
 });
