@@ -45,14 +45,13 @@ function renderTabs(){
   $('#slotTabs').innerHTML=state.data.slots.map(slot=>`<button class="slot-tab${state.slot===slot.id?' active':''}" data-slot="${slot.id}">${slot.name}</button>`).join('');
   document.querySelectorAll('.slot-tab').forEach(button=>button.onclick=()=>{state.slot=button.dataset.slot;render();});
 }
+function setWearable(selector,entry){const layer=$(selector);layer.src=entry?.image||'';layer.hidden=!entry?.image;layer.dataset.style=entry?.style||'none';}
 function renderPreview(){
   const chosen=Object.fromEntries(state.data.slots.map(({id})=>[id,item(state.draft[id])]));
   const bg=chosen.background;$('#previewBackground').src=bg?.image||'';$('#previewBackground').style.opacity=bg?'1':'0';
   $('#previewCharacter').src=chosen.character?.image||'';$('#previewCharacter').style.opacity=chosen.character?'1':'0';
   $('#previewStage').dataset.character=chosen.character?.style||'casino';
-  $('#previewHeadwear').textContent=chosen.headwear?.icon||'';
-  $('#previewFace').textContent=chosen.face?.icon||'';
-  $('#previewHandheld').textContent=chosen.handheld?.icon||'';
+  setWearable('#previewOutfit',chosen.outfit);setWearable('#previewHeadwear',chosen.headwear);setWearable('#previewFace',chosen.face);setWearable('#previewHandheld',chosen.handheld);
   $('#previewCharacter').dataset.outfit=chosen.outfit?.style||'casino';
   $('#previewAura').dataset.style=chosen.aura?.style||'none';$('#previewAura').style.display=chosen.aura?'block':'none';
   const themes=Object.values(chosen).filter(Boolean).map(entry=>entry.theme);const theme=themes.length?themes.sort((a,b)=>themes.filter(x=>x===b).length-themes.filter(x=>x===a).length)[0]:'簡約模式';

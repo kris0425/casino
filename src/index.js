@@ -13,7 +13,7 @@ import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { COSMETIC_SLOTS, COSMETIC_SLOT_LABELS, cosmeticCatalog, cosmeticById, defaultAppearance } from './game-data/cosmetics.js';
-import { WEB_GAME_VERSION, WEB_GAME_MODULES, WEB_TRANSPORT_TYPES, summarizeWebAssets } from './game-data/web-game.js';
+import { WEB_GAME_VERSION, WEB_GAME_MODULES, WEB_TRANSPORT_TYPES, WEB_GARAGE_GROUPS, summarizeWebAssets } from './game-data/web-game.js';
 
 const execFileAsync=promisify(execFile);
 
@@ -8151,7 +8151,7 @@ async function handleInteraction(i) {
       if(!url) throw new Error('個人造型網站尚未完成設定，請稍後再試');
       return i.reply({
         ephemeral:true,
-        embeds:[new EmbedBuilder().setColor(0xD7A4FF).setTitle('✨ 人物大廳與個人造型工作室').setDescription('進入網站即可在人物大廳切換 **4 名全身角色**，再瀏覽 **28 件造型商品**、即時試穿、購買與穿戴，並可儲存 **3 組快速預設**。完成後也能將造型名片發布回目前頻道。').addFields(
+        embeds:[new EmbedBuilder().setColor(0xD7A4FF).setTitle('✨ 人物大廳與個人造型工作室').setDescription('進入網站即可在人物大廳切換 **6 名全身角色**，再瀏覽 **30 件造型商品**、使用正式透明穿戴素材即時試穿、購買與穿戴，並可儲存 **3 組快速預設**。完成後也能將造型名片發布回目前頻道。').addFields(
           {name:'🔐 專屬安全連結',value:'連結綁定你的 Discord 帳號與伺服器，15 分鐘後失效。'},
           {name:'🎁 首次使用',value:'「賭場之王」角色與六件基本套裝已免費開放。'}
         )],
@@ -9471,7 +9471,7 @@ async function appearancePayload(session) {
     catalog:cosmeticCatalog.map(item=>({
       id:item.id,slot:item.slot,theme:item.theme,name:item.name,icon:item.icon,price:item.price,
       starter:Boolean(item.starter),owned:ownsCosmetic(session.guildId,session.userId,item.id),
-      image:item.image?`/appearance/${item.slot==='character'?'characters':'backgrounds'}/${item.image}`:null,style:item.style
+      image:item.image?`/appearance/${item.slot==='character'?'characters':item.slot==='background'?'backgrounds':'wearables'}/${item.image}`:null,style:item.style
     })),
     appearance:playerAppearance(session.guildId,session.userId),
     presets:appearancePresets(session.guildId,session.userId),
@@ -9502,6 +9502,32 @@ function webGameTransportPayload(g,u) {
   });
   return businesses;
 }
+function webGameGarageBonus(asset) {
+  if(asset.trainRevenueBonus) return `鐵路營收 +${Math.round(asset.trainRevenueBonus*100)}%`;
+  if(asset.truckRevenueBonus) return `貨運營收 +${Math.round(asset.truckRevenueBonus*100)}%`;
+  if(asset.buff==='getaway') return '撤離成功率增益';
+  if(asset.buff==='work') return '合法工作收益增益';
+  if(asset.buff==='casino') return '賭場派彩增益';
+  if(asset.buff==='stamina') return '每日體力增益';
+  if(asset.buff==='discount') return '商城折扣增益';
+  return null;
+}
+function webGameGaragePayload(g,u) {
+  ensureStarterTrain(g,u);
+  const owned=assetsOf(g,u).map(row=>({row,asset:assetCatalog[row.asset_id]})).filter(entry=>entry.asset);
+  const groups=WEB_GARAGE_GROUPS.map(group=>{
+    const items=owned.filter(entry=>group.categories.includes(entry.asset.category)).map(({row,asset})=>{
+      const image=asset.image||asset.images?.[0]||null;
+      return {
+        id:row.asset_id,name:asset.name,category:asset.category,rarity:asset.rarity||'一般',quantity:Number(row.quantity)||0,
+        value:(Number(asset.price)||0)*(Number(row.quantity)||0),bonus:webGameGarageBonus(asset),
+        image:image?`/assets/${image.split('/').map(encodeURIComponent).join('/')}`:null
+      };
+    }).sort((a,b)=>b.value-a.value||a.name.localeCompare(b.name,'zh-Hant'));
+    return {...group,count:items.reduce((sum,item)=>sum+item.quantity,0),kinds:items.length,items};
+  });
+  return {count:groups.reduce((sum,group)=>sum+group.count,0),kinds:groups.reduce((sum,group)=>sum+group.kinds,0),groups};
+}
 async function webGamePayload(session) {
   const g=session.guildId,u=session.userId,user=await client.users.fetch(u);
   const coins=ensureWallet(g,u),currentStamina=stamina(g,u),maxStamina=staminaMax(g,u);
@@ -9526,6 +9552,7 @@ async function webGamePayload(session) {
       summary:appearanceSummary(g,u)
     },
     assets:assetSummary,
+    garage:webGameGaragePayload(g,u),
     achievements:{unlocked:achievementState.unlocked.size,total:achievementDefinitions.length,items:achievements},
     transport:webGameTransportPayload(g,u),
     dailyBuff:todayBuff(),
@@ -9570,6 +9597,7 @@ function activityJson(response,status,data) {
   response.end(JSON.stringify(data));
 }
 const ACTIVITY_STATIC_ROOT=resolve('activity/public');
+const ACTIVITY_ASSET_ROOT=resolve('assets');
 const activityStaticTypes={
   '.html':'text/html; charset=utf-8',
   '.css':'text/css; charset=utf-8',
@@ -9586,10 +9614,11 @@ const activityStaticTypes={
 function serveActivityStatic(request,response,url) {
   if(!['GET','HEAD'].includes(request.method||'')) return false;
   const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/appearance':'appearance.html','/game':'game.html'};
-  const relative=routeFiles[url.pathname]||decodeURIComponent(url.pathname).replace(/^\/+/,'');
+  const assetRequest=url.pathname.startsWith('/assets/'),root=assetRequest?ACTIVITY_ASSET_ROOT:ACTIVITY_STATIC_ROOT;
+  const relative=assetRequest?decodeURIComponent(url.pathname.slice('/assets/'.length)):routeFiles[url.pathname]||decodeURIComponent(url.pathname).replace(/^\/+/,'');
   if(!relative||relative.startsWith('api/')||relative.startsWith('activity/')) return false;
-  const file=resolve(ACTIVITY_STATIC_ROOT,relative);
-  if(file!==ACTIVITY_STATIC_ROOT&&!file.startsWith(`${ACTIVITY_STATIC_ROOT}${sep}`)) return false;
+  const file=resolve(root,relative);
+  if(file!==root&&!file.startsWith(`${root}${sep}`)) return false;
   if(!existsSync(file)||!statSync(file).isFile()) return false;
   const type=activityStaticTypes[extname(file).toLowerCase()]||'application/octet-stream';
   const cacheControl=type.startsWith('text/html')?'no-store':'public, max-age=3600';

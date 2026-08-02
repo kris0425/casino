@@ -1,7 +1,7 @@
 const params=new URLSearchParams(location.search),session=params.get('session')||'';
 const $=selector=>document.querySelector(selector);
 const format=value=>Number(value||0).toLocaleString('zh-TW');
-const state={data:null,busy:false};
+const state={data:null,busy:false,garageGroup:null};
 let toastTimer,countdownTimer;
 
 function toast(message,error=false){const node=$('#toast');node.textContent=message;node.className=`toast show${error?' error':''}`;clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.className='toast',3200);}
@@ -37,7 +37,7 @@ function renderSidebar(modules){
   primary.append(sidebarItem({icon:'🏠',name:'遊戲大廳',description:'玩家金庫、體力與今日增益',href:'#top',state:'dashboard'}));
   for(const module of modules){
     const item=sidebarItem(module);
-    if(['transport','assets','achievements'].includes(module.id))primary.append(item);
+    if(['transport','garage','assets','achievements'].includes(module.id))primary.append(item);
     else games.append(item);
   }
 }
@@ -46,6 +46,19 @@ function renderTransport(items){
   for(const item of items){
     const card=node('article',`transport-card${item.registered?'':' unregistered'}`),header=node('header');header.append(node('span','',item.icon));const title=node('div');title.append(node('h3','',item.name),node('small','',item.companyName||'尚未成立公司'));header.append(title);card.append(header,node('p','status',item.status));
     const details=node('dl');for(const [label,value] of [['企業等級',item.registered?`Lv.${item.level}`:'—'],['營運場站',item.station||'—'],['目前路線',item.route||'—']])details.append(node('dt','',label),node('dd','',value));card.append(details);grid.append(card);
+  }
+}
+function renderGarage(data){
+  if(!state.garageGroup||!data.groups.some(group=>group.id===state.garageGroup))state.garageGroup=data.groups[0]?.id||null;
+  setText('#garageSummary',`共 ${format(data.count)} 輛／架｜${format(data.kinds)} 種收藏`);
+  const tabs=$('#garageTabs');tabs.replaceChildren();
+  for(const group of data.groups){const button=node('button',`garage-tab${state.garageGroup===group.id?' active':''}`,`${group.icon} ${group.name} · ${format(group.count)}`);button.type='button';button.onclick=()=>{state.garageGroup=group.id;renderGarage(data);};tabs.append(button);}
+  const grid=$('#garageGrid'),group=data.groups.find(entry=>entry.id===state.garageGroup);grid.replaceChildren();
+  if(!group?.items.length){grid.append(node('div','empty-card',`目前尚未收藏${group?.name||'此類載具'}。`));return;}
+  for(const item of group.items){
+    const card=node('article','garage-card'),media=node('div','garage-media');
+    if(item.image){const image=node('img');image.src=item.image;image.alt=item.name;image.loading='lazy';image.onerror=()=>{media.replaceChildren(node('span','garage-placeholder',group.icon));};media.append(image);}else media.append(node('span','garage-placeholder',group.icon));
+    const copy=node('div','garage-copy'),heading=node('header');heading.append(node('h3','',item.name),node('span','garage-quantity',`× ${format(item.quantity)}`));copy.append(heading,node('p','garage-rarity',`${item.rarity} · ${item.category}`));if(item.bonus)copy.append(node('strong','garage-bonus',item.bonus));copy.append(node('small','garage-value',`收藏原價 ${format(item.value)} 金幣`));card.append(media,copy);grid.append(card);
   }
 }
 function renderAssets(data){
@@ -62,7 +75,7 @@ function startCountdown(expiresAt){
 }
 function openDrawer(){document.body.classList.add('drawer-open');$('#gameSidebar').setAttribute('aria-hidden','false');$('#menuToggle').setAttribute('aria-expanded','true');}
 function closeDrawer(){document.body.classList.remove('drawer-open');$('#gameSidebar').setAttribute('aria-hidden','true');$('#menuToggle').setAttribute('aria-expanded','false');}
-function render(data){state.data=data;renderPlayer(data);renderSidebar(data.modules);renderTransport(data.transport);renderAssets(data.assets);renderAchievements(data.achievements);startCountdown(data.expiresAt);}
+function render(data){state.data=data;renderPlayer(data);renderSidebar(data.modules);renderTransport(data.transport);renderGarage(data.garage);renderAssets(data.assets);renderAchievements(data.achievements);startCountdown(data.expiresAt);}
 async function load(showToast=false){if(state.busy)return;state.busy=true;try{const data=await api('/api/game');render(data);if(showToast)toast('遊戲資料已更新');$('#loading').classList.add('hidden');}catch(error){toast(error.message,true);$('#loading strong').textContent=error.message;$('#loading p').textContent='請回到 Discord 使用 /玩家 遊戲 取得新連結';}finally{state.busy=false;}}
 $('#refreshData').onclick=()=>load(true);
 $('#menuToggle').onclick=openDrawer;$('#sidebarClose').onclick=closeDrawer;$('#drawerOverlay').onclick=closeDrawer;document.addEventListener('keydown',event=>{if(event.key==='Escape')closeDrawer();});
