@@ -129,11 +129,12 @@ test('人物大廳六名全身角色使用透明 PNG 並加入商城',()=>{
 
 test('四套造型以 16 張透明穿戴素材取代 Emoji 疊圖',()=>{
   for(const theme of ['casino','transport','heist','pomeranian']) for(const slot of ['outfit','headwear','face','handheld']) {
-    const url=new URL(`../activity/public/appearance/wearables/${theme}/${slot}.png`,import.meta.url),data=readFileSync(url);
-    assert.ok(existsSync(url),`缺少正式穿戴素材 ${theme}/${slot}.png`);
-    assert.ok(data.length>20_000,`${theme}/${slot}.png 不是有效素材`);
-    assert.equal(data[25],6,`${theme}/${slot}.png 必須是 RGBA PNG`);
-    assert.match(cosmeticsSource,new RegExp(`slot:'${slot}'[^\\n]+image:'${theme}/${slot}\\.png'`));
+    const file=theme==='heist'&&slot==='headwear'?'headwear-open':theme==='heist'&&slot==='face'?'face-open':slot;
+    const url=new URL(`../activity/public/appearance/wearables/${theme}/${file}.png`,import.meta.url),data=readFileSync(url);
+    assert.ok(existsSync(url),`缺少正式穿戴素材 ${theme}/${file}.png`);
+    assert.ok(data.length>20_000,`${theme}/${file}.png 不是有效素材`);
+    assert.equal(data[25],6,`${theme}/${file}.png 必須是 RGBA PNG`);
+    assert.match(cosmeticsSource,new RegExp(`slot:'${slot}'[^\\n]+image:'${theme}/${file}\\.png'`));
   }
   assert.match(source,/item\.slot==='background'\?'backgrounds':'wearables'/);
 });
@@ -169,7 +170,7 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.02\.9'/);
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.02\.10'/);
   for(const id of ['appearance','transport','garage','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
@@ -217,6 +218,42 @@ test('人物穿戴與全載具車庫更新公告完整',()=>{
   assert.equal(update.version,'2026.08.02.9');
   assert.deepEqual(update.channelNames,['賭場公告']);
   for(const required of ['2 名','6 名','16 件','Emoji','飛行器','汽車','摩托車','列車','卡車']) assert.match(text,new RegExp(required));
+});
+
+test('車庫分頁避免手機同時解碼全部大型圖片',()=>{
+  const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
+  assert.match(html,/game\.css\?v=20260802\.10/);
+  assert.match(html,/id="garagePager"/);
+  assert.match(html,/點擊圖片可查看完整原圖/);
+  assert.match(js,/const GARAGE_PAGE_SIZE=6/);
+  assert.match(js,/group\.items\.slice\(start,start\+GARAGE_PAGE_SIZE\)/);
+  assert.match(js,/link\.target='_blank'/);
+  assert.match(css,/content-visibility:auto/);
+  assert.match(css,/object-fit:contain/);
+});
+
+test('既有人物換裝保留五官並使用不遮臉的夜行頭飾',()=>{
+  const html=readFileSync(new URL('../activity/public/appearance.html',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/appearance.js',import.meta.url),'utf8');
+  assert.match(html,/appearance\.css\?v=20260802\.8/);
+  assert.match(html,/既有人物分層換裝/);
+  assert.match(js,/previewCharacter/);
+  assert.match(js,/previewStage'\)\.dataset\.outfit/);
+  assert.match(cosmeticsSource,/name:'紫影戰術耳機'.*image:'heist\/headwear-open\.png'/);
+  assert.match(cosmeticsSource,/name:'紫影戰術鏡'.*image:'heist\/face-open\.png'/);
+  const file=readFileSync(new URL('../activity/public/appearance/wearables/heist/headwear-open.png',import.meta.url));
+  assert.equal(file.subarray(1,4).toString(),'PNG');
+  assert.equal(file[25],6,'夜行頭飾必須是具有 alpha 通道的 RGBA PNG');
+});
+
+test('車庫圖片與人物分層修正公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-02-garage-image-appearance-layering.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.02.10');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['車庫','手機','完整原圖','既有人物','不遮臉','戰術鏡']) assert.match(text,new RegExp(required));
 });
 
 test('網頁遊戲資產摘要由獨立資料模組正確計算',()=>{

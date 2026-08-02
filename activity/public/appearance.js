@@ -51,6 +51,7 @@ function renderPreview(){
   const bg=chosen.background;$('#previewBackground').src=bg?.image||'';$('#previewBackground').style.opacity=bg?'1':'0';
   $('#previewCharacter').src=chosen.character?.image||'';$('#previewCharacter').style.opacity=chosen.character?'1':'0';
   $('#previewStage').dataset.character=chosen.character?.style||'casino';
+  $('#previewStage').dataset.outfit=chosen.outfit?.style||'none';
   setWearable('#previewOutfit',chosen.outfit);setWearable('#previewHeadwear',chosen.headwear);setWearable('#previewFace',chosen.face);setWearable('#previewHandheld',chosen.handheld);
   $('#previewCharacter').dataset.outfit=chosen.outfit?.style||'casino';
   $('#previewAura').dataset.style=chosen.aura?.style||'none';$('#previewAura').style.display=chosen.aura?'block':'none';

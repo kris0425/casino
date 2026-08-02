@@ -1,7 +1,8 @@
 const params=new URLSearchParams(location.search),session=params.get('session')||'';
 const $=selector=>document.querySelector(selector);
 const format=value=>Number(value||0).toLocaleString('zh-TW');
-const state={data:null,busy:false,garageGroup:null};
+const GARAGE_PAGE_SIZE=6;
+const state={data:null,busy:false,garageGroup:null,garagePage:0};
 let toastTimer,countdownTimer;
 
 function toast(message,error=false){const node=$('#toast');node.textContent=message;node.className=`toast show${error?' error':''}`;clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.className='toast',3200);}
@@ -52,14 +53,21 @@ function renderGarage(data){
   if(!state.garageGroup||!data.groups.some(group=>group.id===state.garageGroup))state.garageGroup=data.groups[0]?.id||null;
   setText('#garageSummary',`共 ${format(data.count)} 輛／架｜${format(data.kinds)} 種收藏`);
   const tabs=$('#garageTabs');tabs.replaceChildren();
-  for(const group of data.groups){const button=node('button',`garage-tab${state.garageGroup===group.id?' active':''}`,`${group.icon} ${group.name} · ${format(group.count)}`);button.type='button';button.onclick=()=>{state.garageGroup=group.id;renderGarage(data);};tabs.append(button);}
+  for(const group of data.groups){const button=node('button',`garage-tab${state.garageGroup===group.id?' active':''}`,`${group.icon} ${group.name} · ${format(group.count)}`);button.type='button';button.onclick=()=>{state.garageGroup=group.id;state.garagePage=0;renderGarage(data);};tabs.append(button);}
   const grid=$('#garageGrid'),group=data.groups.find(entry=>entry.id===state.garageGroup);grid.replaceChildren();
-  if(!group?.items.length){grid.append(node('div','empty-card',`目前尚未收藏${group?.name||'此類載具'}。`));return;}
-  for(const item of group.items){
+  const pager=$('#garagePager');
+  if(!group?.items.length){grid.append(node('div','empty-card',`目前尚未收藏${group?.name||'此類載具'}。`));pager.hidden=true;return;}
+  const pageCount=Math.max(1,Math.ceil(group.items.length/GARAGE_PAGE_SIZE));state.garagePage=Math.min(state.garagePage,pageCount-1);
+  const start=state.garagePage*GARAGE_PAGE_SIZE,visible=group.items.slice(start,start+GARAGE_PAGE_SIZE);
+  for(const item of visible){
     const card=node('article','garage-card'),media=node('div','garage-media');
-    if(item.image){const image=node('img');image.src=item.image;image.alt=item.name;image.loading='lazy';image.onerror=()=>{media.replaceChildren(node('span','garage-placeholder',group.icon));};media.append(image);}else media.append(node('span','garage-placeholder',group.icon));
+    if(item.image){const link=node('a','garage-media-link');link.href=item.image;link.target='_blank';link.rel='noopener';link.title=`查看 ${item.name} 完整圖片`;const image=node('img');image.src=item.image;image.alt=item.name;image.loading='lazy';image.decoding='async';image.fetchPriority='low';image.onerror=()=>{media.replaceChildren(node('span','garage-placeholder',group.icon));};link.append(image);media.append(link);}else media.append(node('span','garage-placeholder',group.icon));
     const copy=node('div','garage-copy'),heading=node('header');heading.append(node('h3','',item.name),node('span','garage-quantity',`× ${format(item.quantity)}`));copy.append(heading,node('p','garage-rarity',`${item.rarity} · ${item.category}`));if(item.bonus)copy.append(node('strong','garage-bonus',item.bonus));copy.append(node('small','garage-value',`收藏原價 ${format(item.value)} 金幣`));card.append(media,copy);grid.append(card);
   }
+  pager.hidden=pageCount<=1;setText('#garagePageSummary',`顯示 ${start+1}–${start+visible.length}／${group.items.length} · 第 ${state.garagePage+1} 頁`);
+  const previous=$('#garagePrevious'),next=$('#garageNext');previous.disabled=state.garagePage===0;next.disabled=state.garagePage>=pageCount-1;
+  previous.onclick=()=>{if(state.garagePage>0){state.garagePage--;renderGarage(data);$('#garage').scrollIntoView({block:'start'});}};
+  next.onclick=()=>{if(state.garagePage<pageCount-1){state.garagePage++;renderGarage(data);$('#garage').scrollIntoView({block:'start'});}};
 }
 function renderAssets(data){
   setText('#assetSummary',`共 ${format(data.count)} 件｜原價總值 ${format(data.value)} 金幣`);const grid=$('#assetGrid');grid.replaceChildren();
