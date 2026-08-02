@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#120d1e">
+  <title>個人造型工作室｜澳門最大賭場</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/appearance.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">♠</span><div><strong>澳門最大賭場</strong><small>PERSONAL STYLE STUDIO</small></div></div>
+    <div class="wallet" aria-label="目前金庫"><span>金庫</span><strong id="balance">—</strong></div>
+  </header>
+
+  <main class="layout" id="app" aria-busy="true">
+    <section class="preview-panel panel">
+      <div class="section-heading"><div><span class="eyebrow">LIVE PREVIEW</span><h1>個人造型</h1></div><span class="draft-badge" id="draftBadge">已穿戴</span></div>
+      <div class="portrait" id="portrait">
+        <img id="previewBackground" class="portrait-background" alt="造型背景">
+        <div id="previewAura" class="avatar-aura"></div>
+        <div class="avatar-stage">
+          <div id="previewHeadwear" class="layer-icon headwear"></div>
+          <div class="avatar-head"><img id="playerAvatar" alt="玩家頭像"></div>
+          <div id="previewFace" class="layer-icon face"></div>
+          <div id="previewOutfit" class="avatar-outfit"><span class="lapel left"></span><span class="lapel right"></span><span class="outfit-detail"></span></div>
+          <div id="previewHandheld" class="layer-icon handheld"></div>
+        </div>
+        <div class="portrait-caption"><strong id="playerName">讀取中…</strong><span id="lookTheme">賭場之王</span></div>
+      </div>
+      <div class="selection-summary" id="selectionSummary"></div>
+      <div class="primary-actions">
+        <button class="btn btn-primary" id="saveLook">穿上這套</button>
+        <button class="btn btn-secondary" id="resetLook">復原</button>
+        <button class="btn btn-glow" id="publishLook">發布到 Discord</button>
+      </div>
+      <p class="security-note">安全連結綁定你的 Discord 帳號，所有價格與擁有權都由伺服器再次驗證。</p>
+    </section>
+
+    <section class="wardrobe-panel panel">
+      <div class="section-heading"><div><span class="eyebrow">WARDROBE & SHOP</span><h2>衣櫃商城</h2></div><button class="text-button" id="removeSlot">卸下此部位</button></div>
+      <nav class="slot-tabs" id="slotTabs" aria-label="造型部位"></nav>
+      <div class="catalog-tools"><span id="catalogCount">—</span><span class="legend"><i></i> 已擁有</span></div>
+      <div class="catalog" id="catalog"></div>
+
+      <div class="preset-section">
+        <div class="section-heading compact"><div><span class="eyebrow">QUICK CHANGE</span><h2>快速預設</h2></div><span class="preset-hint">最多 3 組</span></div>
+        <div class="presets" id="presets"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="loading" id="loading"><div class="spinner"></div><p>正在打開你的衣櫃…</p></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/appearance.js" defer></script>
+</body>
+</html>

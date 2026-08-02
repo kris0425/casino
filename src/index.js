@@ -65,11 +65,42 @@ const ECONOMY_SINK_LABELS={
   enterprise_upgrade:'交通企業升級',
   auction_payment:'限時資產拍賣得標款',
   train_blind_box:'列車盲盒',
+  cosmetic_purchase:'個人造型商城',
   transfer_fee:'玩家轉帳手續費'
 };
 const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund']);
 const BASE_STAMINA = 800;
 const assetPath=name=>resolve(process.cwd(),'assets',name);
+const COSMETIC_SLOTS=['background','outfit','headwear','face','handheld','aura'];
+const COSMETIC_SLOT_LABELS={background:'背景',outfit:'服裝',headwear:'頭飾',face:'臉部',handheld:'手持物',aura:'光環／邊框'};
+const cosmeticCatalog=[
+  {id:'casino_background',slot:'background',theme:'賭場之王',name:'黑金至尊廳',icon:'♠️',price:0,starter:true,image:'casino-king.png',style:'casino'},
+  {id:'casino_outfit',slot:'outfit',theme:'賭場之王',name:'黑金晚宴西裝',icon:'🤵',price:0,starter:true,style:'casino'},
+  {id:'casino_headwear',slot:'headwear',theme:'賭場之王',name:'籌碼王冠',icon:'👑',price:0,starter:true,style:'casino'},
+  {id:'casino_face',slot:'face',theme:'賭場之王',name:'金框墨鏡',icon:'😎',price:0,starter:true,style:'casino'},
+  {id:'casino_handheld',slot:'handheld',theme:'賭場之王',name:'至尊籌碼',icon:'🎰',price:0,starter:true,style:'casino'},
+  {id:'casino_aura',slot:'aura',theme:'賭場之王',name:'黃金派彩光環',icon:'✨',price:0,starter:true,style:'casino'},
+  {id:'transport_background',slot:'background',theme:'交通大亨',name:'未來轉運總站',icon:'🌐',price:5_000_000,image:'transport-mogul.png',style:'transport'},
+  {id:'transport_outfit',slot:'outfit',theme:'交通大亨',name:'企業總裁制服',icon:'🧥',price:8_000_000,style:'transport'},
+  {id:'transport_headwear',slot:'headwear',theme:'交通大亨',name:'銀翼站長帽',icon:'🧢',price:3_000_000,style:'transport'},
+  {id:'transport_face',slot:'face',theme:'交通大亨',name:'航線分析鏡',icon:'🥽',price:2_000_000,style:'transport'},
+  {id:'transport_handheld',slot:'handheld',theme:'交通大亨',name:'企業調度平板',icon:'📱',price:4_000_000,style:'transport'},
+  {id:'transport_aura',slot:'aura',theme:'交通大亨',name:'環球航線光環',icon:'🛰️',price:6_000_000,style:'transport'},
+  {id:'heist_background',slot:'background',theme:'暗夜劫案',name:'雨夜撤離天台',icon:'🌃',price:8_000_000,image:'night-heist.png',style:'heist'},
+  {id:'heist_outfit',slot:'outfit',theme:'暗夜劫案',name:'幽影戰術風衣',icon:'🥷',price:12_000_000,style:'heist'},
+  {id:'heist_headwear',slot:'headwear',theme:'暗夜劫案',name:'無聲夜行帽',icon:'🕶️',price:4_000_000,style:'heist'},
+  {id:'heist_face',slot:'face',theme:'暗夜劫案',name:'霓虹變裝面罩',icon:'🎭',price:3_000_000,style:'heist'},
+  {id:'heist_handheld',slot:'handheld',theme:'暗夜劫案',name:'加密撤離箱',icon:'💼',price:6_000_000,style:'heist'},
+  {id:'heist_aura',slot:'aura',theme:'暗夜劫案',name:'紅藍追緝殘影',icon:'🚨',price:10_000_000,style:'heist'},
+  {id:'pomeranian_background',slot:'background',theme:'萌犬航空',name:'粉紅雲端客艙',icon:'☁️',price:12_000_000,image:'pomeranian-air.png',style:'pomeranian'},
+  {id:'pomeranian_outfit',slot:'outfit',theme:'萌犬航空',name:'萌犬機長禮服',icon:'🎀',price:18_000_000,style:'pomeranian'},
+  {id:'pomeranian_headwear',slot:'headwear',theme:'萌犬航空',name:'博美雲朵耳',icon:'🐶',price:6_000_000,style:'pomeranian'},
+  {id:'pomeranian_face',slot:'face',theme:'萌犬航空',name:'蜜桃愛心妝',icon:'💖',price:5_000_000,style:'pomeranian'},
+  {id:'pomeranian_handheld',slot:'handheld',theme:'萌犬航空',name:'迷你萌犬行李箱',icon:'🧳',price:8_000_000,style:'pomeranian'},
+  {id:'pomeranian_aura',slot:'aura',theme:'萌犬航空',name:'雲朵愛心光環',icon:'💕',price:14_000_000,style:'pomeranian'}
+];
+const cosmeticById=Object.fromEntries(cosmeticCatalog.map(item=>[item.id,item]));
+const defaultAppearance=Object.fromEntries(COSMETIC_SLOTS.map(slot=>[slot,cosmeticCatalog.find(item=>item.slot===slot&&item.starter)?.id||null]));
 const petCatalog={
   golden_retriever:{name:'黃金獵犬｜阿金',emoji:'🐕',price:18000,image:'pets/golden_retriever.jpg',petType:'dog',bonusType:'work',bonusValue:0.05,bonusText:'工作收入最高 +5%',description:'熱情可靠的工作夥伴，心情越好，工作收入加成越高。'},
   siamese_cat:{name:'暹羅貓｜小藍',emoji:'🐈',price:22000,image:'pets/siamese_cat.jpg',petType:'cat',bonusType:'casino',bonusValue:0.03,bonusText:'賭場獲勝派彩最高 +3%',description:'神祕又機靈的幸運夥伴，會替贏牌帶來一點好運。'},
@@ -464,6 +495,23 @@ db.exec(`
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id, user_id)
+  );
+  CREATE TABLE IF NOT EXISTS player_cosmetics (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, cosmetic_id TEXT NOT NULL,
+    purchased_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id, cosmetic_id)
+  );
+  CREATE TABLE IF NOT EXISTS player_appearance (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, slot TEXT NOT NULL, cosmetic_id TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id, slot)
+  );
+  CREATE TABLE IF NOT EXISTS appearance_presets (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, preset_no INTEGER NOT NULL,
+    name TEXT NOT NULL DEFAULT '', appearance_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id, preset_no),
+    CHECK (preset_no BETWEEN 1 AND 3)
   );
   CREATE TABLE IF NOT EXISTS player_tutorials (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, tutorial_id TEXT NOT NULL,
@@ -1007,6 +1055,78 @@ function changeBalance(g, u, delta, kind, actor = null, reason = '') {
     db.exec('COMMIT');
     return next;
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+function ownsCosmetic(g,u,cosmeticId) {
+  const item=cosmeticById[cosmeticId];
+  return Boolean(item&&(item.starter||db.prepare('SELECT 1 FROM player_cosmetics WHERE guild_id=? AND user_id=? AND cosmetic_id=?').get(g,u,cosmeticId)));
+}
+function playerAppearance(g,u) {
+  const appearance={...defaultAppearance};
+  for(const row of db.prepare('SELECT slot,cosmetic_id FROM player_appearance WHERE guild_id=? AND user_id=?').all(g,u)) {
+    if(COSMETIC_SLOTS.includes(row.slot)) appearance[row.slot]=row.cosmetic_id||null;
+  }
+  return appearance;
+}
+function validateAppearance(g,u,input) {
+  if(!input||typeof input!=='object'||Array.isArray(input)) throw new Error('造型資料格式錯誤');
+  const appearance={};
+  for(const slot of COSMETIC_SLOTS) {
+    const cosmeticId=input[slot]==null||input[slot]===''?null:String(input[slot]);
+    if(cosmeticId) {
+      const item=cosmeticById[cosmeticId];
+      if(!item||item.slot!==slot) throw new Error(`${COSMETIC_SLOT_LABELS[slot]}商品資料錯誤`);
+      if(!ownsCosmetic(g,u,cosmeticId)) throw new Error(`尚未擁有「${item.name}」`);
+    }
+    appearance[slot]=cosmeticId;
+  }
+  return appearance;
+}
+function savePlayerAppearance(g,u,input) {
+  const appearance=validateAppearance(g,u,input);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const save=db.prepare(`INSERT INTO player_appearance(guild_id,user_id,slot,cosmetic_id)
+      VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,slot) DO UPDATE SET cosmetic_id=excluded.cosmetic_id,updated_at=CURRENT_TIMESTAMP`);
+    for(const slot of COSMETIC_SLOTS) save.run(g,u,slot,appearance[slot]||'');
+    db.exec('COMMIT');
+    return appearance;
+  } catch(error) { db.exec('ROLLBACK');throw error; }
+}
+function purchaseCosmetic(g,u,cosmeticId) {
+  const item=cosmeticById[cosmeticId];
+  if(!item) throw new Error('找不到這件造型商品');
+  if(item.starter) throw new Error('這是免費基本造型，不需要購買');
+  if(ownsCosmetic(g,u,cosmeticId)) throw new Error('你已經擁有這件造型');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const next=changeBalanceUnlocked(g,u,-item.price,'cosmetic_purchase',u,`個人造型：${item.name}`);
+    db.prepare('INSERT INTO player_cosmetics(guild_id,user_id,cosmetic_id) VALUES(?,?,?)').run(g,u,cosmeticId);
+    db.exec('COMMIT');
+    return {item,balance:next};
+  } catch(error) { db.exec('ROLLBACK');throw error; }
+}
+function appearancePresets(g,u) {
+  return db.prepare('SELECT preset_no,name,appearance_json,updated_at FROM appearance_presets WHERE guild_id=? AND user_id=? ORDER BY preset_no').all(g,u).map(row=>{
+    let appearance=null;
+    try { appearance=JSON.parse(row.appearance_json); } catch {}
+    return {presetNo:row.preset_no,name:row.name,appearance,updatedAt:row.updated_at};
+  });
+}
+function saveAppearancePreset(g,u,presetNo,name,input) {
+  const number=Number(presetNo),trimmed=String(name||`預設 ${number}`).trim().slice(0,20);
+  if(!Number.isInteger(number)||number<1||number>3) throw new Error('預設編號必須是 1～3');
+  const appearance=validateAppearance(g,u,input);
+  db.prepare(`INSERT INTO appearance_presets(guild_id,user_id,preset_no,name,appearance_json)
+    VALUES(?,?,?,?,?) ON CONFLICT(guild_id,user_id,preset_no) DO UPDATE SET name=excluded.name,appearance_json=excluded.appearance_json,updated_at=CURRENT_TIMESTAMP`)
+    .run(g,u,number,trimmed||`預設 ${number}`,JSON.stringify(appearance));
+  return {presetNo:number,name:trimmed||`預設 ${number}`,appearance};
+}
+function appearanceNames(appearance) {
+  return COSMETIC_SLOTS.map(slot=>cosmeticById[appearance?.[slot]]?.name).filter(Boolean);
+}
+function appearanceSummary(g,u) {
+  const names=appearanceNames(playerAppearance(g,u));
+  return names.length?names.join('・'):'尚未設定';
 }
 function casinoVaultBalance(g) {
   db.prepare('INSERT OR IGNORE INTO casino_vault(guild_id,balance) VALUES(?,0)').run(g);
@@ -5966,7 +6086,7 @@ const gameHelpDetails={
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
   assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具、**20 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
-  playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、成就與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 成就` 與 `/玩家 稱號`，集中管理角色資訊。'},
+  playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、成就、造型與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 成就`、`/玩家 造型` 與 `/玩家 稱號`，集中管理角色資訊與外觀。'},
   dailyHub:{label:'日常中心',emoji:'📅',hint:'每日獎勵、增益與體力',title:'📅 日常中心',body:'使用 `/日常 領取` 領每日獎勵；`/日常 增益` 查看輪替效果；`/日常 體力` 與 `/日常 回體力` 管理每日體力。'},
   supplyHub:{label:'補給中心',emoji:'🛒',hint:'商城、背包、購買與使用',title:'🛒 補給中心',body:'使用 `/補給 商城` 與 `/補給 背包` 查看物品，再以 `/補給 購買`、`/補給 使用` 完成補給。'},
   pets:{label:'寵物系統',emoji:'🐾',hint:'領養、陪伴、照顧與特殊增益',title:'🐾 寵物陪伴系統',body:'使用 `/寵物 商店` 預覽並領養寵物或購買用品，再用 `/寵物 我的` 設定同行夥伴與使用用品。寵物每天心情 -10，心情低於 20 時特殊功能暫停。'}
@@ -6101,10 +6221,11 @@ const playerTitleChoices=[
   {name:'❌ 取消目前稱號',value:'clear'}
 ];
 const commands = [
-  new SlashCommandBuilder().setName('玩家').setDescription('統一查看金庫、資料、成就與設定稱號')
+  new SlashCommandBuilder().setName('玩家').setDescription('統一查看金庫、資料、成就、造型與設定稱號')
     .addSubcommand(s=>s.setName('金庫').setDescription('查看自己或其他玩家的金幣').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('資料').setDescription('查看類似 Tatsu 的玩家資料卡').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('成就').setDescription('查看自己或其他玩家的成就進度').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
+    .addSubcommand(s=>s.setName('造型').setDescription('開啟個人造型商城、衣櫃與預設網站'))
     .addSubcommand(s=>s.setName('稱號').setDescription('裝備由成就解鎖的個人稱號').addStringOption(o=>o.setName('選擇').setDescription('選擇已解鎖的稱號').setRequired(true).addChoices(...playerTitleChoices))),
   new SlashCommandBuilder().setName('轉帳').setDescription('轉帳金幣給其他玩家（收取 2% 手續費）')
     .addUserOption(o=>o.setName('收款人').setDescription('選擇要收款的玩家').setRequired(true))
@@ -7965,7 +8086,7 @@ async function handleInteraction(i) {
   if (!i.isChatInputCommand() || !i.guildId) return;
   const g=i.guildId, u=i.user.id;
   const hubRoutes={
-    玩家:{金庫:'金庫',資料:'個人資料',成就:'成就',稱號:'稱號'},
+    玩家:{金庫:'金庫',資料:'個人資料',成就:'成就',造型:'個人造型',稱號:'稱號'},
     日常:{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'},
     補給:{商城:'商城',背包:'背包',購買:'購買',使用:'使用'},
     寵物:{商店:'寵物店',我的:'我的寵物'}
@@ -8052,6 +8173,18 @@ async function handleInteraction(i) {
       db.prepare('INSERT INTO player_profiles(guild_id,user_id,title) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET title=excluded.title,updated_at=CURRENT_TIMESTAMP').run(g,u,selected);
       return i.reply({content:`✅ 已裝備個人稱號 **${profileTitles[selected]}**。`,ephemeral:true});
     }
+    if(routedCommand==='個人造型') {
+      const url=appearanceActivityUrl(g,u,i.channelId);
+      if(!url) throw new Error('個人造型網站尚未完成設定，請稍後再試');
+      return i.reply({
+        ephemeral:true,
+        embeds:[new EmbedBuilder().setColor(0xD7A4FF).setTitle('✨ 個人造型工作室').setDescription('進入網站即可瀏覽 **24 件造型商品**、即時試穿、購買與穿戴，並可儲存 **3 組快速預設**。完成後也能將造型名片發布回目前頻道。').addFields(
+          {name:'🔐 專屬安全連結',value:'連結綁定你的 Discord 帳號與伺服器，15 分鐘後失效。'},
+          {name:'🎁 首次使用',value:'「賭場之王」六件基本套裝已免費開放。'}
+        )],
+        components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('開啟造型網站').setEmoji('👗').setStyle(ButtonStyle.Link).setURL(url))]
+      });
+    }
     if(routedCommand==='個人資料') {
       const target=i.options.getUser('玩家')||i.user,coins=balance(g,target.id),energy=stamina(g,target.id),maxEnergy=staminaMax(g,target.id);
       const ledger=db.prepare("SELECT COUNT(*) actions, SUM(CASE WHEN kind='payout' AND delta>0 THEN 1 ELSE 0 END) wins, SUM(CASE WHEN kind IN ('bet','duel_bet') THEN 1 ELSE 0 END) bets FROM ledger WHERE guild_id=? AND user_id=?").get(g,target.id);
@@ -8065,6 +8198,7 @@ async function handleInteraction(i) {
         {name:'💰 經濟',value:`金庫：${fmt(coins)}\n負債：${fmt(debt(g,target.id))}\n累積獲得：${fmt(earned)}`,inline:true},
         {name:'🎮 紀錄',value:`獲勝紀錄：${ledger.wins||0}\n下注次數：${ledger.bets||0}\n帳務活動：${ledger.actions||0}`,inline:true},
         {name:'🏷️ 特殊稱號',value:playerTitle(g,target.id),inline:true},
+        {name:'✨ 個人造型',value:`${appearanceSummary(g,target.id)}\n使用 /玩家 造型 開啟衣櫃`,inline:false},
         {name:'🏆 成就收藏',value:`已解鎖：${achievementState.unlocked.size}/${achievementDefinitions.length}\n徽章：${achievementBadgeText(g,target.id)}\n使用 /玩家 成就 查看完整進度`,inline:true},
         {name:'🏠 豪華資產',value:`持有數量：${assetCount}\n原價總值：${fmt(assetValue)}`,inline:true},
         {name:'🎒 社交與狀態',value:`背包物品：${items}\n隊伍：${team?`${teamDisplayName(team)}（${team.members.length} 人）`:'尚未加入'}\n狀態：${status}`,inline:false},
@@ -9237,6 +9371,15 @@ function vehicleActivityUrl(guildId,userId,assetId) {
   const token=vehicleActivityToken(guildId,userId,assetId);
   return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/?session=${encodeURIComponent(token)}`:null;
 }
+function appearanceActivityToken(guildId,userId,channelId) {
+  if(!ACTIVITY_SIGNING_SECRET) return null;
+  const payload=Buffer.from(JSON.stringify({kind:'appearance',guildId,userId,channelId,exp:Date.now()+15*60*1000})).toString('base64url');
+  return `${payload}.${activitySignature(payload)}`;
+}
+function appearanceActivityUrl(guildId,userId,channelId) {
+  const token=appearanceActivityToken(guildId,userId,channelId);
+  return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/appearance?session=${encodeURIComponent(token)}`:null;
+}
 function scratchActivityToken(guildId,userId,ticketId,expiresAt) {
   if(!ACTIVITY_SIGNING_SECRET) return null;
   const payload=Buffer.from(JSON.stringify({kind:'scratch',guildId,userId,ticketId,exp:expiresAt})).toString('base64url');
@@ -9285,6 +9428,16 @@ function parseVehicleActivityToken(token) {
   if(!session.guildId||!session.userId||!session.assetId||!session.exp||session.exp<Date.now()) throw new Error('改裝連結已過期，請回到 Discord 重新使用 `/改裝`');
   return session;
 }
+function parseAppearanceActivityToken(token) {
+  if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('造型網站連結無效');
+  const [payload,signature,...extra]=token.split('.');
+  if(!payload||!signature||extra.length) throw new Error('造型網站連結格式錯誤');
+  const expected=Buffer.from(activitySignature(payload)),received=Buffer.from(signature);
+  if(expected.length!==received.length||!timingSafeEqual(expected,received)) throw new Error('造型網站連結驗證失敗');
+  const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
+  if(session.kind!=='appearance'||!session.guildId||!session.userId||!session.channelId||!session.exp||session.exp<Date.now()) throw new Error('造型網站連結已過期，請回到 Discord 重新使用 `/玩家 造型`');
+  return session;
+}
 function activityCatalog(category,assetId) {
   return Object.entries(vehicleModCatalog[category].options).map(([id,option])=>({id,name:vehicleModOptionName(assetId,category,id),price:option.price||0}));
 }
@@ -9300,6 +9453,53 @@ function activityPayload(session) {
     catalog:{paint:activityCatalog('paint',assetId),widebody:activityCatalog('widebody',assetId),wheels:activityCatalog('wheels',assetId)},
     expiresAt:session.exp
   };
+}
+async function appearancePayload(session) {
+  const user=await client.users.fetch(session.userId);
+  return {
+    player:{
+      userId:session.userId,
+      name:user.globalName||user.username,
+      avatar:user.displayAvatarURL({extension:'png',size:256}),
+      balance:ensureWallet(session.guildId,session.userId)
+    },
+    slots:COSMETIC_SLOTS.map(id=>({id,name:COSMETIC_SLOT_LABELS[id]})),
+    catalog:cosmeticCatalog.map(item=>({
+      id:item.id,slot:item.slot,theme:item.theme,name:item.name,icon:item.icon,price:item.price,
+      starter:Boolean(item.starter),owned:ownsCosmetic(session.guildId,session.userId,item.id),
+      image:item.image?`/appearance/backgrounds/${item.image}`:null,style:item.style
+    })),
+    appearance:playerAppearance(session.guildId,session.userId),
+    presets:appearancePresets(session.guildId,session.userId),
+    expiresAt:session.exp
+  };
+}
+const appearancePublishCooldowns=new Map();
+async function publishAppearance(session) {
+  const key=`${session.guildId}:${session.userId}`,now=Date.now(),last=appearancePublishCooldowns.get(key)||0;
+  if(now-last<30_000) throw new Error(`發布冷卻中，請等待 ${Math.ceil((30_000-(now-last))/1000)} 秒`);
+  appearancePublishCooldowns.set(key,now);
+  try {
+    const channel=await client.channels.fetch(session.channelId);
+    if(!channel?.isTextBased()||typeof channel.send!=='function'||channel.guildId!==session.guildId) throw new Error('原本的 Discord 頻道目前無法發布造型');
+    const user=await client.users.fetch(session.userId),appearance=playerAppearance(session.guildId,session.userId);
+    const selected=COSMETIC_SLOTS.map(slot=>({slot,item:cosmeticById[appearance[slot]]})).filter(entry=>entry.item);
+    const embed=new EmbedBuilder()
+      .setColor(0xD7A4FF)
+      .setAuthor({name:`${user.globalName||user.username} 的個人造型`,iconURL:user.displayAvatarURL({extension:'png',size:128})})
+      .setTitle('✨ 澳門最大賭場｜造型名片')
+      .setDescription(selected.length?'已把網站衣櫃中的造型正式穿戴完成。':'目前使用簡約無配件造型。')
+      .addFields(selected.map(({slot,item})=>({name:`${item.icon} ${COSMETIC_SLOT_LABELS[slot]}`,value:item.name,inline:true})))
+      .setFooter({text:'使用 /玩家 造型 打造專屬外觀'})
+      .setTimestamp();
+    const background=cosmeticById[appearance.background];
+    if(background?.image&&ACTIVITY_PUBLIC_URL) embed.setImage(`${ACTIVITY_PUBLIC_URL}/appearance/backgrounds/${background.image}`);
+    const message=await channel.send({embeds:[embed],allowedMentions:{parse:[]}});
+    return {messageUrl:message.url};
+  } catch(error) {
+    if(appearancePublishCooldowns.get(key)===now) appearancePublishCooldowns.delete(key);
+    throw error;
+  }
 }
 function activityJson(response,status,data) {
   response.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
@@ -9321,7 +9521,7 @@ const activityStaticTypes={
 };
 function serveActivityStatic(request,response,url) {
   if(!['GET','HEAD'].includes(request.method||'')) return false;
-  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html'};
+  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/appearance':'appearance.html'};
   const relative=routeFiles[url.pathname]||decodeURIComponent(url.pathname).replace(/^\/+/,'');
   if(!relative||relative.startsWith('api/')||relative.startsWith('activity/')) return false;
   const file=resolve(ACTIVITY_STATIC_ROOT,relative);
@@ -9891,6 +10091,30 @@ if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
         const result=purchaseVehicleModBundle(session.guildId,session.userId,session.assetId,body.selections||{});
         return activityJson(response,200,{ok:true,message:`已完成 ${result.asset.name} 改裝`,price:result.price,balance:result.balance,current:result.selections,changes:result.changes});
       }
+      if(request.method==='GET'&&url.pathname==='/activity/appearance') {
+        const session=parseAppearanceActivityToken(url.searchParams.get('session'));
+        return activityJson(response,200,{ok:true,...await appearancePayload(session)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/appearance/purchase') {
+        const body=await activityRequestBody(request),session=parseAppearanceActivityToken(body.session);
+        const result=purchaseCosmetic(session.guildId,session.userId,String(body.cosmeticId||''));
+        return activityJson(response,200,{ok:true,message:`已購買「${result.item.name}」`,...await appearancePayload(session)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/appearance/save') {
+        const body=await activityRequestBody(request),session=parseAppearanceActivityToken(body.session);
+        savePlayerAppearance(session.guildId,session.userId,body.appearance);
+        return activityJson(response,200,{ok:true,message:'造型已套用',...await appearancePayload(session)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/appearance/preset') {
+        const body=await activityRequestBody(request),session=parseAppearanceActivityToken(body.session);
+        const preset=saveAppearancePreset(session.guildId,session.userId,body.presetNo,body.name,body.appearance);
+        return activityJson(response,200,{ok:true,message:`已儲存「${preset.name}」`,preset,...await appearancePayload(session)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/appearance/publish') {
+        const body=await activityRequestBody(request),session=parseAppearanceActivityToken(body.session);
+        const result=await publishAppearance(session);
+        return activityJson(response,200,{ok:true,message:'造型名片已發布到原本的 Discord 頻道',...result});
+      }
       if(request.method==='POST'&&url.pathname==='/activity/mahjong/create') {
         return activityJson(response,200,{ok:true,game:webMahjongCreate(await activityRequestBody(request))});
       }
@@ -9933,11 +10157,11 @@ if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
       if(request.method==='GET'&&url.pathname==='/activity/health') return activityJson(response,200,{ok:true});
       return activityJson(response,404,{ok:false,error:'Not found'});
     } catch(error) {
-      console.error('Vehicle activity API error:',error);
+      console.error('Activity API error:',error);
       return activityJson(response,400,{ok:false,error:error.message||'改裝失敗'});
     }
-  }).listen(ACTIVITY_API_PORT,'0.0.0.0',()=>console.log(`Vehicle activity API listening on ${ACTIVITY_API_PORT}`));
+  }).listen(ACTIVITY_API_PORT,'0.0.0.0',()=>console.log(`Activity API listening on ${ACTIVITY_API_PORT}`));
 } else {
-  console.warn('Vehicle activity API disabled: missing ACTIVITY_BACKEND_SECRET or ACTIVITY_SIGNING_SECRET');
+  console.warn('Activity API disabled: missing ACTIVITY_BACKEND_SECRET or ACTIVITY_SIGNING_SECRET');
 }
 client.login(TOKEN);

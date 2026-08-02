@@ -61,7 +61,7 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   for(const name of removed) {
     assert.doesNotMatch(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${name}'\\)`),`舊指令 /${name} 仍在註冊`);
   }
-  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',成就:'成就',稱號:'稱號'\}/);
+  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',成就:'成就',造型:'個人造型',稱號:'稱號'\}/);
   assert.match(source,/日常:\{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'\}/);
   assert.match(source,/補給:\{商城:'商城',背包:'背包',購買:'購買',使用:'使用'\}/);
   assert.match(source,/寵物:\{商店:'寵物店',我的:'我的寵物'\}/);
@@ -69,6 +69,49 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
     assert.match(source,new RegExp(`command:'${game}'`),`/${game} 移除後未保留在小遊戲選單`);
   }
   assert.match(source,/miniGameProxyInteraction\(i,game\.command/);
+});
+
+test('網站版個人造型第一版具備商城、衣櫃、預設與發布流程',()=>{
+  const html=readFileSync(new URL('../activity/public/appearance.html',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/appearance.css',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/appearance.js',import.meta.url),'utf8');
+  assert.match(source,/const COSMETIC_SLOTS=\['background','outfit','headwear','face','handheld','aura'\]/);
+  const catalogBlock=source.match(/const cosmeticCatalog=\[[\s\S]+?\n\];/)?.[0]||'';
+  assert.equal((catalogBlock.match(/\{id:'/g)||[]).length,24,'第一版必須提供 24 件造型');
+  assert.match(source,/CREATE TABLE IF NOT EXISTS player_cosmetics/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS player_appearance/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS appearance_presets/);
+  assert.match(source,/cosmetic_purchase:'個人造型商城'/);
+  assert.match(source,/changeBalanceUnlocked\(g,u,-item\.price,'cosmetic_purchase'/);
+  assert.match(source,/setName\('造型'\).*個人造型商城/s);
+  assert.match(source,/appearanceActivityToken\(guildId,userId,channelId\)/);
+  assert.match(source,/kind:'appearance'.*exp:Date\.now\(\)\+15\*60\*1000/s);
+  assert.match(source,/\/activity\/appearance\/purchase/);
+  assert.match(source,/\/activity\/appearance\/save/);
+  assert.match(source,/\/activity\/appearance\/preset/);
+  assert.match(source,/\/activity\/appearance\/publish/);
+  assert.match(html,/id="portrait"/);
+  assert.match(css,/\.avatar-outfit\[data-style=transport\]/);
+  assert.match(js,/尚未擁有|owned\(entry\)/);
+  assert.match(js,/請先按「穿上這套」再發布/);
+});
+
+test('四張個人造型主題背景已加入網站素材',()=>{
+  for(const file of ['casino-king.png','transport-mogul.png','night-heist.png','pomeranian-air.png']) {
+    const url=new URL(`../activity/public/appearance/backgrounds/${file}`,import.meta.url);
+    assert.ok(existsSync(url),`缺少造型背景 ${file}`);
+    assert.ok(readFileSync(url).length>100_000,`${file} 不是有效的完整圖片素材`);
+  }
+  assert.match(source,/\/appearance':'appearance\.html'/);
+  assert.match(source,/\/appearance\/backgrounds\/\$\{background\.image\}/);
+});
+
+test('網站版個人造型更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-02-appearance-web-v1.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.02.4');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['/玩家 造型','24 件','3 組','發布','不會提供能力加成']) assert.match(text,new RegExp(required.replace('/','\\/')));
 });
 
 test('成就累加資料表可安全累計與取最大值',()=>{
