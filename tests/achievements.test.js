@@ -153,7 +153,7 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.02\.7'/);
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.02\.8'/);
   for(const id of ['appearance','transport','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
@@ -163,11 +163,17 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   assert.match(source,/url\.pathname==='\/activity\/game\/stamina-restore'/);
   assert.match(source,/setName\('遊戲'\)\.setDescription\('開啟網頁遊戲大廳與個人經營總覽'\)/);
   assert.match(source,/routedCommand==='網頁遊戲'/);
-  for(const id of ['playerBalance','restoreStamina','moduleGrid','transportGrid','assetGrid','achievementGrid']) assert.match(html,new RegExp(`id="${id}"`));
+  for(const id of ['menuToggle','gameSidebar','primaryNav','gameNav','playerBalance','restoreStamina','transportGrid','assetGrid','achievementGrid']) assert.match(html,new RegExp(`id="${id}"`));
+  assert.doesNotMatch(html,/id="moduleGrid"/);
+  assert.match(css,/\.game-sidebar/);
+  assert.match(css,/\.drawer-open \.game-sidebar/);
   assert.match(css,/\.hero-character/);
   assert.match(css,/@media\(max-width:620px\)/);
   assert.match(js,/api\('\/api\/game'\)/);
   assert.match(js,/api\('\/api\/game\/stamina-restore',\{method:'POST'\}\)/);
+  assert.match(js,/function renderSidebar\(modules\)/);
+  assert.match(js,/function openDrawer\(\)/);
+  assert.match(js,/function closeDrawer\(\)/);
 });
 
 test('網頁遊戲第一版更新公告完整',()=>{
@@ -176,6 +182,14 @@ test('網頁遊戲第一版更新公告完整',()=>{
   assert.equal(update.version,'2026.08.02.7');
   assert.deepEqual(update.channelNames,['賭場公告']);
   for(const required of ['/玩家 遊戲','金庫','資產','交通事業','成就','每日免費體力','Oracle']) assert.match(text,new RegExp(required.replace('/','\\/')));
+});
+
+test('網頁遊戲左側導覽與大廳修正公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-02-web-game-left-drawer.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.02.8');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['左側','大廳','交通事業','資產','成就','小遊戲','人物']) assert.match(text,new RegExp(required));
 });
 
 test('網頁遊戲資產摘要由獨立資料模組正確計算',()=>{

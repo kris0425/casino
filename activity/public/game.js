@@ -18,6 +18,7 @@ async function api(path,{method='GET'}={}){
 function setText(selector,value){$(selector).textContent=value;}
 function renderPlayer(data){
   $('#playerAvatar').src=data.player.avatar;setText('#playerName',data.player.name);setText('#playerRank',data.player.rank);setText('#playerTitle',data.player.title);
+  $('#sidebarAvatar').src=data.player.avatar;setText('#sidebarName',data.player.name);setText('#sidebarBalance',`${format(data.player.balance)} 金幣`);
   setText('#playerBalance',format(data.player.balance));setText('#playerDebt',format(data.player.debt));setText('#staminaText',`${format(data.player.stamina)} / ${format(data.player.maxStamina)}`);
   $('#staminaBar').style.width=`${Math.min(100,Math.max(0,data.player.stamina/data.player.maxStamina*100))}%`;
   const restore=$('#restoreStamina');restore.disabled=!data.player.dailyStaminaAvailable;restore.textContent=data.player.dailyStaminaAvailable?'每日免費回體力':'今日已領取';
@@ -26,11 +27,18 @@ function renderPlayer(data){
   setText('#assetCount',format(data.assets.count));setText('#assetValue',format(data.assets.value));setText('#achievementCount',`${data.achievements.unlocked} / ${data.achievements.total}`);
   setText('#versionLabel',`版本 ${data.version}`);$('#appearanceLink').href=data.modules.find(module=>module.id==='appearance')?.href||'#';
 }
-function renderModules(modules){
-  const grid=$('#moduleGrid');grid.replaceChildren();
+function sidebarItem({icon,name,description,href,state}){
+  const item=node(state==='coming'?'button':'a',`nav-item${state==='coming'?' disabled':''}`);if(item.tagName==='A')item.href=href;
+  item.append(node('span','nav-icon',icon));const copy=node('span','nav-copy');copy.append(node('strong','',name),node('small','',description));item.append(copy,node('span','nav-arrow',state==='coming'?'即將推出':'›'));
+  if(item.tagName==='A')item.onclick=()=>closeDrawer();return item;
+}
+function renderSidebar(modules){
+  const primary=$('#primaryNav'),games=$('#gameNav');primary.replaceChildren();games.replaceChildren();
+  primary.append(sidebarItem({icon:'🏠',name:'遊戲大廳',description:'玩家金庫、體力與今日增益',href:'#top',state:'dashboard'}));
   for(const module of modules){
-    const target=module.href||'#',card=node(module.state==='coming'?'article':'a',`module-card ${module.state}`);if(card.tagName==='A')card.href=target;
-    card.append(node('span','module-icon',module.icon));const copy=node('div');copy.append(node('strong','',module.name),node('p','',module.description));card.append(copy,node('span','state-pill',module.state==='available'?'可使用':module.state==='dashboard'?'即時總覽':'開發中'));grid.append(card);
+    const item=sidebarItem(module);
+    if(['transport','assets','achievements'].includes(module.id))primary.append(item);
+    else games.append(item);
   }
 }
 function renderTransport(items){
@@ -50,10 +58,13 @@ function renderAchievements(data){
   for(const item of data.items){const card=node('article',`achievement-card${item.done?' done':''}`),header=node('header');header.append(node('h3','',item.name),node('span','',item.done?'✓':'🔒'));card.append(header,node('p','',item.description),node('small','',item.done?'已解鎖':item.progress||'等待揭曉'));grid.append(card);}
 }
 function startCountdown(expiresAt){
-  clearInterval(countdownTimer);const update=()=>{const remaining=Math.max(0,expiresAt-Date.now()),minutes=Math.floor(remaining/60000),seconds=Math.floor(remaining%60000/1000);setText('#sessionTime',remaining?`安全連結 ${minutes}:${String(seconds).padStart(2,'0')}`:'安全連結已過期');};update();countdownTimer=setInterval(update,1000);
+  clearInterval(countdownTimer);const update=()=>{const remaining=Math.max(0,expiresAt-Date.now()),minutes=Math.floor(remaining/60000),seconds=Math.floor(remaining%60000/1000),label=remaining?`安全連結 ${minutes}:${String(seconds).padStart(2,'0')}`:'安全連結已過期';setText('#sessionTime',label);setText('#sidebarSession',label);};update();countdownTimer=setInterval(update,1000);
 }
-function render(data){state.data=data;renderPlayer(data);renderModules(data.modules);renderTransport(data.transport);renderAssets(data.assets);renderAchievements(data.achievements);startCountdown(data.expiresAt);}
+function openDrawer(){document.body.classList.add('drawer-open');$('#gameSidebar').setAttribute('aria-hidden','false');$('#menuToggle').setAttribute('aria-expanded','true');}
+function closeDrawer(){document.body.classList.remove('drawer-open');$('#gameSidebar').setAttribute('aria-hidden','true');$('#menuToggle').setAttribute('aria-expanded','false');}
+function render(data){state.data=data;renderPlayer(data);renderSidebar(data.modules);renderTransport(data.transport);renderAssets(data.assets);renderAchievements(data.achievements);startCountdown(data.expiresAt);}
 async function load(showToast=false){if(state.busy)return;state.busy=true;try{const data=await api('/api/game');render(data);if(showToast)toast('遊戲資料已更新');$('#loading').classList.add('hidden');}catch(error){toast(error.message,true);$('#loading strong').textContent=error.message;$('#loading p').textContent='請回到 Discord 使用 /玩家 遊戲 取得新連結';}finally{state.busy=false;}}
 $('#refreshData').onclick=()=>load(true);
+$('#menuToggle').onclick=openDrawer;$('#sidebarClose').onclick=closeDrawer;$('#drawerOverlay').onclick=closeDrawer;document.addEventListener('keydown',event=>{if(event.key==='Escape')closeDrawer();});
 $('#restoreStamina').onclick=async()=>{if(state.busy)return;state.busy=true;try{const data=await api('/api/game/stamina-restore',{method:'POST'});render(data);toast(data.message);}catch(error){toast(error.message,true);}finally{state.busy=false;}};
 if(!session){$('#loading strong').textContent='缺少安全連結';$('#loading p').textContent='請回到 Discord 使用 /玩家 遊戲';}else load();
