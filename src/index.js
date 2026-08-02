@@ -71,9 +71,13 @@ const ECONOMY_SINK_LABELS={
 const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund']);
 const BASE_STAMINA = 800;
 const assetPath=name=>resolve(process.cwd(),'assets',name);
-const COSMETIC_SLOTS=['background','outfit','headwear','face','handheld','aura'];
-const COSMETIC_SLOT_LABELS={background:'背景',outfit:'服裝',headwear:'頭飾',face:'臉部',handheld:'手持物',aura:'光環／邊框'};
+const COSMETIC_SLOTS=['character','background','outfit','headwear','face','handheld','aura'];
+const COSMETIC_SLOT_LABELS={character:'人物',background:'背景',outfit:'服裝',headwear:'頭飾',face:'臉部',handheld:'手持物',aura:'光環／邊框'};
 const cosmeticCatalog=[
+  {id:'casino_character',slot:'character',theme:'賭場之王',name:'黑金首席荷官',icon:'♦️',price:0,starter:true,image:'casino-host.png',style:'casino'},
+  {id:'transport_character',slot:'character',theme:'交通大亨',name:'銀翼運輸指揮官',icon:'🛫',price:20_000_000,image:'transport-commander.png',style:'transport'},
+  {id:'heist_character',slot:'character',theme:'暗夜劫案',name:'紫影情報專員',icon:'🌙',price:30_000_000,image:'night-agent.png',style:'heist'},
+  {id:'pomeranian_character',slot:'character',theme:'萌犬航空',name:'粉雲萌犬機長',icon:'🐾',price:40_000_000,image:'pomeranian-captain.png',style:'pomeranian'},
   {id:'casino_background',slot:'background',theme:'賭場之王',name:'黑金至尊廳',icon:'♠️',price:0,starter:true,image:'casino-king.png',style:'casino'},
   {id:'casino_outfit',slot:'outfit',theme:'賭場之王',name:'黑金晚宴西裝',icon:'🤵',price:0,starter:true,style:'casino'},
   {id:'casino_headwear',slot:'headwear',theme:'賭場之王',name:'籌碼王冠',icon:'👑',price:0,starter:true,style:'casino'},
@@ -1108,7 +1112,7 @@ function purchaseCosmetic(g,u,cosmeticId) {
 function appearancePresets(g,u) {
   return db.prepare('SELECT preset_no,name,appearance_json,updated_at FROM appearance_presets WHERE guild_id=? AND user_id=? ORDER BY preset_no').all(g,u).map(row=>{
     let appearance=null;
-    try { appearance=JSON.parse(row.appearance_json); } catch {}
+    try { appearance={...defaultAppearance,...JSON.parse(row.appearance_json)}; } catch {}
     return {presetNo:row.preset_no,name:row.name,appearance,updatedAt:row.updated_at};
   });
 }
@@ -8178,9 +8182,9 @@ async function handleInteraction(i) {
       if(!url) throw new Error('個人造型網站尚未完成設定，請稍後再試');
       return i.reply({
         ephemeral:true,
-        embeds:[new EmbedBuilder().setColor(0xD7A4FF).setTitle('✨ 個人造型工作室').setDescription('進入網站即可瀏覽 **24 件造型商品**、即時試穿、購買與穿戴，並可儲存 **3 組快速預設**。完成後也能將造型名片發布回目前頻道。').addFields(
+        embeds:[new EmbedBuilder().setColor(0xD7A4FF).setTitle('✨ 人物大廳與個人造型工作室').setDescription('進入網站即可在人物大廳切換 **4 名全身角色**，再瀏覽 **28 件造型商品**、即時試穿、購買與穿戴，並可儲存 **3 組快速預設**。完成後也能將造型名片發布回目前頻道。').addFields(
           {name:'🔐 專屬安全連結',value:'連結綁定你的 Discord 帳號與伺服器，15 分鐘後失效。'},
-          {name:'🎁 首次使用',value:'「賭場之王」六件基本套裝已免費開放。'}
+          {name:'🎁 首次使用',value:'「賭場之王」角色與六件基本套裝已免費開放。'}
         )],
         components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('開啟造型網站').setEmoji('👗').setStyle(ButtonStyle.Link).setURL(url))]
       });
@@ -9467,7 +9471,7 @@ async function appearancePayload(session) {
     catalog:cosmeticCatalog.map(item=>({
       id:item.id,slot:item.slot,theme:item.theme,name:item.name,icon:item.icon,price:item.price,
       starter:Boolean(item.starter),owned:ownsCosmetic(session.guildId,session.userId,item.id),
-      image:item.image?`/appearance/backgrounds/${item.image}`:null,style:item.style
+      image:item.image?`/appearance/${item.slot==='character'?'characters':'backgrounds'}/${item.image}`:null,style:item.style
     })),
     appearance:playerAppearance(session.guildId,session.userId),
     presets:appearancePresets(session.guildId,session.userId),
@@ -9494,6 +9498,8 @@ async function publishAppearance(session) {
       .setTimestamp();
     const background=cosmeticById[appearance.background];
     if(background?.image&&ACTIVITY_PUBLIC_URL) embed.setImage(`${ACTIVITY_PUBLIC_URL}/appearance/backgrounds/${background.image}`);
+    const character=cosmeticById[appearance.character];
+    if(character?.image&&ACTIVITY_PUBLIC_URL) embed.setThumbnail(`${ACTIVITY_PUBLIC_URL}/appearance/characters/${character.image}`);
     const message=await channel.send({embeds:[embed],allowedMentions:{parse:[]}});
     return {messageUrl:message.url};
   } catch(error) {

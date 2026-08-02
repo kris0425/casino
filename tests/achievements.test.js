@@ -71,13 +71,13 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   assert.match(source,/miniGameProxyInteraction\(i,game\.command/);
 });
 
-test('網站版個人造型第一版具備商城、衣櫃、預設與發布流程',()=>{
+test('網站版個人造型具備人物大廳、商城、衣櫃、預設與發布流程',()=>{
   const html=readFileSync(new URL('../activity/public/appearance.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../activity/public/appearance.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/appearance.js',import.meta.url),'utf8');
-  assert.match(source,/const COSMETIC_SLOTS=\['background','outfit','headwear','face','handheld','aura'\]/);
+  assert.match(source,/const COSMETIC_SLOTS=\['character','background','outfit','headwear','face','handheld','aura'\]/);
   const catalogBlock=source.match(/const cosmeticCatalog=\[[\s\S]+?\n\];/)?.[0]||'';
-  assert.equal((catalogBlock.match(/\{id:'/g)||[]).length,24,'第一版必須提供 24 件造型');
+  assert.equal((catalogBlock.match(/\{id:'/g)||[]).length,28,'人物大廳版必須提供 28 件造型');
   assert.match(source,/CREATE TABLE IF NOT EXISTS player_cosmetics/);
   assert.match(source,/CREATE TABLE IF NOT EXISTS player_appearance/);
   assert.match(source,/CREATE TABLE IF NOT EXISTS appearance_presets/);
@@ -90,10 +90,25 @@ test('網站版個人造型第一版具備商城、衣櫃、預設與發布流�
   assert.match(source,/\/activity\/appearance\/save/);
   assert.match(source,/\/activity\/appearance\/preset/);
   assert.match(source,/\/activity\/appearance\/publish/);
-  assert.match(html,/id="portrait"/);
-  assert.match(css,/\.avatar-outfit\[data-style=transport\]/);
+  assert.match(html,/id="characterLineup"/);
+  assert.match(html,/id="previewCharacter"/);
+  assert.match(css,/\.character-card\.active/);
+  assert.match(css,/\.character-model/);
+  assert.match(js,/function renderLobby\(\)/);
   assert.match(js,/尚未擁有|owned\(entry\)/);
   assert.match(js,/請先按「穿上這套」再發布/);
+});
+
+test('人物大廳四名全身角色使用透明 PNG 並加入商城',()=>{
+  const characters=['casino-host.png','transport-commander.png','night-agent.png','pomeranian-captain.png'];
+  for(const file of characters) {
+    const url=new URL(`../activity/public/appearance/characters/${file}`,import.meta.url),data=readFileSync(url);
+    assert.ok(existsSync(url),`缺少全身角色 ${file}`);
+    assert.ok(data.length>500_000,`${file} 不是完整角色素材`);
+    assert.equal(data[25],6,`${file} 必須是具有 alpha 通道的 RGBA PNG`);
+  }
+  for(const id of ['casino_character','transport_character','heist_character','pomeranian_character']) assert.match(source,new RegExp(`id:'${id}',slot:'character'`));
+  assert.match(source,/setThumbnail\(`\$\{ACTIVITY_PUBLIC_URL\}\/appearance\/characters\/\$\{character\.image\}`\)/);
 });
 
 test('四張個人造型主題背景已加入網站素材',()=>{
@@ -112,6 +127,14 @@ test('網站版個人造型更新公告完整',()=>{
   assert.equal(update.version,'2026.08.02.4');
   assert.deepEqual(update.channelNames,['賭場公告']);
   for(const required of ['/玩家 造型','24 件','3 組','發布','不會提供能力加成']) assert.match(text,new RegExp(required.replace('/','\\/')));
+});
+
+test('人物展示大廳更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-02-appearance-lobby-v2.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.02.5');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['人物展示大廳','4 名','全身角色','28 件','原有衣櫃']) assert.match(text,new RegExp(required));
 });
 
 test('成就累加資料表可安全累計與取最大值',()=>{

@@ -15,6 +15,22 @@
     <div class="wallet" aria-label="目前金庫"><span>金庫</span><strong id="balance">—</strong></div>
   </header>
 
+  <section class="showroom" id="showroom" aria-label="人物展示大廳">
+    <img id="lobbyBackground" class="showroom-background" alt="人物大廳背景">
+    <div class="showroom-shade"></div>
+    <div class="showroom-copy">
+      <span class="eyebrow">CHARACTER LOBBY</span>
+      <h1>人物展示大廳</h1>
+      <p>選擇你的代表人物，再進入衣櫃搭配背景、配件與光環。</p>
+    </div>
+    <div class="character-lineup" id="characterLineup"></div>
+    <div class="showroom-footer">
+      <div class="player-chip"><img id="playerAvatar" alt="玩家頭像"><span><small>目前玩家</small><strong id="playerName">讀取中…</strong></span></div>
+      <div class="active-character"><small>展示人物</small><strong id="activeCharacterName">—</strong><span id="activeCharacterTheme">—</span></div>
+      <button class="btn btn-primary" id="openWardrobe">進入衣櫃</button>
+    </div>
+  </section>
+
   <main class="layout" id="app" aria-busy="true">
     <section class="preview-panel panel">
       <div class="section-heading"><div><span class="eyebrow">LIVE PREVIEW</span><h1>個人造型</h1></div><span class="draft-badge" id="draftBadge">已穿戴</span></div>
@@ -22,13 +38,12 @@
         <img id="previewBackground" class="portrait-background" alt="造型背景">
         <div id="previewAura" class="avatar-aura"></div>
         <div class="avatar-stage">
+          <img id="previewCharacter" class="character-model" alt="目前展示人物">
           <div id="previewHeadwear" class="layer-icon headwear"></div>
-          <div class="avatar-head"><img id="playerAvatar" alt="玩家頭像"></div>
           <div id="previewFace" class="layer-icon face"></div>
-          <div id="previewOutfit" class="avatar-outfit"><span class="lapel left"></span><span class="lapel right"></span><span class="outfit-detail"></span></div>
           <div id="previewHandheld" class="layer-icon handheld"></div>
         </div>
-        <div class="portrait-caption"><strong id="playerName">讀取中…</strong><span id="lookTheme">賭場之王</span></div>
+        <div class="portrait-caption"><strong>即時試穿</strong><span id="lookTheme">賭場之王</span></div>
       </div>
       <div class="selection-summary" id="selectionSummary"></div>
       <div class="primary-actions">

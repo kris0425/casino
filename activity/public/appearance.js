@@ -1,7 +1,7 @@
 const params=new URLSearchParams(location.search);
 const session=params.get('session')||'';
 const $=selector=>document.querySelector(selector);
-const state={data:null,equipped:null,draft:null,slot:'background',busy:false};
+const state={data:null,equipped:null,draft:null,slot:'character',busy:false};
 const formatCoins=value=>`${Number(value||0).toLocaleString('zh-TW')} 金幣`;
 let toastTimer;
 
@@ -28,7 +28,19 @@ function syncData(data,keepDraft=false){
   $('#playerAvatar').src=data.player.avatar;
   render();
 }
-function render(){renderTabs();renderPreview();renderCatalog();renderPresets();}
+function render(){renderLobby();renderTabs();renderPreview();renderCatalog();renderPresets();}
+function renderLobby(){
+  const characters=state.data.catalog.filter(entry=>entry.slot==='character');
+  const current=item(state.draft.character)||characters[0];
+  const currentIndex=Math.max(0,characters.findIndex(entry=>entry.id===current?.id));
+  const visible=characters.length>3?[characters[(currentIndex-1+characters.length)%characters.length],characters[currentIndex],characters[(currentIndex+1)%characters.length]]:characters;
+  const background=item(state.draft.background);
+  $('#lobbyBackground').src=background?.image||'';
+  $('#characterLineup').innerHTML=visible.map(entry=>`<button class="character-card${current?.id===entry.id?' active':''}" data-character="${entry.id}" aria-label="${entry.name}"><img src="${entry.image}" alt="${entry.name}"><span class="character-tag">${entry.name}</span>${owned(entry)?'':'<span class="character-lock">🔒</span>'}</button>`).join('');
+  document.querySelectorAll('[data-character]').forEach(card=>card.onclick=()=>selectItem(card.dataset.character));
+  $('#activeCharacterName').textContent=current?.name||'未選擇人物';
+  $('#activeCharacterTheme').textContent=current?.theme||'人物大廳';
+}
 function renderTabs(){
   $('#slotTabs').innerHTML=state.data.slots.map(slot=>`<button class="slot-tab${state.slot===slot.id?' active':''}" data-slot="${slot.id}">${slot.name}</button>`).join('');
   document.querySelectorAll('.slot-tab').forEach(button=>button.onclick=()=>{state.slot=button.dataset.slot;render();});
@@ -36,10 +48,11 @@ function renderTabs(){
 function renderPreview(){
   const chosen=Object.fromEntries(state.data.slots.map(({id})=>[id,item(state.draft[id])]));
   const bg=chosen.background;$('#previewBackground').src=bg?.image||'';$('#previewBackground').style.opacity=bg?'1':'0';
+  $('#previewCharacter').src=chosen.character?.image||'';$('#previewCharacter').style.opacity=chosen.character?'1':'0';
   $('#previewHeadwear').textContent=chosen.headwear?.icon||'';
   $('#previewFace').textContent=chosen.face?.icon||'';
   $('#previewHandheld').textContent=chosen.handheld?.icon||'';
-  $('#previewOutfit').dataset.style=chosen.outfit?.style||'casino';
+  $('#previewCharacter').dataset.outfit=chosen.outfit?.style||'casino';
   $('#previewAura').dataset.style=chosen.aura?.style||'none';$('#previewAura').style.display=chosen.aura?'block':'none';
   const themes=Object.values(chosen).filter(Boolean).map(entry=>entry.theme);const theme=themes.length?themes.sort((a,b)=>themes.filter(x=>x===b).length-themes.filter(x=>x===a).length)[0]:'簡約模式';
   $('#lookTheme').textContent=theme;
@@ -48,7 +61,7 @@ function renderPreview(){
 }
 function renderCatalog(){
   const entries=state.data.catalog.filter(entry=>entry.slot===state.slot);$('#catalogCount').textContent=`${entries.length} 件商品`;
-  $('#catalog').innerHTML=entries.map(entry=>`<button class="item-card${state.draft[state.slot]===entry.id?' selected':''}" data-id="${entry.id}"><span class="item-icon">${entry.icon}</span><span class="item-copy"><strong>${entry.name}</strong><span>${entry.theme} · ${state.data.slots.find(slot=>slot.id===entry.slot).name}</span><small>${owned(entry)?(entry.starter?'免費基本款':'已擁有'):formatCoins(entry.price)}</small></span>${owned(entry)?'<i class="owned-dot"></i>':''}</button>`).join('');
+  $('#catalog').innerHTML=entries.map(entry=>`<button class="item-card${state.draft[state.slot]===entry.id?' selected':''}" data-id="${entry.id}"><span class="item-icon${entry.image?' visual':''}">${entry.image?`<img src="${entry.image}" alt="">`:entry.icon}</span><span class="item-copy"><strong>${entry.name}</strong><span>${entry.theme} · ${state.data.slots.find(slot=>slot.id===entry.slot).name}</span><small>${owned(entry)?(entry.starter?'免費基本款':'已擁有'):formatCoins(entry.price)}</small></span>${owned(entry)?'<i class="owned-dot"></i>':''}</button>`).join('');
   document.querySelectorAll('.item-card').forEach(card=>card.onclick=()=>selectItem(card.dataset.id));
 }
 async function selectItem(id){
@@ -73,8 +86,9 @@ async function busy(action){if(state.busy)return;state.busy=true;document.queryS
 
 $('#saveLook').onclick=()=>busy(async()=>{const data=await api('/api/appearance/save',{method:'POST',body:{appearance:state.draft}});syncData(data);toast(data.message);});
 $('#resetLook').onclick=()=>{state.draft={...state.equipped};render();toast('已復原到目前穿戴造型');};
-$('#removeSlot').onclick=()=>{state.draft[state.slot]=null;render();};
+$('#removeSlot').onclick=()=>{if(state.slot==='character')return toast('展示人物不能卸下，請選擇另一名人物',true);state.draft[state.slot]=null;render();};
 $('#publishLook').onclick=()=>busy(async()=>{if(!equalLooks(state.draft,state.equipped))throw new Error('請先按「穿上這套」再發布');const data=await api('/api/appearance/publish',{method:'POST',body:{}});toast(data.message);});
+$('#openWardrobe').onclick=()=>$('#app').scrollIntoView({behavior:'smooth',block:'start'});
 
 (async()=>{
   try{
