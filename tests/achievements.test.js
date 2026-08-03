@@ -479,11 +479,11 @@ test('萌犬豪華客機已加入商城、航空營運及圖片資產',()=>{
 test('兩架 777-300ER 特殊塗裝客機已加入資產市場及航空營運',()=>{
   const definitions={
     boeing_777_300er_lucky_wings:{
-      name:'🍀 Boeing 777-300ER 幸運星翼',price:8880000,buff:'casino',buffMultiplier:'3',
+      name:'🐦‍⬛ Boeing 777-300ER 星光八哥號',price:8880000,buff:'casino',buffMultiplier:'3',
       image:'aircraft/passenger/boeing_777_300er_lucky_wings_special.png'
     },
     boeing_777_300er_myna_starlight:{
-      name:'🐦‍⬛ Boeing 777-300ER 八哥星羽',price:9280000,buff:'work',buffMultiplier:'3\\.1',
+      name:'🐦 Boeing 777-300ER 星羽文鳥號',price:9280000,buff:'work',buffMultiplier:'3\\.1',
       image:'aircraft/passenger/boeing_777_300er_myna_starlight_special.png'
     }
   };
@@ -503,6 +503,8 @@ test('兩架 777-300ER 特殊塗裝客機已加入資產市場及航空營運',(
     const width=image.readUInt32BE(16),height=image.readUInt32BE(20);
     assert.ok(width>=1500&&height>=800&&width>height,`${expected.name} 圖片規格錯誤：${width}x${height}`);
   }
+  assert.match(source,/boeing_777_300er_lucky_wings:\{[^\n]+八哥彩繪/);
+  assert.match(source,/boeing_777_300er_myna_starlight:\{[^\n]+白色頰羽[^\n]+文鳥主題/);
 });
 
 test('航空航線基礎營收下修 25% 且不影響其他交通事業',()=>{
