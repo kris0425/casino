@@ -2,16 +2,16 @@ const params=new URLSearchParams(location.search),session=params.get('session')|
 const $=selector=>document.querySelector(selector);
 const format=value=>Number(value||0).toLocaleString('zh-TW');
 const GARAGE_PAGE_SIZE=6;
-const state={data:null,busy:false,garageGroup:null,garagePage:0};
-let toastTimer,countdownTimer;
+const state={data:null,busy:false,garageGroup:null,garagePage:0,pvp:null,pvpBusy:false,pvpSettledRace:null};
+let toastTimer,countdownTimer,pvpPollTimer;
 
 function toast(message,error=false){const node=$('#toast');node.textContent=message;node.className=`toast show${error?' error':''}`;clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.className='toast',3200);}
 function node(tag,className,text){const element=document.createElement(tag);if(className)element.className=className;if(text!==undefined)element.textContent=text;return element;}
-async function api(path,{method='GET'}={}){
+async function api(path,{method='GET',body={}}={}){
   const options={method,headers:{}};
   let url=path;
   if(method==='GET')url+=`?session=${encodeURIComponent(session)}`;
-  else{options.headers['content-type']='application/json';options.body=JSON.stringify({session});}
+  else{options.headers['content-type']='application/json';options.body=JSON.stringify({session,...body});}
   const response=await fetch(url,options),data=await response.json().catch(()=>({}));
   if(!response.ok||!data.ok)throw new Error(data.error||'網站暫時無法取得遊戲資料');
   return data;
@@ -38,7 +38,7 @@ function renderSidebar(modules){
   primary.append(sidebarItem({icon:'🏠',name:'遊戲大廳',description:'玩家金庫、體力與今日增益',href:'#top',state:'dashboard'}));
   for(const module of modules){
     const item=sidebarItem(module);
-    if(['transport','garage','assets','achievements'].includes(module.id))primary.append(item);
+    if(['transport','vehicle-pvp','garage','assets','achievements'].includes(module.id))primary.append(item);
     else games.append(item);
   }
 }
@@ -78,14 +78,55 @@ function renderAchievements(data){
   const grid=$('#achievementGrid');grid.replaceChildren();
   for(const item of data.items){const card=node('article',`achievement-card${item.done?' done':''}`),header=node('header');header.append(node('h3','',item.name),node('span','',item.done?'✓':'🔒'));card.append(header,node('p','',item.description),node('small','',item.done?'已解鎖':item.progress||'等待揭曉'));grid.append(card);}
 }
+function pvpStatusText(room){if(room.status==='waiting')return '等待對手加入';if(room.status==='finished')return room.draw?'平手完成':'賽事完成';if(Date.now()<(room.startsAt||0))return '雙方已就位';return `即時賽段 ${room.stage} / ${room.totalStages}`;}
+function renderPvpPlayer(room,index){
+  const racer=$(`#pvpRacer${index}`),player=room.players[index];
+  if(!player){racer.hidden=true;return;}racer.hidden=false;
+  const image=racer.querySelector('img');image.src=player.vehicle.image||'';image.alt=player.vehicle.name;
+  racer.querySelector('strong').textContent=`${player.name}${player.isSelf?'（你）':''}`;racer.querySelector('small').textContent=player.event||player.vehicle.name;
+  const progress=Math.max(0,Math.min(100,player.progress||0));racer.style.left=`calc(${progress}% - ${progress*.84}px)`;
+  racer.classList.toggle('boost',player.event==='氮氣爆發');racer.classList.toggle('mistake',player.event==='彎道失誤');racer.classList.toggle('winner',room.status==='finished'&&!room.draw&&room.winnerId===player.id);
+}
+function renderPvp(data){
+  state.pvp=data;const select=$('#pvpVehicle'),selected=select.value;
+  select.replaceChildren();
+  if(!data.choices.length){const option=node('option','', '車庫內沒有可參賽的汽車或機車');option.value='';select.append(option);}else for(const choice of data.choices){const option=node('option','',`${choice.name}｜${choice.rarity}｜戰力 ${choice.power}`);option.value=choice.id;select.append(option);}
+  if(data.choices.some(choice=>choice.id===selected))select.value=selected;
+  const room=data.room,empty=$('#pvpEmpty'),live=$('#pvpLive');empty.hidden=Boolean(room);live.hidden=!room;
+  $('#pvpCreate').disabled=state.pvpBusy||!data.choices.length||Boolean(room&&['waiting','running'].includes(room.status));
+  $('#pvpJoin').disabled=state.pvpBusy||!data.choices.length||Boolean(room&&['waiting','running'].includes(room.status));
+  if(!room){clearInterval(pvpPollTimer);pvpPollTimer=null;return;}
+  setText('#pvpStatus',pvpStatusText(room));setText('#pvpTitle',`${room.title}｜每人 ${format(room.bet)} 金幣`);setText('#pvpCopyCode',room.code);
+  $('#pvpArena').style.backgroundImage=room.scene?.image?`url("${room.scene.image}")`:'';
+  const countdown=$('#pvpCountdown');
+  if(room.status==='waiting')countdown.textContent='等待對手輸入房碼';
+  else if(room.status==='running'&&Date.now()<room.startsAt)countdown.textContent=`${Math.max(1,Math.ceil((room.startsAt-Date.now())/1000))}`;
+  else countdown.textContent=room.status==='finished'?(room.draw?'平手！':'🏆 勝負已定'):room.title;
+  renderPvpPlayer(room,0);renderPvpPlayer(room,1);
+  const result=$('#pvpResult');result.replaceChildren();
+  if(room.status==='waiting')result.textContent='把房碼交給同一個 Discord 伺服器的玩家；等待期間不會扣款。';
+  else if(room.status==='running')result.textContent=room.stage?room.players.map(player=>`${player.name}：${Math.round(player.distance)}m · ${player.event}`).join('　'):'雙方下注與體力已鎖定，準備起跑。';
+  else if(room.draw)result.append(node('strong','',`雙方同時衝線，已各退回 ${format(room.bet)} 金幣。`));
+  else {const winner=room.players.find(player=>player.id===room.winnerId),credited=room.result?.credited||0,rake=room.result?.rake||0;result.append(node('strong','',`🏆 ${winner?.name||'勝者'} 入帳 ${format(credited)} 金幣`));if(rake)result.append(document.createTextNode(`（高額賭局抽成 ${Math.round((room.result.rakeRate||0)*100)}%：${format(rake)}）`));}
+  $('#pvpCancel').hidden=!room.canCancel;
+  if(['waiting','running'].includes(room.status)){if(!pvpPollTimer)pvpPollTimer=setInterval(()=>loadPvp(false),700);}
+  else {clearInterval(pvpPollTimer);pvpPollTimer=null;if(state.pvpSettledRace!==room.id){state.pvpSettledRace=room.id;load(false);}}
+}
+async function loadPvp(showToast=false){if(state.pvpBusy)return;try{const data=await api('/api/game/vehicle-pvp');renderPvp(data);if(showToast)toast('PVP 狀態已更新');}catch(error){clearInterval(pvpPollTimer);pvpPollTimer=null;if(showToast)toast(error.message,true);}}
+async function pvpAction(path,body){if(state.pvpBusy)return;state.pvpBusy=true;try{const data=await api(path,{method:'POST',body});renderPvp(data);toast(data.message||'PVP 狀態已更新');}catch(error){toast(error.message,true);}finally{state.pvpBusy=false;if(state.pvp)renderPvp(state.pvp);}}
 function startCountdown(expiresAt){
   clearInterval(countdownTimer);const update=()=>{const remaining=Math.max(0,expiresAt-Date.now()),minutes=Math.floor(remaining/60000),seconds=Math.floor(remaining%60000/1000),label=remaining?`安全連結 ${minutes}:${String(seconds).padStart(2,'0')}`:'安全連結已過期';setText('#sessionTime',label);setText('#sidebarSession',label);};update();countdownTimer=setInterval(update,1000);
 }
 function openDrawer(){document.body.classList.add('drawer-open');$('#gameSidebar').setAttribute('aria-hidden','false');$('#menuToggle').setAttribute('aria-expanded','true');}
 function closeDrawer(){document.body.classList.remove('drawer-open');$('#gameSidebar').setAttribute('aria-hidden','true');$('#menuToggle').setAttribute('aria-expanded','false');}
 function render(data){state.data=data;renderPlayer(data);renderSidebar(data.modules);renderTransport(data.transport);renderGarage(data.garage);renderAssets(data.assets);renderAchievements(data.achievements);startCountdown(data.expiresAt);}
-async function load(showToast=false){if(state.busy)return;state.busy=true;try{const data=await api('/api/game');render(data);if(showToast)toast('遊戲資料已更新');$('#loading').classList.add('hidden');}catch(error){toast(error.message,true);$('#loading strong').textContent=error.message;$('#loading p').textContent='請回到 Discord 使用 /玩家 遊戲 取得新連結';}finally{state.busy=false;}}
+async function load(showToast=false){if(state.busy)return;state.busy=true;try{const data=await api('/api/game');render(data);if(showToast)toast('遊戲資料已更新');$('#loading').classList.add('hidden');loadPvp(false);}catch(error){toast(error.message,true);$('#loading strong').textContent=error.message;$('#loading p').textContent='請回到 Discord 使用 /玩家 遊戲 取得新連結';}finally{state.busy=false;}}
 $('#refreshData').onclick=()=>load(true);
 $('#menuToggle').onclick=openDrawer;$('#sidebarClose').onclick=closeDrawer;$('#drawerOverlay').onclick=closeDrawer;document.addEventListener('keydown',event=>{if(event.key==='Escape')closeDrawer();});
 $('#restoreStamina').onclick=async()=>{if(state.busy)return;state.busy=true;try{const data=await api('/api/game/stamina-restore',{method:'POST'});render(data);toast(data.message);}catch(error){toast(error.message,true);}finally{state.busy=false;}};
+$('#pvpCreate').onclick=()=>{const bet=Number($('#pvpBet').value),assetId=$('#pvpVehicle').value;if(!Number.isSafeInteger(bet)||bet<10)return toast('下注必須是至少 10 的正整數',true);pvpAction('/api/game/vehicle-pvp/create',{assetId,bet});};
+$('#pvpJoin').onclick=()=>{const code=$('#pvpCode').value.trim().toUpperCase(),assetId=$('#pvpVehicle').value;if(!/^[A-Z2-9]{6}$/.test(code))return toast('請輸入六位房碼',true);pvpAction('/api/game/vehicle-pvp/join',{code,assetId});};
+$('#pvpCancel').onclick=()=>pvpAction('/api/game/vehicle-pvp/cancel',{code:state.pvp?.room?.code||''});
+$('#pvpCopyCode').onclick=async()=>{const code=state.pvp?.room?.code;if(!code)return;try{await navigator.clipboard.writeText(code);toast(`房碼 ${code} 已複製`);}catch{toast(`房碼：${code}`);}};
+$('#pvpCode').addEventListener('input',event=>{event.target.value=event.target.value.toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,6);});
 if(!session){$('#loading strong').textContent='缺少安全連結';$('#loading p').textContent='請回到 Discord 使用 /玩家 遊戲';}else load();

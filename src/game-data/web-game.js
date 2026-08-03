@@ -1,9 +1,10 @@
-export const WEB_GAME_VERSION='2026.08.02.10';
+export const WEB_GAME_VERSION='2026.08.03.1';
 
 export const WEB_GAME_MODULES=[
   {id:'appearance',icon:'👗',name:'人物造型',description:'人物大廳、衣櫃、商城與三組快速預設',state:'available'},
   {id:'transport',icon:'🧭',name:'交通事業',description:'航空、鐵路、客運與貨運企業總覽',state:'dashboard'},
   {id:'garage',icon:'🗂️',name:'全載具車庫',description:'飛行器、汽車、機車、列車與卡車收藏',state:'dashboard'},
+  {id:'vehicle-pvp',icon:'🏁',name:'載具 PVP',description:'建立房間、選車下注並觀看即時競速',state:'available'},
   {id:'assets',icon:'🏛️',name:'資產收藏',description:'查看持有資產、數量與原價總值',state:'dashboard'},
   {id:'achievements',icon:'🏆',name:'成就收藏',description:'追蹤解鎖進度與特殊稱號',state:'dashboard'},
   {id:'mahjong',icon:'🀄',name:'網頁麻將',description:'建立房間或加入好友牌局',state:'available'},

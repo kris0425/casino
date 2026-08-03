@@ -170,8 +170,8 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.02\.10'/);
-  for(const id of ['appearance','transport','garage','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.03\.1'/);
+  for(const id of ['appearance','transport','garage','vehicle-pvp','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
   assert.match(source,/session\.kind!=='game'/);
@@ -194,6 +194,31 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   assert.match(js,/function closeDrawer\(\)/);
   assert.match(source,/function webGameGaragePayload\(g,u\)/);
   assert.match(source,/url\.pathname\.startsWith\('\/assets\/'\)/);
+});
+
+test('網站載具 PVP 使用持久化房間與伺服器權威結算',()=>{
+  const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
+  assert.match(source,/CREATE TABLE IF NOT EXISTS web_vehicle_pvp_races/);
+  assert.match(source,/function webVehiclePvpGenerate\(g,players\)/);
+  assert.match(source,/function settleWebVehiclePvpRace\(raceId/);
+  assert.match(source,/Number\.isSafeInteger\(bet\)/);
+  assert.match(source,/creditPvpPrize\(race\.guild_id,race\.winner_id/);
+  for(const route of ['vehicle-pvp','vehicle-pvp/create','vehicle-pvp/join','vehicle-pvp/cancel']) assert.match(source,new RegExp(`/activity/game/${route}`));
+  for(const id of ['vehicle-pvp','pvpVehicle','pvpBet','pvpCode','pvpCreate','pvpJoin','pvpArena','pvpRacer0','pvpRacer1']) assert.match(html,new RegExp(`id="${id}"`));
+  assert.match(css,/\.pvp-racer\.boost/);
+  assert.match(css,/transition:left \.78s/);
+  assert.match(js,/setInterval\(\(\)=>loadPvp\(false\),700\)/);
+  assert.match(js,/pvpAction\('\/api\/game\/vehicle-pvp\/join'/);
+});
+
+test('網站載具 PVP 更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-03-web-vehicle-pvp.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.03.1');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['載具 PVP','房碼','六段','10 點體力','Oracle','1%～3%']) assert.match(text,new RegExp(required));
 });
 
 test('網頁遊戲第一版更新公告完整',()=>{
@@ -224,7 +249,7 @@ test('車庫分頁避免手機同時解碼全部大型圖片',()=>{
   const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
-  assert.match(html,/game\.css\?v=20260802\.10/);
+  assert.match(html,/game\.css\?v=20260803\.1/);
   assert.match(html,/id="garagePager"/);
   assert.match(html,/點擊圖片可查看完整原圖/);
   assert.match(js,/const GARAGE_PAGE_SIZE=6/);

@@ -653,6 +653,33 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_player_transfers_sender ON player_transfers(guild_id,sender_id,created_at);
   CREATE INDEX IF NOT EXISTS idx_player_transfers_status ON player_transfers(guild_id,status);
+  CREATE TABLE IF NOT EXISTS web_vehicle_pvp_races (
+    race_id TEXT PRIMARY KEY,
+    room_code TEXT NOT NULL UNIQUE,
+    guild_id TEXT NOT NULL,
+    challenger_id TEXT NOT NULL,
+    challenger_name TEXT NOT NULL,
+    challenger_asset_id TEXT NOT NULL,
+    opponent_id TEXT,
+    opponent_name TEXT,
+    opponent_asset_id TEXT,
+    bet INTEGER NOT NULL,
+    scene_id TEXT,
+    status TEXT NOT NULL DEFAULT 'waiting',
+    events_json TEXT,
+    winner_id TEXT,
+    is_draw INTEGER NOT NULL DEFAULT 0,
+    result_json TEXT,
+    started_at INTEGER,
+    finishes_at INTEGER,
+    expires_at INTEGER NOT NULL,
+    settled_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_web_vehicle_pvp_status ON web_vehicle_pvp_races(guild_id,status,expires_at);
+  CREATE INDEX IF NOT EXISTS idx_web_vehicle_pvp_challenger ON web_vehicle_pvp_races(guild_id,challenger_id,created_at);
+  CREATE INDEX IF NOT EXISTS idx_web_vehicle_pvp_opponent ON web_vehicle_pvp_races(guild_id,opponent_id,created_at);
   CREATE TABLE IF NOT EXISTS web_mahjong_rooms (
     room_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'lobby',
     state_json TEXT NOT NULL DEFAULT '{}',
@@ -5623,6 +5650,188 @@ function vehicleRacePower(g,u,assetId) {
   const asset=assetCatalog[assetId]||{},priceBonus=Math.max(0,Math.min(2.2,Math.log10(Math.max(1000,asset.price||1000))-3));
   return 1.5+(raceRarityBonus[asset.rarity]||0)+priceBonus+Math.min(2.2,Math.max(0,assetBuffPower(assetId)-1)*1.4)+vehicleModPerformance(g,u,assetId).race;
 }
+const WEB_VEHICLE_PVP_WAIT_MS=10*60*1000;
+const WEB_VEHICLE_PVP_START_DELAY_MS=1400;
+const WEB_VEHICLE_PVP_STAGE_MS=950;
+const WEB_VEHICLE_PVP_STAGES=6;
+const WEB_VEHICLE_PVP_RESULT_MS=20*60*1000;
+const WEB_VEHICLE_PVP_CODE_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function webVehiclePvpRoomCode() {
+  for(let attempt=0;attempt<20;attempt++) {
+    let code='';
+    for(let index=0;index<6;index++) code+=WEB_VEHICLE_PVP_CODE_ALPHABET[Math.floor(Math.random()*WEB_VEHICLE_PVP_CODE_ALPHABET.length)];
+    if(!db.prepare('SELECT 1 FROM web_vehicle_pvp_races WHERE room_code=?').get(code)) return code;
+  }
+  throw new Error('暫時無法建立房間碼，請稍後再試');
+}
+function webVehiclePvpAsset(g,u,assetId) {
+  const info=raceChoiceInfo(g,u,'vehicle',assetId);
+  if(!info) return null;
+  const image=info.asset.image||info.asset.images?.[0]||null;
+  return {
+    id:assetId,name:info.name,category:info.asset.category,rarity:info.asset.rarity||'普通',
+    image:image?`/assets/${image.split('/').map(encodeURIComponent).join('/')}`:null,
+    power:Number(vehicleRacePower(g,u,assetId).toFixed(2))
+  };
+}
+function webVehiclePvpChoices(g,u) {
+  return raceChoices(g,u,'vehicle').map(choice=>({...webVehiclePvpAsset(g,u,choice.id),quantity:Number(choice.quantity)||0})).filter(choice=>choice.id);
+}
+function webVehiclePvpActiveForUser(g,u,excludedRaceId=null) {
+  const now=Date.now();
+  return Boolean(db.prepare(`SELECT 1 FROM web_vehicle_pvp_races
+    WHERE guild_id=? AND race_id<>COALESCE(?, '') AND status IN ('waiting','running') AND expires_at>?
+      AND (challenger_id=? OR opponent_id=?) LIMIT 1`).get(g,excludedRaceId,now,u,u));
+}
+function webVehiclePvpGenerate(g,players) {
+  const scene=raceScenes[Math.floor(Math.random()*raceScenes.length)];
+  const entrants=players.map(player=>({...player,power:vehicleRacePower(g,player.id,player.assetId),distance:0}));
+  const events=[];
+  for(let stage=1;stage<=WEB_VEHICLE_PVP_STAGES;stage++) {
+    const framePlayers=entrants.map(entry=>{
+      const burst=Math.random()<(scene.id==='street'?0.17:scene.id==='drift'?0.14:0.1)?(scene.id==='drift'?9:7):0;
+      const mistake=scene.id==='mountain'&&Math.random()<0.08?-5:0;
+      const delta=Math.max(4,10+Math.random()*8+entry.power+burst+mistake);
+      entry.distance+=delta;
+      const event=mistake<0?'彎道失誤':burst>0?'氮氣爆發':stage===WEB_VEHICLE_PVP_STAGES?'全速衝線':'穩定推進';
+      return {id:entry.id,distance:Number(entry.distance.toFixed(2)),delta:Number(delta.toFixed(2)),event};
+    });
+    events.push({stage,title:stage===1?'起跑！':stage===WEB_VEHICLE_PVP_STAGES?'最後衝線':`第 ${stage} 賽段`,players:framePlayers});
+  }
+  const ranking=[...entrants].sort((a,b)=>b.distance-a.distance),isDraw=Math.abs(ranking[0].distance-ranking[1].distance)<1;
+  return {scene,events,isDraw,winnerId:isDraw?null:ranking[0].id,finishDistance:Math.max(...ranking.map(entry=>entry.distance)),ranking:ranking.map(entry=>entry.id)};
+}
+function webVehiclePvpExpireWaiting() {
+  const now=Date.now();
+  db.prepare(`UPDATE web_vehicle_pvp_races SET status='cancelled',updated_at=? WHERE status='waiting' AND expires_at<=?`).run(now,now);
+}
+function settleWebVehiclePvpRace(raceId,now=Date.now()) {
+  const due=db.prepare("SELECT * FROM web_vehicle_pvp_races WHERE race_id=? AND status='running' AND settled_at IS NULL AND finishes_at<=?").get(raceId,now);
+  if(!due) return null;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const race=db.prepare("SELECT * FROM web_vehicle_pvp_races WHERE race_id=? AND status='running' AND settled_at IS NULL AND finishes_at<=?").get(raceId,now);
+    if(!race){db.exec('COMMIT');return null;}
+    const ids=[race.challenger_id,race.opponent_id];
+    let settlement;
+    if(race.is_draw) {
+      for(const id of ids) changeBalanceUnlocked(race.guild_id,id,race.bet,'web_pvp_refund',ids.find(other=>other!==id),'網站載具 PVP 平手退款');
+      settlement={draw:true,credited:race.bet,rake:0,rakeRate:0};
+    } else {
+      const loserId=ids.find(id=>id!==race.winner_id);
+      settlement={draw:false,...creditPvpPrize(race.guild_id,race.winner_id,race.bet,race.bet*2,'web_pvp_wager',loserId,'網站載具 PVP 勝者獎池',{unlocked:true})};
+    }
+    settlement.balances=Object.fromEntries(ids.map(id=>[id,balance(race.guild_id,id)]));
+    db.prepare("UPDATE web_vehicle_pvp_races SET status='finished',result_json=?,settled_at=?,updated_at=? WHERE race_id=? AND settled_at IS NULL")
+      .run(JSON.stringify(settlement),now,now,race.race_id);
+    db.exec('COMMIT');
+    return settlement;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function settleDueWebVehiclePvpRaces() {
+  webVehiclePvpExpireWaiting();
+  for(const row of db.prepare("SELECT race_id FROM web_vehicle_pvp_races WHERE status='running' AND settled_at IS NULL AND finishes_at<=?").all(Date.now())) {
+    try { settleWebVehiclePvpRace(row.race_id); } catch(error) { console.error('Website vehicle PVP settlement failed:',row.race_id,error); }
+  }
+}
+function webVehiclePvpLatestRoom(g,u) {
+  settleDueWebVehiclePvpRaces();
+  return db.prepare(`SELECT * FROM web_vehicle_pvp_races WHERE guild_id=? AND status IN ('waiting','running') AND expires_at>?
+      AND (challenger_id=? OR opponent_id=?) ORDER BY created_at DESC LIMIT 1`).get(g,Date.now(),u,u)
+    ||db.prepare(`SELECT * FROM web_vehicle_pvp_races WHERE guild_id=? AND status='finished' AND settled_at>?
+      AND (challenger_id=? OR opponent_id=?) ORDER BY settled_at DESC LIMIT 1`).get(g,Date.now()-WEB_VEHICLE_PVP_RESULT_MS,u,u);
+}
+function webVehiclePvpPublicRoom(race,selfId) {
+  if(!race) return null;
+  const generated=race.events_json?JSON.parse(race.events_json):null;
+  const scene=raceScenes.find(item=>item.id===race.scene_id)||null;
+  const now=Date.now(),stage=race.status==='finished'?WEB_VEHICLE_PVP_STAGES:race.status==='running'?Math.max(0,Math.min(WEB_VEHICLE_PVP_STAGES,Math.floor((now-race.started_at)/WEB_VEHICLE_PVP_STAGE_MS)+1)):0;
+  const frame=stage&&generated?.events?.[stage-1]||null;
+  const playerRows=[
+    {id:race.challenger_id,name:race.challenger_name,assetId:race.challenger_asset_id},
+    race.opponent_id?{id:race.opponent_id,name:race.opponent_name,assetId:race.opponent_asset_id}:null
+  ].filter(Boolean);
+  const players=playerRows.map(player=>{
+    const vehicle=webVehiclePvpAsset(race.guild_id,player.id,player.assetId)||{id:player.assetId,name:'資產已失效',image:null,rarity:'—',power:0};
+    const progressRow=frame?.players?.find(item=>item.id===player.id),distance=progressRow?.distance||0;
+    return {...player,isSelf:player.id===selfId,vehicle,distance,event:progressRow?.event||'',progress:generated?.finishDistance?Math.min(100,Number((distance/generated.finishDistance*100).toFixed(1))):0};
+  });
+  const result=race.result_json?JSON.parse(race.result_json):null;
+  return {
+    id:race.race_id,code:race.room_code,status:race.status,bet:race.bet,stage,totalStages:WEB_VEHICLE_PVP_STAGES,
+    startsAt:race.started_at,finishesAt:race.finishes_at,expiresAt:race.expires_at,
+    scene:scene?{id:scene.id,name:scene.name,emoji:scene.emoji,description:scene.description,image:`/assets/${scene.image}`} : null,
+    title:frame?.title||(race.status==='waiting'?'等待對手加入':'準備起跑'),players,
+    winnerId:race.status==='finished'?race.winner_id:null,draw:race.status==='finished'?Boolean(race.is_draw):false,result,
+    canCancel:race.status==='waiting'&&race.challenger_id===selfId
+  };
+}
+async function webVehiclePvpPayload(session) {
+  const room=webVehiclePvpLatestRoom(session.guildId,session.userId);
+  return {choices:webVehiclePvpChoices(session.guildId,session.userId),room:webVehiclePvpPublicRoom(room,session.userId)};
+}
+async function webVehiclePvpCreate(session,body) {
+  const assetId=String(body.assetId||''),bet=Number(body.bet);
+  if(!Number.isSafeInteger(bet)||bet<MIN_BET) throw new Error(`下注至少需要 ${MIN_BET.toLocaleString()} 金幣，且必須是安全整數`);
+  if(!webVehiclePvpAsset(session.guildId,session.userId,assetId)) throw new Error('請從自己的車庫選擇汽車或機車');
+  if(activeRaceForUser(session.guildId,session.userId)) throw new Error('你目前已有進行中的競速或等待房間');
+  validBet(session.guildId,session.userId,bet);
+  if(stamina(session.guildId,session.userId)<staminaCost(session.guildId,session.userId,10)) throw new Error('你的體力不足，載具 PVP 需要 10 點體力');
+  const user=await client.users.fetch(session.userId),now=Date.now();
+  db.prepare(`INSERT INTO web_vehicle_pvp_races(race_id,room_code,guild_id,challenger_id,challenger_name,challenger_asset_id,bet,status,expires_at,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,'waiting',?,?,?)`).run(randomUUID(),webVehiclePvpRoomCode(),session.guildId,session.userId,user.globalName||user.username,assetId,bet,now+WEB_VEHICLE_PVP_WAIT_MS,now,now);
+  return webVehiclePvpPayload(session);
+}
+async function webVehiclePvpJoin(session,body) {
+  const code=String(body.code||'').trim().toUpperCase(),assetId=String(body.assetId||'');
+  const race=db.prepare("SELECT * FROM web_vehicle_pvp_races WHERE room_code=? AND status='waiting'").get(code);
+  if(!race||race.expires_at<=Date.now()) throw new Error('找不到可加入的房間，房碼可能已過期');
+  if(race.guild_id!==session.guildId) throw new Error('只能加入同一個 Discord 伺服器的房間');
+  if(race.challenger_id===session.userId) throw new Error('不能加入自己建立的房間');
+  if(otherActiveRaceForUser(session.guildId,session.userId,race.race_id)) throw new Error('你目前已有其他進行中的競速');
+  if(otherActiveRaceForUser(session.guildId,race.challenger_id,race.race_id)) throw new Error('房主目前正在進行其他競速');
+  const challengerVehicle=webVehiclePvpAsset(race.guild_id,race.challenger_id,race.challenger_asset_id),opponentVehicle=webVehiclePvpAsset(race.guild_id,session.userId,assetId);
+  if(!challengerVehicle) throw new Error('房主的參賽車輛已不存在');
+  if(!opponentVehicle) throw new Error('請從自己的車庫選擇汽車或機車');
+  for(const id of [race.challenger_id,session.userId]) {
+    validBet(race.guild_id,id,race.bet);
+    if(stamina(race.guild_id,id)<staminaCost(race.guild_id,id,10)) throw new Error(`${id===session.userId?'你的':'房主的'}體力不足，載具 PVP 需要 10 點體力`);
+  }
+  const opponent=await client.users.fetch(session.userId),generated=webVehiclePvpGenerate(race.guild_id,[
+    {id:race.challenger_id,name:race.challenger_name,assetId:race.challenger_asset_id},
+    {id:session.userId,name:opponent.globalName||opponent.username,assetId}
+  ]),now=Date.now(),startedAt=now+WEB_VEHICLE_PVP_START_DELAY_MS,finishesAt=startedAt+WEB_VEHICLE_PVP_STAGES*WEB_VEHICLE_PVP_STAGE_MS;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const locked=db.prepare("SELECT status FROM web_vehicle_pvp_races WHERE race_id=?").get(race.race_id);
+    if(locked?.status!=='waiting') throw new Error('其他玩家已先加入這個房間');
+    for(const id of [race.challenger_id,session.userId]) {
+      const cost=staminaCost(race.guild_id,id,10);
+      const consumed=db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=? AND stamina>=?').run(cost,race.guild_id,id,cost);
+      if(Number(consumed.changes)!==1) throw new Error('其中一位玩家的體力已不足');
+      changeBalanceUnlocked(race.guild_id,id,-race.bet,'web_pvp_wager',[race.challenger_id,session.userId].find(other=>other!==id),'網站載具 PVP 下注');
+    }
+    db.prepare(`UPDATE web_vehicle_pvp_races SET opponent_id=?,opponent_name=?,opponent_asset_id=?,scene_id=?,status='running',events_json=?,winner_id=?,is_draw=?,started_at=?,finishes_at=?,expires_at=?,updated_at=? WHERE race_id=? AND status='waiting'`)
+      .run(session.userId,opponent.globalName||opponent.username,assetId,generated.scene.id,JSON.stringify(generated),generated.winnerId,generated.isDraw?1:0,startedAt,finishesAt,finishesAt+WEB_VEHICLE_PVP_RESULT_MS,now,race.race_id);
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return webVehiclePvpPayload(session);
+}
+async function webVehiclePvpCancel(session,body) {
+  const code=String(body.code||'').trim().toUpperCase(),now=Date.now();
+  const result=db.prepare("UPDATE web_vehicle_pvp_races SET status='cancelled',updated_at=? WHERE room_code=? AND guild_id=? AND challenger_id=? AND status='waiting'")
+    .run(now,code,session.guildId,session.userId);
+  if(Number(result.changes)!==1) throw new Error('這個房間無法取消，可能已開始或已過期');
+  return {choices:webVehiclePvpChoices(session.guildId,session.userId),room:null};
+}
+const webVehiclePvpSettlementTimer=setInterval(settleDueWebVehiclePvpRaces,1000);
+webVehiclePvpSettlementTimer.unref();
 function petRacePower(pet) {
   const product=petCatalog[pet.petId]||{};
   return 1.5+(pet.happiness??100)/28+Math.min(1.8,(product.price||1000)/9000);
@@ -5654,11 +5863,13 @@ function competitionResultMessage(type,place) {
 }
 function activeRaceForUser(g,u) {
   if([...raceSessions.values()].some(s=>s.guildId===g&&s.userId===u&&s.expiresAt>Date.now())) return true;
-  return [...pvpRaceSessions.values()].some(s=>s.guildId===g&&[s.challengerId,s.opponentId].includes(u)&&s.status!=='done'&&s.expiresAt>Date.now());
+  if([...pvpRaceSessions.values()].some(s=>s.guildId===g&&[s.challengerId,s.opponentId].includes(u)&&s.status!=='done'&&s.expiresAt>Date.now())) return true;
+  return webVehiclePvpActiveForUser(g,u);
 }
 function otherActiveRaceForUser(g,u,excludedToken) {
   if([...raceSessions.values()].some(s=>s.guildId===g&&s.userId===u&&s.expiresAt>Date.now())) return true;
-  return [...pvpRaceSessions.entries()].some(([token,s])=>token!==excludedToken&&s.guildId===g&&[s.challengerId,s.opponentId].includes(u)&&s.status!=='done'&&s.expiresAt>Date.now());
+  if([...pvpRaceSessions.entries()].some(([token,s])=>token!==excludedToken&&s.guildId===g&&[s.challengerId,s.opponentId].includes(u)&&s.status!=='done'&&s.expiresAt>Date.now())) return true;
+  return webVehiclePvpActiveForUser(g,u,excludedToken);
 }
 function pvpRaceChallengeRow(token,disabled=false) {
   return new ActionRowBuilder().addComponents(
@@ -10216,6 +10427,22 @@ if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
         const body=await activityRequestBody(request),session=parseGameActivityToken(body.session);
         const result=claimDailyStaminaRestore(session.guildId,session.userId);
         return activityJson(response,200,{ok:true,message:`已免費恢復 ${result.restored} 點體力`,result,...await webGamePayload(session)});
+      }
+      if(request.method==='GET'&&url.pathname==='/activity/game/vehicle-pvp') {
+        const session=parseGameActivityToken(url.searchParams.get('session'));
+        return activityJson(response,200,{ok:true,...await webVehiclePvpPayload(session)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/game/vehicle-pvp/create') {
+        const body=await activityRequestBody(request),session=parseGameActivityToken(body.session);
+        return activityJson(response,200,{ok:true,message:'PVP 房間已建立，把房碼交給同伺服器的對手',...await webVehiclePvpCreate(session,body)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/game/vehicle-pvp/join') {
+        const body=await activityRequestBody(request),session=parseGameActivityToken(body.session);
+        return activityJson(response,200,{ok:true,message:'已加入房間，雙方下注與體力已鎖定',...await webVehiclePvpJoin(session,body)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/game/vehicle-pvp/cancel') {
+        const body=await activityRequestBody(request),session=parseGameActivityToken(body.session);
+        return activityJson(response,200,{ok:true,message:'房間已取消，未扣除任何金幣或體力',...await webVehiclePvpCancel(session,body)});
       }
       if(request.method==='POST'&&url.pathname==='/activity/mahjong/create') {
         return activityJson(response,200,{ok:true,game:webMahjongCreate(await activityRequestBody(request))});
