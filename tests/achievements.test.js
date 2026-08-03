@@ -74,45 +74,36 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   assert.match(source,/miniGameProxyInteraction\(i,game\.command/);
 });
 
-test('網站版個人造型具備人物大廳、商城、衣櫃、預設與發布流程',()=>{
-  const html=readFileSync(new URL('../activity/public/appearance.html',import.meta.url),'utf8');
-  const css=readFileSync(new URL('../activity/public/appearance.css',import.meta.url),'utf8');
-  const js=readFileSync(new URL('../activity/public/appearance.js',import.meta.url),'utf8');
+test('角色造型系統使用完整圖片並提供管理員上傳後台',()=>{
+  const html=readFileSync(new URL('../activity/public/style.html',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/style.css',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/style.js',import.meta.url),'utf8');
+  const adminHtml=readFileSync(new URL('../activity/public/appearance-admin.html',import.meta.url),'utf8');
+  const adminJs=readFileSync(new URL('../activity/public/appearance-admin.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/cosmetics\.js'/);
-  assert.match(cosmeticsSource,/export const COSMETIC_SLOTS=\['character','background','outfit','headwear','face','handheld','aura'\]/);
-  const catalogBlock=cosmeticsSource.match(/export const cosmeticCatalog=\[[\s\S]+?\n\];/)?.[0]||'';
-  assert.equal((catalogBlock.match(/\{id:'/g)||[]).length,30,'人物大廳版必須提供 30 件造型');
-  assert.match(source,/CREATE TABLE IF NOT EXISTS player_cosmetics/);
-  assert.match(source,/CREATE TABLE IF NOT EXISTS player_appearance/);
-  assert.match(source,/CREATE TABLE IF NOT EXISTS appearance_presets/);
-  assert.match(source,/cosmetic_purchase:'個人造型商城'/);
-  assert.match(source,/changeBalanceUnlocked\(g,u,-item\.price,'cosmetic_purchase'/);
-  assert.match(source,/setName\('造型'\).*個人造型商城/s);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS character_styles/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS player_character_styles/);
+  assert.match(source,/const CHARACTER_STYLE_SYSTEM_ENABLED/);
+  assert.match(source,/const CHARACTER_STYLE_ROOT=resolve\(process\.cwd\(\),'data','appearance-styles'\)/);
+  assert.match(source,/function uploadCharacterStyle/);
+  assert.match(source,/function decodeCharacterStyleImage/);
+  assert.match(source,/8\*1024\*1024/);
+  assert.match(source,/image\/png.*image\/jpeg.*image\/webp/s);
   assert.match(source,/appearanceActivityToken\(guildId,userId,channelId\)/);
-  assert.match(source,/kind:'appearance'.*exp:Date\.now\(\)\+15\*60\*1000/s);
-  assert.match(source,/\/activity\/appearance\/purchase/);
-  assert.match(source,/\/activity\/appearance\/save/);
-  assert.match(source,/\/activity\/appearance\/preset/);
-  assert.match(source,/\/activity\/appearance\/publish/);
-  assert.match(html,/id="characterLineup"/);
-  assert.match(html,/id="previewCharacter"/);
-  assert.match(html,/id="previewOutfit"/);
-  assert.match(html,/id="previewStage"/);
-  assert.match(css,/\.character-card\.active/);
-  assert.match(css,/\.character-model/);
-  assert.match(css,/\.avatar-stage\[data-character=transport\]/);
-  assert.match(css,/\.avatar-stage\[data-character=heist\]/);
-  assert.match(css,/\.avatar-stage\[data-character=pomeranian\]/);
-  assert.match(css,/\.avatar-stage\[data-character=garage\]/);
-  assert.match(css,/\.avatar-stage\[data-character=rail\]/);
-  assert.match(css,/\.wearable-layer\{/);
-  assert.match(css,/\.outfit\{[^}]*object-position:center top/);
-  assert.match(js,/function renderLobby\(\)/);
-  assert.match(js,/function setWearable\(selector,entry\)/);
-  assert.doesNotMatch(js,/previewHeadwear'\)\.textContent/);
-  assert.match(js,/previewStage'\)\.dataset\.character=chosen\.character\?\.style/);
-  assert.match(js,/尚未擁有|owned\(entry\)/);
-  assert.match(js,/請先按「穿上這套」再發布/);
+  assert.match(source,/kind:'appearance_admin'.*exp:Date\.now\(\)\+15\*60\*1000/s);
+  assert.match(source,/member\.permissions\.has\(PermissionFlagsBits\.Administrator\)/);
+  assert.match(source,/setName\('造型後台'\).*setDefaultMemberPermissions\(PermissionFlagsBits\.Administrator\)/s);
+  assert.match(source,/\/activity\/appearance\/select/);
+  assert.match(source,/\/activity\/appearance-admin\/upload/);
+  assert.match(source,/\/activity\/appearance-admin\/active/);
+  assert.match(source,/舊版分層換裝系統已取消/);
+  for(const id of ['characterTabs','styleGrid','characterImage','equip']) assert.match(html,new RegExp(`id="${id}"`));
+  for(const id of ['characterSelect','styleName','styleFile','uploadButton','styleGrid']) assert.match(adminHtml,new RegExp(`id="${id}"`));
+  assert.doesNotMatch(html,/previewOutfit|previewHeadwear|removeSlot|preset/);
+  assert.match(css,/\.style-card/);
+  assert.match(js,/\/api\/appearance\/select/);
+  assert.match(adminJs,/\/api\/appearance-admin\/upload/);
+  assert.match(adminJs,/\/api\/appearance-admin\/active/);
 });
 
 test('人物大廳六名全身角色使用透明 PNG 並加入商城',()=>{
@@ -136,7 +127,7 @@ test('四套造型以 16 張透明穿戴素材取代 Emoji 疊圖',()=>{
     assert.equal(data[25],6,`${theme}/${file}.png 必須是 RGBA PNG`);
     assert.match(cosmeticsSource,new RegExp(`slot:'${slot}'[^\\n]+image:'${theme}/${file}\\.png'`));
   }
-  assert.match(source,/item\.slot==='background'\?'backgrounds':'wearables'/);
+  assert.match(cosmeticsSource,/export const COSMETIC_SLOTS=\['character','background','outfit','headwear','face','handheld','aura'\]/);
 });
 
 test('四張個人造型主題背景已加入網站素材',()=>{
@@ -145,7 +136,7 @@ test('四張個人造型主題背景已加入網站素材',()=>{
     assert.ok(existsSync(url),`缺少造型背景 ${file}`);
     assert.ok(readFileSync(url).length>100_000,`${file} 不是有效的完整圖片素材`);
   }
-  assert.match(source,/\/appearance':'appearance\.html'/);
+  assert.match(source,/\/appearance':'style\.html'/);
   assert.match(source,/\/appearance\/backgrounds\/\$\{background\.image\}/);
 });
 
@@ -170,7 +161,7 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.03\.2'/);
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.03\.3'/);
   for(const id of ['appearance','transport','garage','vehicle-pvp','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
@@ -221,15 +212,17 @@ test('網站載具 PVP 更新公告完整',()=>{
   for(const required of ['載具 PVP','房碼','六段','10 點體力','Oracle','1%～3%']) assert.match(text,new RegExp(required));
 });
 
-test('換裝系統可暫時關閉且完整保留既有資料',()=>{
+test('角色造型系統取代換裝並保留既有資料',()=>{
   const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
-  assert.match(source,/const APPEARANCE_SYSTEM_ENABLED = String\(process\.env\.APPEARANCE_SYSTEM_ENABLED \|\| 'false'\)/);
-  assert.match(source,/if\(!APPEARANCE_SYSTEM_ENABLED\) return i\.reply\(\{content:'🛠️ 個人換裝系統目前暫時關閉維護中/);
-  assert.match(source,/function parseAppearanceActivityToken\(token\) \{\s+if\(!APPEARANCE_SYSTEM_ENABLED\) throw new Error/);
-  assert.match(source,/module\.id==='appearance'&&!APPEARANCE_SYSTEM_ENABLED/);
-  assert.match(js,/換裝系統維護中/);
-  assert.match(html,/game\.js\?v=20260803\.2/);
+  assert.match(source,/const CHARACTER_STYLE_SYSTEM_ENABLED = String\(process\.env\.CHARACTER_STYLE_SYSTEM_ENABLED \|\| 'true'\)/);
+  assert.match(source,/function parseAppearanceActivityToken\(token\) \{\s+if\(!CHARACTER_STYLE_SYSTEM_ENABLED\) throw new Error/);
+  assert.match(source,/module\.id==='appearance'&&!CHARACTER_STYLE_SYSTEM_ENABLED/);
+  assert.match(js,/造型系統維護中/);
+  assert.match(html,/game\.js\?v=20260803\.3/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS player_cosmetics/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS player_appearance/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS appearance_presets/);
 });
 
 test('換裝系統維護公告說明資料保留',()=>{
@@ -238,6 +231,14 @@ test('換裝系統維護公告說明資料保留',()=>{
   assert.equal(update.version,'2026.08.03.2');
   assert.deepEqual(update.channelNames,['賭場公告']);
   for(const required of ['暫時關閉','/玩家 造型','購買','目前穿搭','快速預設','全部保留']) assert.match(text,new RegExp(required.replace('/','\\/')));
+});
+
+test('角色造型與管理後台更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-03-character-style-admin.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.03.3');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['/玩家 造型','/造型後台','6 名','8 MB','Oracle','全部保留']) assert.match(text,new RegExp(required.replace('/','\\/')));
 });
 
 test('網頁遊戲第一版更新公告完整',()=>{
@@ -268,7 +269,7 @@ test('車庫分頁避免手機同時解碼全部大型圖片',()=>{
   const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
-  assert.match(html,/game\.css\?v=20260803\.2/);
+  assert.match(html,/game\.css\?v=20260803\.3/);
   assert.match(html,/id="garagePager"/);
   assert.match(html,/點擊圖片可查看完整原圖/);
   assert.match(js,/const GARAGE_PAGE_SIZE=6/);

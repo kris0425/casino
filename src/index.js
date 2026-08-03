@@ -5,7 +5,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle
 } from 'discord.js';
-import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -36,7 +36,7 @@ const ACTIVITY_PUBLIC_URL = String(process.env.ACTIVITY_PUBLIC_URL || '').replac
 const ACTIVITY_API_PORT = Number(process.env.ACTIVITY_API_PORT || 8787);
 const ACTIVITY_SIGNING_SECRET = process.env.ACTIVITY_SIGNING_SECRET || '';
 const ACTIVITY_BACKEND_SECRET = process.env.ACTIVITY_BACKEND_SECRET || '';
-const APPEARANCE_SYSTEM_ENABLED = String(process.env.APPEARANCE_SYSTEM_ENABLED || 'false').toLowerCase()==='true';
+const CHARACTER_STYLE_SYSTEM_ENABLED = String(process.env.CHARACTER_STYLE_SYSTEM_ENABLED || 'true').toLowerCase()!=='false';
 const PLAYER_TRANSFER_FEE_RATE = 0.02;
 const PLAYER_TRANSFER_MIZI_CHANCE = 0.05;
 const PLAYER_TRANSFER_EXTRA_ZERO_CHANCE = 0.05;
@@ -74,6 +74,8 @@ const ECONOMY_SINK_LABELS={
 const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund']);
 const BASE_STAMINA = 800;
 const assetPath=name=>resolve(process.cwd(),'assets',name);
+const CHARACTER_STYLE_ROOT=resolve(process.cwd(),'data','appearance-styles');
+mkdirSync(CHARACTER_STYLE_ROOT,{recursive:true});
 const petCatalog={
   golden_retriever:{name:'黃金獵犬｜阿金',emoji:'🐕',price:18000,image:'pets/golden_retriever.jpg',petType:'dog',bonusType:'work',bonusValue:0.05,bonusText:'工作收入最高 +5%',description:'熱情可靠的工作夥伴，心情越好，工作收入加成越高。'},
   siamese_cat:{name:'暹羅貓｜小藍',emoji:'🐈',price:22000,image:'pets/siamese_cat.jpg',petType:'cat',bonusType:'casino',bonusValue:0.03,bonusText:'賭場獲勝派彩最高 +3%',description:'神祕又機靈的幸運夥伴，會替贏牌帶來一點好運。'},
@@ -678,6 +680,27 @@ db.exec(`
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS character_styles (
+    style_id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    character_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    image_file TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_character_styles_character ON character_styles(guild_id,character_id,active,created_at);
+  CREATE TABLE IF NOT EXISTS player_character_styles (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    character_id TEXT NOT NULL,
+    style_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id)
+  );
   CREATE INDEX IF NOT EXISTS idx_web_vehicle_pvp_status ON web_vehicle_pvp_races(guild_id,status,expires_at);
   CREATE INDEX IF NOT EXISTS idx_web_vehicle_pvp_challenger ON web_vehicle_pvp_races(guild_id,challenger_id,created_at);
   CREATE INDEX IF NOT EXISTS idx_web_vehicle_pvp_opponent ON web_vehicle_pvp_races(guild_id,opponent_id,created_at);
@@ -1125,8 +1148,77 @@ function appearanceNames(appearance) {
   return COSMETIC_SLOTS.map(slot=>cosmeticById[appearance?.[slot]]?.name).filter(Boolean);
 }
 function appearanceSummary(g,u) {
-  const names=appearanceNames(playerAppearance(g,u));
-  return names.length?names.join('・'):'尚未設定';
+  const equipped=equippedCharacterStyle(g,u);
+  return equipped?`${equipped.character.name}・${equipped.style.name}`:'尚未設定';
+}
+const characterCosmetics=cosmeticCatalog.filter(item=>item.slot==='character');
+const characterCosmeticById=Object.fromEntries(characterCosmetics.map(item=>[item.id,item]));
+function characterStyleImageUrl(imageFile) {
+  return `/appearance-styles/${String(imageFile).split('/').map(encodeURIComponent).join('/')}`;
+}
+function characterBaseStyle(character) {
+  return {id:`base:${character.id}`,characterId:character.id,name:'經典造型',image:`/appearance/characters/${character.image}`,base:true,active:true};
+}
+function characterUploadedStyles(g,characterId,{includeInactive=false}={}) {
+  const rows=db.prepare(`SELECT style_id,character_id,name,image_file,mime_type,active,created_by,created_at,updated_at FROM character_styles
+    WHERE guild_id=? AND character_id=? ${includeInactive?'':'AND active=1'} ORDER BY created_at DESC`).all(g,characterId);
+  return rows.map(row=>({id:row.style_id,characterId:row.character_id,name:row.name,image:characterStyleImageUrl(row.image_file),base:false,active:Boolean(row.active),createdBy:row.created_by,createdAt:row.created_at,updatedAt:row.updated_at}));
+}
+function characterStyleById(g,characterId,styleId,{includeInactive=false}={}) {
+  const character=characterCosmeticById[characterId];
+  if(!character) return null;
+  if(styleId===`base:${characterId}`) return characterBaseStyle(character);
+  return characterUploadedStyles(g,characterId,{includeInactive}).find(style=>style.id===styleId)||null;
+}
+function equippedCharacterStyle(g,u) {
+  const legacy=playerAppearance(g,u),fallbackCharacter=characterCosmeticById[legacy.character]||characterCosmetics[0];
+  const row=db.prepare('SELECT character_id,style_id FROM player_character_styles WHERE guild_id=? AND user_id=?').get(g,u);
+  const character=characterCosmeticById[row?.character_id]||fallbackCharacter;
+  const style=characterStyleById(g,character.id,row?.style_id)||characterBaseStyle(character);
+  return {character,style};
+}
+function equipCharacterStyle(g,u,characterId,styleId) {
+  const character=characterCosmeticById[characterId];
+  if(!character) throw new Error('找不到指定角色');
+  if(!ownsCosmetic(g,u,characterId)) throw new Error(`尚未擁有「${character.name}」角色`);
+  const style=characterStyleById(g,characterId,styleId);
+  if(!style) throw new Error('這個角色造型不存在或已停用');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(`INSERT INTO player_character_styles(guild_id,user_id,character_id,style_id) VALUES(?,?,?,?)
+      ON CONFLICT(guild_id,user_id) DO UPDATE SET character_id=excluded.character_id,style_id=excluded.style_id,updated_at=CURRENT_TIMESTAMP`).run(g,u,characterId,styleId);
+    db.prepare(`INSERT INTO player_appearance(guild_id,user_id,slot,cosmetic_id) VALUES(?,?,'character',?)
+      ON CONFLICT(guild_id,user_id,slot) DO UPDATE SET cosmetic_id=excluded.cosmetic_id,updated_at=CURRENT_TIMESTAMP`).run(g,u,characterId);
+    db.exec('COMMIT');
+    return {character,style};
+  } catch(error) { db.exec('ROLLBACK');throw error; }
+}
+function decodeCharacterStyleImage(dataUrl) {
+  const match=/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl||''));
+  if(!match) throw new Error('圖片只支援 PNG、JPG 或 WebP');
+  const buffer=Buffer.from(match[2],'base64');
+  if(!buffer.length||buffer.length>8*1024*1024) throw new Error('圖片大小必須介於 1 Byte 到 8 MB');
+  const type=match[1],valid=type==='png'?buffer.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')):type==='jpeg'?buffer[0]===0xff&&buffer[1]===0xd8&&buffer[2]===0xff:buffer.subarray(0,4).toString()==='RIFF'&&buffer.subarray(8,12).toString()==='WEBP';
+  if(!valid) throw new Error('圖片內容與副檔名不一致');
+  return {buffer,mimeType:type==='jpeg'?'image/jpeg':`image/${type}`,extension:type==='jpeg'?'jpg':type};
+}
+function uploadCharacterStyle(g,u,{characterId,name,imageData}) {
+  const character=characterCosmeticById[String(characterId||'')];
+  if(!character) throw new Error('請選擇有效角色');
+  const trimmed=String(name||'').trim().replace(/\s+/g,' ').slice(0,40);
+  if(!trimmed) throw new Error('請輸入造型名稱');
+  const image=decodeCharacterStyleImage(imageData),styleId=randomUUID(),relative=`${g}/${character.id}/${styleId}.${image.extension}`,file=resolve(CHARACTER_STYLE_ROOT,...relative.split('/'));
+  mkdirSync(resolve(CHARACTER_STYLE_ROOT,g,character.id),{recursive:true});
+  writeFileSync(file,image.buffer,{flag:'wx'});
+  try {
+    db.prepare('INSERT INTO character_styles(style_id,guild_id,character_id,name,image_file,mime_type,created_by) VALUES(?,?,?,?,?,?,?)')
+      .run(styleId,g,character.id,trimmed,relative,image.mimeType,u);
+  } catch(error) { try { unlinkSync(file); } catch {} throw error; }
+  return {id:styleId,characterId:character.id,name:trimmed,image:characterStyleImageUrl(relative),base:false,active:true};
+}
+function setCharacterStyleActive(g,styleId,active) {
+  const result=db.prepare('UPDATE character_styles SET active=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND style_id=?').run(active?1:0,g,String(styleId||''));
+  if(Number(result.changes)!==1) throw new Error('找不到指定的角色造型');
 }
 function casinoVaultBalance(g) {
   db.prepare('INSERT OR IGNORE INTO casino_vault(guild_id,balance) VALUES(?,0)').run(g);
@@ -6282,7 +6374,7 @@ const commandHelpCategories={
   pets:{label:'🐾 寵物與陪伴',description:'寵物商店及同行夥伴管理',commands:['寵物']},
   assets:{label:'🏎️ 資產與交易',description:'房產、航空與交通事業、載具、改裝、展示與二手市場',commands:['資產商城','購買資產','我的資產','藏身處','交通事業','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','變賣資產','回收廠','二手市場']},
   heist:{label:'🚓 團隊與小黑屋',description:'隊伍搶劫、情報、救援、逃獄與暴動',commands:['隊伍','團隊搶銀行','銀行情報','賄絡迷子','減刑','逃獄','小黑屋暴動','救援同伴']},
-  admin:{label:'🛡️ 管理員與系統',description:'玩法入口及限管理員使用的維護指令',commands:['玩法','搶劫公告頻道','單人搶劫機率','稱號設定','資產調整','金幣調整','管理員入金','帳務紀錄','經濟監控']}
+  admin:{label:'🛡️ 管理員與系統',description:'玩法入口及限管理員使用的維護指令',commands:['玩法','造型後台','搶劫公告頻道','單人搶劫機率','稱號設定','資產調整','金幣調整','管理員入金','帳務紀錄','經濟監控']}
 };
 const detailedHelpCommandKeys={小遊戲:'miniGames',玩家:'playerHub',日常:'dailyHub',補給:'supplyHub',寵物:'pets',團隊搶銀行:'heist',賺錢:'money',轉帳:'transfers',資產商城:'assets',交通事業:'assets',藏身處:'hideout'};
 function commandHelpCategoryRow(selected='casino') {
@@ -6409,7 +6501,7 @@ const commands = [
     .addSubcommand(s=>s.setName('金庫').setDescription('查看自己或其他玩家的金幣').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('資料').setDescription('查看類似 Tatsu 的玩家資料卡').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('成就').setDescription('查看自己或其他玩家的成就進度').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
-    .addSubcommand(s=>s.setName('造型').setDescription('開啟個人造型商城、衣櫃與預設網站'))
+    .addSubcommand(s=>s.setName('造型').setDescription('選擇角色與管理員發布的完整造型'))
     .addSubcommand(s=>s.setName('遊戲').setDescription('開啟網頁遊戲大廳與個人經營總覽'))
     .addSubcommand(s=>s.setName('稱號').setDescription('裝備由成就解鎖的個人稱號').addStringOption(o=>o.setName('選擇').setDescription('選擇已解鎖的稱號').setRequired(true).addChoices(...playerTitleChoices))),
   new SlashCommandBuilder().setName('轉帳').setDescription('轉帳金幣給其他玩家（收取 2% 手續費）')
@@ -6516,6 +6608,7 @@ const commands = [
   new SlashCommandBuilder().setName('稱號設定').setDescription('管理員設定玩家資料卡稱號').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption(o=>o.setName('玩家').setDescription('目標玩家').setRequired(true))
     .addStringOption(o=>o.setName('稱號').setDescription('輸入名稱搜尋特殊稱號').setRequired(true).setAutocomplete(true)),
+  new SlashCommandBuilder().setName('造型後台').setDescription('管理員上傳並管理每名角色的完整造型').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder().setName('搶劫公告頻道').setDescription('管理員設定搶劫成功與週日寶庫情報頻道').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addChannelOption(o=>o.setName('頻道').setDescription('單人或團隊搶劫成功時發布公告的頻道').setRequired(true).addChannelTypes(ChannelType.GuildText,ChannelType.GuildAnnouncement)),
   new SlashCommandBuilder().setName('單人搶劫機率').setDescription('管理員設定單人搶銀行的基礎成功率').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -8359,16 +8452,16 @@ async function handleInteraction(i) {
       return i.reply({content:`✅ 已裝備個人稱號 **${profileTitles[selected]}**。`,ephemeral:true});
     }
     if(routedCommand==='個人造型') {
-      if(!APPEARANCE_SYSTEM_ENABLED) return i.reply({content:'🛠️ 個人換裝系統目前暫時關閉維護中。已擁有的造型、目前穿搭與預設資料都會完整保留，重新開放時可繼續使用。',ephemeral:true});
+      if(!CHARACTER_STYLE_SYSTEM_ENABLED) return i.reply({content:'🛠️ 角色造型系統目前暫時關閉維護中。既有角色與資料都會完整保留。',ephemeral:true});
       const url=appearanceActivityUrl(g,u,i.channelId);
-      if(!url) throw new Error('個人造型網站尚未完成設定，請稍後再試');
+      if(!url) throw new Error('角色造型網站尚未完成設定，請稍後再試');
       return i.reply({
         ephemeral:true,
-        embeds:[new EmbedBuilder().setColor(0xD7A4FF).setTitle('✨ 人物大廳與個人造型工作室').setDescription('進入網站即可在人物大廳切換 **6 名全身角色**，再瀏覽 **30 件造型商品**、使用正式透明穿戴素材即時試穿、購買與穿戴，並可儲存 **3 組快速預設**。完成後也能將造型名片發布回目前頻道。').addFields(
+        embeds:[new EmbedBuilder().setColor(0xD7A4FF).setTitle('✨ 角色造型系統').setDescription('進入網站即可選擇已擁有的角色，並套用管理員為該角色發布的完整造型。舊版分層服裝、頭飾、臉部與手持物換裝已取消。').addFields(
           {name:'🔐 專屬安全連結',value:'連結綁定你的 Discord 帳號與伺服器，15 分鐘後失效。'},
-          {name:'🎁 首次使用',value:'「賭場之王」角色與六件基本套裝已免費開放。'}
+          {name:'💾 舊資料',value:'先前購買的換裝商品與預設仍保留在資料庫，不會被刪除。'}
         )],
-        components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('開啟造型網站').setEmoji('👗').setStyle(ButtonStyle.Link).setURL(url))]
+        components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('開啟角色造型').setEmoji('✨').setStyle(ButtonStyle.Link).setURL(url))]
       });
     }
     if(routedCommand==='網頁遊戲') {
@@ -8396,7 +8489,7 @@ async function handleInteraction(i) {
         {name:'💰 經濟',value:`金庫：${fmt(coins)}\n負債：${fmt(debt(g,target.id))}\n累積獲得：${fmt(earned)}`,inline:true},
         {name:'🎮 紀錄',value:`獲勝紀錄：${ledger.wins||0}\n下注次數：${ledger.bets||0}\n帳務活動：${ledger.actions||0}`,inline:true},
         {name:'🏷️ 特殊稱號',value:playerTitle(g,target.id),inline:true},
-        {name:'✨ 個人造型',value:`${appearanceSummary(g,target.id)}\n使用 /玩家 造型 開啟衣櫃`,inline:false},
+        {name:'✨ 角色造型',value:`${appearanceSummary(g,target.id)}\n使用 /玩家 造型 選擇完整造型`,inline:false},
         {name:'🏆 成就收藏',value:`已解鎖：${achievementState.unlocked.size}/${achievementDefinitions.length}\n徽章：${achievementBadgeText(g,target.id)}\n使用 /玩家 成就 查看完整進度`,inline:true},
         {name:'🏠 豪華資產',value:`持有數量：${assetCount}\n原價總值：${fmt(assetValue)}`,inline:true},
         {name:'🎒 社交與狀態',value:`背包物品：${items}\n隊伍：${team?`${teamDisplayName(team)}（${team.members.length} 人）`:'尚未加入'}\n狀態：${status}`,inline:false},
@@ -8765,6 +8858,15 @@ async function handleInteraction(i) {
       const reward=taipeiWeekday()===0?1000:500,before=balance(g,u);
       daily.set(key,now); const next=changeBalance(g,u,reward,'daily',u,'每日獎勵');
       return i.reply(`🎁 已領取 ${fmt(next-before)}${reward===1000?'（週日雙倍）':''}，目前餘額 ${fmt(next)}`);
+    }
+    if(i.commandName==='造型後台') {
+      if(!i.memberPermissions.has(PermissionFlagsBits.Administrator)) throw new Error('只有管理員可以開啟造型後台');
+      const url=appearanceAdminActivityUrl(g,u);
+      if(!url) throw new Error('角色造型後台尚未完成設定，請稍後再試');
+      return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0xB26DFF).setTitle('🛡️ 角色造型管理後台').setDescription('可為六名既有角色上傳完整 PNG、JPG 或 WebP 造型圖，並控制每款造型是否對玩家開放。').addFields(
+        {name:'圖片規格',value:'單張上限 8 MB；建議透明背景 PNG、直式全身構圖。'},
+        {name:'權限安全',value:'連結綁定你的 Discord 帳號與伺服器管理員權限，15 分鐘後失效。'}
+      )],components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('開啟管理後台').setEmoji('🛡️').setStyle(ButtonStyle.Link).setURL(url))]});
     }
     if(i.commandName==='搶劫公告頻道') {
       if(!i.memberPermissions.has(PermissionFlagsBits.Administrator)) throw new Error('只有管理員可以設定搶劫公告頻道');
@@ -9575,9 +9677,18 @@ function appearanceActivityToken(guildId,userId,channelId) {
   return `${payload}.${activitySignature(payload)}`;
 }
 function appearanceActivityUrl(guildId,userId,channelId) {
-  if(!APPEARANCE_SYSTEM_ENABLED) return null;
+  if(!CHARACTER_STYLE_SYSTEM_ENABLED) return null;
   const token=appearanceActivityToken(guildId,userId,channelId);
   return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/appearance?session=${encodeURIComponent(token)}`:null;
+}
+function appearanceAdminActivityToken(guildId,userId) {
+  if(!ACTIVITY_SIGNING_SECRET) return null;
+  const payload=Buffer.from(JSON.stringify({kind:'appearance_admin',guildId,userId,exp:Date.now()+15*60*1000})).toString('base64url');
+  return `${payload}.${activitySignature(payload)}`;
+}
+function appearanceAdminActivityUrl(guildId,userId) {
+  const token=appearanceAdminActivityToken(guildId,userId);
+  return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/appearance-admin?session=${encodeURIComponent(token)}`:null;
 }
 function gameActivityToken(guildId,userId,channelId) {
   if(!ACTIVITY_SIGNING_SECRET) return null;
@@ -9637,7 +9748,7 @@ function parseVehicleActivityToken(token) {
   return session;
 }
 function parseAppearanceActivityToken(token) {
-  if(!APPEARANCE_SYSTEM_ENABLED) throw new Error('個人換裝系統目前暫時關閉維護中，既有造型資料均已保留');
+  if(!CHARACTER_STYLE_SYSTEM_ENABLED) throw new Error('角色造型系統目前暫時關閉維護中');
   if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('造型網站連結無效');
   const [payload,signature,...extra]=token.split('.');
   if(!payload||!signature||extra.length) throw new Error('造型網站連結格式錯誤');
@@ -9645,6 +9756,18 @@ function parseAppearanceActivityToken(token) {
   if(expected.length!==received.length||!timingSafeEqual(expected,received)) throw new Error('造型網站連結驗證失敗');
   const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
   if(session.kind!=='appearance'||!session.guildId||!session.userId||!session.channelId||!session.exp||session.exp<Date.now()) throw new Error('造型網站連結已過期，請回到 Discord 重新使用 `/玩家 造型`');
+  return session;
+}
+async function parseAppearanceAdminActivityToken(token) {
+  if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('管理員造型後台連結無效');
+  const [payload,signature,...extra]=token.split('.');
+  if(!payload||!signature||extra.length) throw new Error('管理員造型後台連結格式錯誤');
+  const expected=Buffer.from(activitySignature(payload)),received=Buffer.from(signature);
+  if(expected.length!==received.length||!timingSafeEqual(expected,received)) throw new Error('管理員造型後台連結驗證失敗');
+  const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
+  if(session.kind!=='appearance_admin'||!session.guildId||!session.userId||!session.exp||session.exp<Date.now()) throw new Error('管理員造型後台連結已過期，請回到 Discord 重新使用 `/造型後台`');
+  const guild=await client.guilds.fetch(session.guildId),member=await guild.members.fetch(session.userId);
+  if(!member.permissions.has(PermissionFlagsBits.Administrator)) throw new Error('只有 Discord 管理員可以使用造型後台');
   return session;
 }
 function parseGameActivityToken(token) {
@@ -9674,23 +9797,27 @@ function activityPayload(session) {
   };
 }
 async function appearancePayload(session) {
+  const g=session.guildId,u=session.userId,user=await client.users.fetch(u),equipped=equippedCharacterStyle(g,u),legacy=playerAppearance(g,u),background=cosmeticById[legacy.background];
+  return {
+    player:{userId:u,name:user.globalName||user.username,avatar:user.displayAvatarURL({extension:'png',size:256}),balance:ensureWallet(g,u)},
+    characters:characterCosmetics.map(character=>({
+      id:character.id,name:character.name,theme:character.theme,owned:ownsCosmetic(g,u,character.id),
+      styles:[characterBaseStyle(character),...characterUploadedStyles(g,character.id)]
+    })),
+    equipped:{characterId:equipped.character.id,styleId:equipped.style.id},
+    backgroundImage:background?.image?`/appearance/backgrounds/${background.image}`:null,
+    legacyDataPreserved:true,expiresAt:session.exp
+  };
+}
+async function appearanceAdminPayload(session) {
   const user=await client.users.fetch(session.userId);
   return {
-    player:{
-      userId:session.userId,
-      name:user.globalName||user.username,
-      avatar:user.displayAvatarURL({extension:'png',size:256}),
-      balance:ensureWallet(session.guildId,session.userId)
-    },
-    slots:COSMETIC_SLOTS.map(id=>({id,name:COSMETIC_SLOT_LABELS[id]})),
-    catalog:cosmeticCatalog.map(item=>({
-      id:item.id,slot:item.slot,theme:item.theme,name:item.name,icon:item.icon,price:item.price,
-      starter:Boolean(item.starter),owned:ownsCosmetic(session.guildId,session.userId,item.id),
-      image:item.image?`/appearance/${item.slot==='character'?'characters':item.slot==='background'?'backgrounds':'wearables'}/${item.image}`:null,style:item.style
+    admin:{userId:session.userId,name:user.globalName||user.username,avatar:user.displayAvatarURL({extension:'png',size:128})},
+    characters:characterCosmetics.map(character=>({
+      id:character.id,name:character.name,theme:character.theme,baseImage:`/appearance/characters/${character.image}`,
+      styles:characterUploadedStyles(session.guildId,character.id,{includeInactive:true})
     })),
-    appearance:playerAppearance(session.guildId,session.userId),
-    presets:appearancePresets(session.guildId,session.userId),
-    expiresAt:session.exp
+    limits:{maxBytes:8*1024*1024,types:['image/png','image/jpeg','image/webp']},expiresAt:session.exp
   };
 }
 function webGameTransportPayload(g,u) {
@@ -9747,7 +9874,7 @@ async function webGamePayload(session) {
   const g=session.guildId,u=session.userId,user=await client.users.fetch(u);
   const coins=ensureWallet(g,u),currentStamina=stamina(g,u),maxStamina=staminaMax(g,u);
   const achievementState=syncAchievements(g,u),assetSummary=summarizeWebAssets(assetsOf(g,u),assetCatalog);
-  const appearance=playerAppearance(g,u),character=cosmeticById[appearance.character],background=cosmeticById[appearance.background];
+  const appearance=playerAppearance(g,u),equippedStyle=equippedCharacterStyle(g,u),character=equippedStyle.character,background=cosmeticById[appearance.background];
   const achievements=achievementDefinitions.map(item=>{
     const done=achievementState.unlocked.has(item.id);
     if(item.hidden&&!done) return {id:item.id,name:'❔ 隱藏成就',description:'達成特殊條件後才會揭曉',done:false,hidden:true,progress:null};
@@ -9762,7 +9889,7 @@ async function webGamePayload(session) {
       stamina:currentStamina,maxStamina,dailyStaminaAvailable:!dailyStaminaRestoreClaimed(g,u)
     },
     appearance:{
-      character:character?.name||'黑金首席荷官',characterImage:character?.image?`/appearance/characters/${character.image}`:null,
+      character:character?.name||'黑金首席荷官',characterImage:equippedStyle.style.image,
       background:background?.name||'黑金至尊廳',backgroundImage:background?.image?`/appearance/backgrounds/${background.image}`:null,
       summary:appearanceSummary(g,u)
     },
@@ -9771,8 +9898,8 @@ async function webGamePayload(session) {
     achievements:{unlocked:achievementState.unlocked.size,total:achievementDefinitions.length,items:achievements},
     transport:webGameTransportPayload(g,u),
     dailyBuff:todayBuff(),
-    modules:WEB_GAME_MODULES.map(module=>module.id==='appearance'&&!APPEARANCE_SYSTEM_ENABLED?{
-      ...module,state:'coming',description:'換裝系統暫時關閉維護中，既有資料均已保留',href:'#'
+    modules:WEB_GAME_MODULES.map(module=>module.id==='appearance'&&!CHARACTER_STYLE_SYSTEM_ENABLED?{
+      ...module,state:'coming',description:'角色造型系統暫時維護中',href:'#'
     }:{
       ...module,
       href:module.id==='appearance'?appearanceActivityUrl(g,u,session.channelId):module.id==='mahjong'?`${ACTIVITY_PUBLIC_URL}/mahjong`:`#${module.id}`
@@ -9830,8 +9957,8 @@ const activityStaticTypes={
 };
 function serveActivityStatic(request,response,url) {
   if(!['GET','HEAD'].includes(request.method||'')) return false;
-  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/appearance':'appearance.html','/game':'game.html'};
-  const assetRequest=url.pathname.startsWith('/assets/'),root=assetRequest?ACTIVITY_ASSET_ROOT:ACTIVITY_STATIC_ROOT;
+  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/appearance':'style.html','/appearance-admin':'appearance-admin.html','/game':'game.html'};
+  const assetRequest=url.pathname.startsWith('/assets/'),styleRequest=url.pathname.startsWith('/appearance-styles/'),root=assetRequest?ACTIVITY_ASSET_ROOT:styleRequest?resolve(CHARACTER_STYLE_ROOT,'..'):ACTIVITY_STATIC_ROOT;
   const relative=assetRequest?decodeURIComponent(url.pathname.slice('/assets/'.length)):routeFiles[url.pathname]||decodeURIComponent(url.pathname).replace(/^\/+/,'');
   if(!relative||relative.startsWith('api/')||relative.startsWith('activity/')) return false;
   const file=resolve(root,relative);
@@ -10379,6 +10506,15 @@ async function activityRequestBody(request) {
   }
   return raw?JSON.parse(raw):{};
 }
+async function activityLargeRequestBody(request,maxBytes=12*1024*1024) {
+  const chunks=[];let total=0;
+  for await (const chunk of request) {
+    total+=chunk.length;
+    if(total>maxBytes) throw new Error('上傳資料超過 12 MB 限制');
+    chunks.push(chunk);
+  }
+  return total?JSON.parse(Buffer.concat(chunks,total).toString('utf8')):{};
+}
 if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
   createServer(async (request,response)=>{
     try {
@@ -10405,25 +10541,28 @@ if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
         const session=parseAppearanceActivityToken(url.searchParams.get('session'));
         return activityJson(response,200,{ok:true,...await appearancePayload(session)});
       }
-      if(request.method==='POST'&&url.pathname==='/activity/appearance/purchase') {
+      if(request.method==='POST'&&url.pathname==='/activity/appearance/select') {
         const body=await activityRequestBody(request),session=parseAppearanceActivityToken(body.session);
-        const result=purchaseCosmetic(session.guildId,session.userId,String(body.cosmeticId||''));
-        return activityJson(response,200,{ok:true,message:`已購買「${result.item.name}」`,...await appearancePayload(session)});
+        const result=equipCharacterStyle(session.guildId,session.userId,String(body.characterId||''),String(body.styleId||''));
+        return activityJson(response,200,{ok:true,message:`已套用「${result.character.name}｜${result.style.name}」`,...await appearancePayload(session)});
       }
-      if(request.method==='POST'&&url.pathname==='/activity/appearance/save') {
-        const body=await activityRequestBody(request),session=parseAppearanceActivityToken(body.session);
-        savePlayerAppearance(session.guildId,session.userId,body.appearance);
-        return activityJson(response,200,{ok:true,message:'造型已套用',...await appearancePayload(session)});
+      if(request.method==='POST'&&['/activity/appearance/purchase','/activity/appearance/save','/activity/appearance/preset','/activity/appearance/publish'].includes(url.pathname)) {
+        const body=await activityRequestBody(request);parseAppearanceActivityToken(body.session);
+        throw new Error('舊版分層換裝系統已取消，請回到角色造型頁選擇完整造型');
       }
-      if(request.method==='POST'&&url.pathname==='/activity/appearance/preset') {
-        const body=await activityRequestBody(request),session=parseAppearanceActivityToken(body.session);
-        const preset=saveAppearancePreset(session.guildId,session.userId,body.presetNo,body.name,body.appearance);
-        return activityJson(response,200,{ok:true,message:`已儲存「${preset.name}」`,preset,...await appearancePayload(session)});
+      if(request.method==='GET'&&url.pathname==='/activity/appearance-admin') {
+        const session=await parseAppearanceAdminActivityToken(url.searchParams.get('session'));
+        return activityJson(response,200,{ok:true,...await appearanceAdminPayload(session)});
       }
-      if(request.method==='POST'&&url.pathname==='/activity/appearance/publish') {
-        const body=await activityRequestBody(request),session=parseAppearanceActivityToken(body.session);
-        const result=await publishAppearance(session);
-        return activityJson(response,200,{ok:true,message:'造型名片已發布到原本的 Discord 頻道',...result});
+      if(request.method==='POST'&&url.pathname==='/activity/appearance-admin/upload') {
+        const body=await activityLargeRequestBody(request),session=await parseAppearanceAdminActivityToken(body.session);
+        const style=uploadCharacterStyle(session.guildId,session.userId,body);
+        return activityJson(response,200,{ok:true,message:`已為角色上傳「${style.name}」`,style,...await appearanceAdminPayload(session)});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/appearance-admin/active') {
+        const body=await activityRequestBody(request),session=await parseAppearanceAdminActivityToken(body.session);
+        setCharacterStyleActive(session.guildId,String(body.styleId||''),Boolean(body.active));
+        return activityJson(response,200,{ok:true,message:body.active?'造型已開放給玩家':'造型已暫停顯示',...await appearanceAdminPayload(session)});
       }
       if(request.method==='GET'&&url.pathname==='/activity/game') {
         const session=parseGameActivityToken(url.searchParams.get('session'));

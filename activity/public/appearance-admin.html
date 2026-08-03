@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#09070f">
+  <title>角色造型管理後台｜澳門最大賭場</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/appearance-admin.css?v=20260803.3">
+</head>
+<body>
+  <header><div class="brand"><span>🛡️</span><div><strong>角色造型管理後台</strong><small>ADMIN · CHARACTER STYLE</small></div></div><div class="admin"><img id="adminAvatar" alt="管理員頭像"><div><small>Discord 管理員</small><strong id="adminName">驗證中…</strong></div></div></header>
+  <main>
+    <section class="upload-panel">
+      <div class="heading"><small>UPLOAD COMPLETE LOOK</small><h1>上傳完整造型</h1><p>每張圖片直接代表角色完整外觀，不會再疊加服裝、頭飾或手持物。</p></div>
+      <label><span>選擇角色</span><select id="characterSelect"></select></label>
+      <label><span>造型名稱</span><input id="styleName" maxlength="40" placeholder="例如：夏日海灘限定造型"></label>
+      <label class="file-drop" id="fileDrop"><input id="styleFile" type="file" accept="image/png,image/jpeg,image/webp"><strong>點擊選擇 PNG、JPG 或 WebP</strong><small>單張上限 8 MB，建議直式全身圖或透明背景 PNG</small></label>
+      <div class="image-preview" id="imagePreview"><span>尚未選擇圖片</span><img id="previewImage" alt="待上傳造型預覽" hidden></div>
+      <button class="upload-button" id="uploadButton" type="button" disabled>上傳並開放給玩家</button>
+      <p class="security">所有操作都會再次驗證 Discord 管理員權限；安全連結 15 分鐘後失效。</p>
+    </section>
+    <section class="manage-panel">
+      <div class="manage-head"><div><small>CHARACTER LIBRARY</small><h2>角色造型庫</h2></div><span id="sessionTime">安全連結</span></div>
+      <nav class="character-tabs" id="characterTabs"></nav>
+      <div class="character-summary"><img id="baseImage" alt="角色經典造型"><div><small>目前管理角色</small><strong id="selectedCharacter">—</strong><span id="styleCount">—</span></div></div>
+      <div class="style-grid" id="styleGrid"></div>
+    </section>
+  </main>
+  <div class="loading" id="loading"><div class="spinner"></div><strong>正在驗證管理員權限…</strong><p>請勿分享此專屬連結</p></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/appearance-admin.js?v=20260803.3" defer></script>
+</body>
+</html>
