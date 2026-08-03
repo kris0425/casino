@@ -212,7 +212,7 @@ test('網站載具 PVP 更新公告完整',()=>{
   for(const required of ['載具 PVP','房碼','六段','10 點體力','Oracle','1%～3%']) assert.match(text,new RegExp(required));
 });
 
-test('角色造型系統取代換裝並保留既有資料',()=>{
+test('角色造型系統取代換裝並保留角色資料表',()=>{
   const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/const CHARACTER_STYLE_SYSTEM_ENABLED = String\(process\.env\.CHARACTER_STYLE_SYSTEM_ENABLED \|\| 'true'\)/);
@@ -223,6 +223,17 @@ test('角色造型系統取代換裝並保留既有資料',()=>{
   assert.match(source,/CREATE TABLE IF NOT EXISTS player_cosmetics/);
   assert.match(source,/CREATE TABLE IF NOT EXISTS player_appearance/);
   assert.match(source,/CREATE TABLE IF NOT EXISTS appearance_presets/);
+});
+
+test('一次性清除舊服裝購買穿戴與預設但保留角色',()=>{
+  assert.match(source,/CREATE TABLE IF NOT EXISTS system_migrations/);
+  assert.match(source,/LEGACY_COSMETIC_PURGE_MIGRATION='2026-08-03-purge-legacy-cosmetic-purchases'/);
+  assert.match(source,/cosmeticCatalog\.filter\(item=>item\.slot!=='character'\)/);
+  assert.match(source,/DELETE FROM player_cosmetics WHERE cosmetic_id IN/);
+  assert.match(source,/DELETE FROM player_appearance WHERE slot<>'character'/);
+  assert.match(source,/DELETE FROM appearance_presets/);
+  assert.match(source,/charactersPreserved:true/);
+  assert.match(source,/LEGACY_COSMETIC_PURGE_OK/);
 });
 
 test('換裝系統維護公告說明資料保留',()=>{
@@ -239,6 +250,14 @@ test('角色造型與管理後台更新公告完整',()=>{
   assert.equal(update.version,'2026.08.03.3');
   assert.deepEqual(update.channelNames,['賭場公告']);
   for(const required of ['/玩家 造型','/造型後台','6 名','8 MB','Oracle','全部保留']) assert.match(text,new RegExp(required.replace('/','\\/')));
+});
+
+test('舊服裝資料清除公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-03-legacy-cosmetic-purge.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.03.4');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['舊服裝購買','穿戴','快速預設','角色本體','完整造型']) assert.match(text,new RegExp(required));
 });
 
 test('網頁遊戲第一版更新公告完整',()=>{

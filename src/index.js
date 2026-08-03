@@ -488,6 +488,11 @@ db.exec(`
     PRIMARY KEY (guild_id, user_id, preset_no),
     CHECK (preset_no BETWEEN 1 AND 3)
   );
+  CREATE TABLE IF NOT EXISTS system_migrations (
+    migration_id TEXT PRIMARY KEY,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE IF NOT EXISTS player_tutorials (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, tutorial_id TEXT NOT NULL,
     seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -925,6 +930,29 @@ db.exec(`
       FROM casino_vault WHERE guild_id=NEW.guild_id;
   END;
 `);
+
+const LEGACY_COSMETIC_PURGE_MIGRATION='2026-08-03-purge-legacy-cosmetic-purchases';
+function purgeLegacyCosmeticDataOnce() {
+  if(db.prepare('SELECT 1 FROM system_migrations WHERE migration_id=?').get(LEGACY_COSMETIC_PURGE_MIGRATION)) return null;
+  const legacyCosmeticIds=cosmeticCatalog.filter(item=>item.slot!=='character').map(item=>item.id);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const placeholders=legacyCosmeticIds.map(()=>'?').join(','),purchases=legacyCosmeticIds.length
+      ? db.prepare(`DELETE FROM player_cosmetics WHERE cosmetic_id IN (${placeholders})`).run(...legacyCosmeticIds)
+      : {changes:0};
+    const equipped=db.prepare("DELETE FROM player_appearance WHERE slot<>'character'").run();
+    const presets=db.prepare('DELETE FROM appearance_presets').run();
+    const details={purchases:Number(purchases.changes),equipped:Number(equipped.changes),presets:Number(presets.changes),charactersPreserved:true};
+    db.prepare('INSERT INTO system_migrations(migration_id,details_json) VALUES(?,?)').run(LEGACY_COSMETIC_PURGE_MIGRATION,JSON.stringify(details));
+    db.exec('COMMIT');
+    console.log(`LEGACY_COSMETIC_PURGE_OK purchases=${details.purchases} equipped=${details.equipped} presets=${details.presets} characters_preserved=true`);
+    return details;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+purgeLegacyCosmeticDataOnce();
 
 if(!db.prepare('PRAGMA table_info(teams)').all().some(column=>column.name==='name')) {
   db.exec('ALTER TABLE teams ADD COLUMN name TEXT');
@@ -8459,7 +8487,7 @@ async function handleInteraction(i) {
         ephemeral:true,
         embeds:[new EmbedBuilder().setColor(0xD7A4FF).setTitle('✨ 角色造型系統').setDescription('進入網站即可選擇已擁有的角色，並套用管理員為該角色發布的完整造型。舊版分層服裝、頭飾、臉部與手持物換裝已取消。').addFields(
           {name:'🔐 專屬安全連結',value:'連結綁定你的 Discord 帳號與伺服器，15 分鐘後失效。'},
-          {name:'💾 舊資料',value:'先前購買的換裝商品與預設仍保留在資料庫，不會被刪除。'}
+          {name:'🧹 舊版資料',value:'舊服裝購買、穿戴與快速預設資料已清除；已擁有的角色本體不受影響。'}
         )],
         components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('開啟角色造型').setEmoji('✨').setStyle(ButtonStyle.Link).setURL(url))]
       });
@@ -9806,7 +9834,7 @@ async function appearancePayload(session) {
     })),
     equipped:{characterId:equipped.character.id,styleId:equipped.style.id},
     backgroundImage:background?.image?`/appearance/backgrounds/${background.image}`:null,
-    legacyDataPreserved:true,expiresAt:session.exp
+    expiresAt:session.exp
   };
 }
 async function appearanceAdminPayload(session) {

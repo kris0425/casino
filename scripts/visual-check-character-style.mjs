@@ -15,7 +15,7 @@ const characters=[
   {id:'transport_character',name:'銀翼運輸指揮官',theme:'交通帝國',owned:true,baseImage:styleImage,styles:[{id:'base:transport_character',name:'經典造型',image:styleImage,base:true,active:true}]},
   {id:'heist_character',name:'無聲夜行者',theme:'夜行特務',owned:false,baseImage:'/appearance/characters/night-agent.png',styles:[{id:'base:heist_character',name:'經典造型',image:'/appearance/characters/night-agent.png',base:true,active:true}]}
 ];
-const playerPayload={ok:true,player:{name:'KRIS',avatar:characterImage},characters,equipped:{characterId:'casino_character',styleId:'base:casino_character'},backgroundImage,expiresAt:Date.now()+15*60*1000,legacyDataPreserved:true};
+const playerPayload={ok:true,player:{name:'KRIS',avatar:characterImage},characters,equipped:{characterId:'casino_character',styleId:'base:casino_character'},backgroundImage,expiresAt:Date.now()+15*60*1000};
 const adminPayload={ok:true,admin:{name:'KRIS',avatar:characterImage},characters:characters.map(character=>({...character,styles:character.styles.filter(style=>!style.base)})),expiresAt:Date.now()+15*60*1000,limits:{maxBytes:8*1024*1024,types:['image/png','image/jpeg','image/webp']}};
 
 function localFile(pathname) {
