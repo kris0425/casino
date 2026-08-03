@@ -1193,6 +1193,24 @@ test('20 款卡車加入物流貨運並套用最高收益加成',()=>{
   assert.match(update.changes.join('\n'),/最高.*加成/s);
 });
 
+test('BAGE 黑金猛禽卡車加入資產商城與物流貨運',()=>{
+  const assetBlock=source.match(/truck_bage_blackgold_rival:\{[^\n]+/)?.[0]||'';
+  assert.match(assetBlock,/name:'🐦‍⬛ BAGE 黑金猛禽卡車'/);
+  assert.match(assetBlock,/category:'卡車'/);
+  assert.match(assetBlock,/price:56000000/);
+  assert.match(assetBlock,/rarity:'限定'/);
+  assert.match(assetBlock,/buff:'freight'/);
+  assert.match(assetBlock,/truckRevenueBonus:0\.70/);
+  assert.match(assetBlock,/forSale:true/);
+  assert.match(assetBlock,/image:'trucks\/bage_blackgold_rival\.png'/);
+  const freight=source.match(/const freightTruckIds=\[[\s\S]+?\n\];/)?.[0]||'';
+  assert.match(freight,/'truck_bage_blackgold_rival'/);
+  const image=readFileSync(new URL('../assets/trucks/bage_blackgold_rival.png',import.meta.url));
+  assert.equal(image.subarray(1,4).toString(),'PNG');
+  const width=image.readUInt32BE(16),height=image.readUInt32BE(20);
+  assert.ok(width>=1200&&height>=900&&width>height,`BAGE 卡車圖片規格錯誤：${width}x${height}`);
+});
+
 test('Oracle 部署將大型素材改用掛載並支援跳過 Docker 重建',()=>{
   const dockerignore=readFileSync(new URL('../.dockerignore',import.meta.url),'utf8');
   const dockerfile=readFileSync(new URL('../Dockerfile',import.meta.url),'utf8');

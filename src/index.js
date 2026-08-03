@@ -1516,6 +1516,7 @@ const assetCatalog={
   truck_sunset_peach_foodliner:{name:'🍑 暮霞鮮食專送車',category:'卡車',price:28000000,description:'為高級餐飲與鮮食供應鏈打造的精品冷鏈車；開始物流任務時，貨運營收 +55%。',image:'trucks/sunset_peach_foodliner.png',rarity:'神話',buff:'freight',truckRevenueBonus:0.55},
   truck_obsidian_titan_transporter:{name:'🖤 黑曜泰坦運輸車',category:'卡車',price:36000000,description:'多軸重型運輸平台，專門承攬超大型跨境物流；開始物流任務時，貨運營收 +60%。',image:'trucks/obsidian_titan_transporter.png',rarity:'限定',buff:'freight',truckRevenueBonus:0.60},
   truck_starlight_silver_longhaul:{name:'✨ 星光銀河長運車',category:'卡車',price:48000000,description:'自動駕駛與超長程貨艙兼備的終極物流車；開始物流任務時，貨運營收 +65%。',image:'trucks/starlight_silver_longhaul.png',rarity:'限定',buff:'freight',truckRevenueBonus:0.65},
+  truck_bage_blackgold_rival:{name:'🐦‍⬛ BAGE 黑金猛禽卡車',category:'卡車',price:56000000,description:'BAGE 特別版黑金猛禽卡車，以黑金車體、漫畫猛禽塗裝與強悍貨箱打造的旗艦貨運車；開始物流任務時，貨運營收 +70%。',image:'trucks/bage_blackgold_rival.png',rarity:'限定',buff:'freight',truckRevenueBonus:0.70,forSale:true},
   train_starter_service_commuter:{name:'🚃 銀灣基礎通勤列車',category:'列車',price:0,description:'伺服器配給火車站業主的可靠入門電聯車，可執行所有鐵路路線；不占列車車庫格數，也不能交易或刊登。',image:'trains/starter_service_commuter.png',rarity:'配給',buff:'transport',trainRevenueBonus:0,forSale:false,systemGranted:true,nonTransferable:true},
   train_city_glow_commuter:{name:'🚈 城市微光電聯車',category:'列車',price:60000,description:'可靠的都會入門電聯車，繁忙尖峰也能穩定周轉。列車盲盒限定收藏。',image:'trains/city_glow_commuter.png',rarity:'一般',buff:'transport',trainRevenueBonus:0.03,forSale:false,trainBlindBox:true},
   train_bay_breeze_commuter:{name:'🌊 海灣通勤號',category:'列車',price:80000,description:'沿著海灣高架線穿梭的清爽通勤列車。列車盲盒限定收藏。',image:'trains/bay_breeze_commuter.png',rarity:'一般',buff:'transport',trainRevenueBonus:0.04,forSale:false,trainBlindBox:true},
@@ -2016,7 +2017,7 @@ const freightTruckIds=[
   'truck_crimson_mountain_climber','truck_sapphire_coastal_freighter','truck_golden_sun_bulkmaster','truck_midnight_stealth_carrier',
   'truck_jade_river_tanker','truck_silver_frost_express','truck_neon_lotus_cityrunner','truck_ironwood_heavy_lifter',
   'truck_coral_reef_logistics','truck_violet_comet_courier','truck_emberforge_armored','truck_aurora_polar_freighter',
-  'truck_harbor_blue_containerliner','truck_sunset_peach_foodliner','truck_obsidian_titan_transporter','truck_starlight_silver_longhaul'
+  'truck_harbor_blue_containerliner','truck_sunset_peach_foodliner','truck_obsidian_titan_transporter','truck_starlight_silver_longhaul','truck_bage_blackgold_rival'
 ];
 const trainRarityRank={一般:1,稀有:2,史詩:3,傳說:4};
 function drawTrainBlindBoxAssetId(random=Math.random) {
@@ -6391,7 +6392,7 @@ const gameHelpDetails={
   heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
   money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/日常 領取\` 取得每日獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。可用 \`/日常 體力\` 查看狀態，並從 \`/補給\` 購買及使用恢復用品。`},
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具、**20 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具、**21 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
   playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、成就、造型與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 成就`、`/玩家 造型` 與 `/玩家 稱號`，集中管理角色資訊與外觀。'},
   dailyHub:{label:'日常中心',emoji:'📅',hint:'每日獎勵、增益與體力',title:'📅 日常中心',body:'使用 `/日常 領取` 領每日獎勵；`/日常 增益` 查看輪替效果；`/日常 體力` 與 `/日常 回體力` 管理每日體力。'},
