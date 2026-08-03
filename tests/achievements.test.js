@@ -170,7 +170,7 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.03\.1'/);
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.03\.2'/);
   for(const id of ['appearance','transport','garage','vehicle-pvp','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
@@ -221,6 +221,25 @@ test('網站載具 PVP 更新公告完整',()=>{
   for(const required of ['載具 PVP','房碼','六段','10 點體力','Oracle','1%～3%']) assert.match(text,new RegExp(required));
 });
 
+test('換裝系統可暫時關閉且完整保留既有資料',()=>{
+  const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
+  assert.match(source,/const APPEARANCE_SYSTEM_ENABLED = String\(process\.env\.APPEARANCE_SYSTEM_ENABLED \|\| 'false'\)/);
+  assert.match(source,/if\(!APPEARANCE_SYSTEM_ENABLED\) return i\.reply\(\{content:'🛠️ 個人換裝系統目前暫時關閉維護中/);
+  assert.match(source,/function parseAppearanceActivityToken\(token\) \{\s+if\(!APPEARANCE_SYSTEM_ENABLED\) throw new Error/);
+  assert.match(source,/module\.id==='appearance'&&!APPEARANCE_SYSTEM_ENABLED/);
+  assert.match(js,/換裝系統維護中/);
+  assert.match(html,/game\.js\?v=20260803\.2/);
+});
+
+test('換裝系統維護公告說明資料保留',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-03-appearance-maintenance.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.03.2');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['暫時關閉','/玩家 造型','購買','目前穿搭','快速預設','全部保留']) assert.match(text,new RegExp(required.replace('/','\\/')));
+});
+
 test('網頁遊戲第一版更新公告完整',()=>{
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-02-web-game-v1.json',import.meta.url),'utf8'));
   const text=[update.title,update.summary,...update.changes].join('\n');
@@ -249,7 +268,7 @@ test('車庫分頁避免手機同時解碼全部大型圖片',()=>{
   const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
-  assert.match(html,/game\.css\?v=20260803\.1/);
+  assert.match(html,/game\.css\?v=20260803\.2/);
   assert.match(html,/id="garagePager"/);
   assert.match(html,/點擊圖片可查看完整原圖/);
   assert.match(js,/const GARAGE_PAGE_SIZE=6/);

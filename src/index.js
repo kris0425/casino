@@ -36,6 +36,7 @@ const ACTIVITY_PUBLIC_URL = String(process.env.ACTIVITY_PUBLIC_URL || '').replac
 const ACTIVITY_API_PORT = Number(process.env.ACTIVITY_API_PORT || 8787);
 const ACTIVITY_SIGNING_SECRET = process.env.ACTIVITY_SIGNING_SECRET || '';
 const ACTIVITY_BACKEND_SECRET = process.env.ACTIVITY_BACKEND_SECRET || '';
+const APPEARANCE_SYSTEM_ENABLED = String(process.env.APPEARANCE_SYSTEM_ENABLED || 'false').toLowerCase()==='true';
 const PLAYER_TRANSFER_FEE_RATE = 0.02;
 const PLAYER_TRANSFER_MIZI_CHANCE = 0.05;
 const PLAYER_TRANSFER_EXTRA_ZERO_CHANCE = 0.05;
@@ -8358,6 +8359,7 @@ async function handleInteraction(i) {
       return i.reply({content:`✅ 已裝備個人稱號 **${profileTitles[selected]}**。`,ephemeral:true});
     }
     if(routedCommand==='個人造型') {
+      if(!APPEARANCE_SYSTEM_ENABLED) return i.reply({content:'🛠️ 個人換裝系統目前暫時關閉維護中。已擁有的造型、目前穿搭與預設資料都會完整保留，重新開放時可繼續使用。',ephemeral:true});
       const url=appearanceActivityUrl(g,u,i.channelId);
       if(!url) throw new Error('個人造型網站尚未完成設定，請稍後再試');
       return i.reply({
@@ -9573,6 +9575,7 @@ function appearanceActivityToken(guildId,userId,channelId) {
   return `${payload}.${activitySignature(payload)}`;
 }
 function appearanceActivityUrl(guildId,userId,channelId) {
+  if(!APPEARANCE_SYSTEM_ENABLED) return null;
   const token=appearanceActivityToken(guildId,userId,channelId);
   return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/appearance?session=${encodeURIComponent(token)}`:null;
 }
@@ -9634,6 +9637,7 @@ function parseVehicleActivityToken(token) {
   return session;
 }
 function parseAppearanceActivityToken(token) {
+  if(!APPEARANCE_SYSTEM_ENABLED) throw new Error('個人換裝系統目前暫時關閉維護中，既有造型資料均已保留');
   if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('造型網站連結無效');
   const [payload,signature,...extra]=token.split('.');
   if(!payload||!signature||extra.length) throw new Error('造型網站連結格式錯誤');
@@ -9767,10 +9771,12 @@ async function webGamePayload(session) {
     achievements:{unlocked:achievementState.unlocked.size,total:achievementDefinitions.length,items:achievements},
     transport:webGameTransportPayload(g,u),
     dailyBuff:todayBuff(),
-    modules:WEB_GAME_MODULES.map(module=>({
+    modules:WEB_GAME_MODULES.map(module=>module.id==='appearance'&&!APPEARANCE_SYSTEM_ENABLED?{
+      ...module,state:'coming',description:'換裝系統暫時關閉維護中，既有資料均已保留',href:'#'
+    }:{
       ...module,
       href:module.id==='appearance'?appearanceActivityUrl(g,u,session.channelId):module.id==='mahjong'?`${ACTIVITY_PUBLIC_URL}/mahjong`:`#${module.id}`
-    })),
+    }),
     expiresAt:session.exp
   };
 }

@@ -26,7 +26,7 @@ function renderPlayer(data){
   $('#heroBackground').src=data.appearance.backgroundImage||'';$('#heroCharacter').src=data.appearance.characterImage||'';
   setText('#buffIcon',data.dailyBuff.icon);setText('#buffName',`${data.dailyBuff.day}｜${data.dailyBuff.name}`);setText('#buffText',data.dailyBuff.text);
   setText('#assetCount',format(data.assets.count));setText('#assetValue',format(data.assets.value));setText('#achievementCount',`${data.achievements.unlocked} / ${data.achievements.total}`);
-  setText('#versionLabel',`版本 ${data.version}`);$('#appearanceLink').href=data.modules.find(module=>module.id==='appearance')?.href||'#';
+  setText('#versionLabel',`版本 ${data.version}`);const appearanceModule=data.modules.find(module=>module.id==='appearance'),appearanceLink=$('#appearanceLink'),appearanceClosed=appearanceModule?.state==='coming';appearanceLink.href=appearanceModule?.href||'#';appearanceLink.textContent=appearanceClosed?'換裝系統維護中':'進入造型工作室';appearanceLink.classList.toggle('disabled',appearanceClosed);appearanceLink.setAttribute('aria-disabled',String(appearanceClosed));appearanceLink.onclick=appearanceClosed?event=>event.preventDefault():null;
 }
 function sidebarItem({icon,name,description,href,state}){
   const item=node(state==='coming'?'button':'a',`nav-item${state==='coming'?' disabled':''}`);if(item.tagName==='A')item.href=href;

@@ -1,4 +1,4 @@
-export const WEB_GAME_VERSION='2026.08.03.1';
+export const WEB_GAME_VERSION='2026.08.03.2';
 
 export const WEB_GAME_MODULES=[
   {id:'appearance',icon:'👗',name:'人物造型',description:'人物大廳、衣櫃、商城與三組快速預設',state:'available'},
