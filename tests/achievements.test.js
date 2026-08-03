@@ -476,6 +476,35 @@ test('萌犬豪華客機已加入商城、航空營運及圖片資產',()=>{
   assert.ok(width>=1500&&height>=800&&width>height,`萌犬豪華客機圖片規格錯誤：${width}x${height}`);
 });
 
+test('兩架 777-300ER 特殊塗裝客機已加入資產市場及航空營運',()=>{
+  const definitions={
+    boeing_777_300er_lucky_wings:{
+      name:'🍀 Boeing 777-300ER 幸運星翼',price:8880000,buff:'casino',buffMultiplier:'3',
+      image:'aircraft/passenger/boeing_777_300er_lucky_wings_special.png'
+    },
+    boeing_777_300er_myna_starlight:{
+      name:'🐦‍⬛ Boeing 777-300ER 八哥星羽',price:9280000,buff:'work',buffMultiplier:'3\\.1',
+      image:'aircraft/passenger/boeing_777_300er_myna_starlight_special.png'
+    }
+  };
+  const airliners=source.match(/const passengerAirlinerIds=new Set\(\[[\s\S]+?\n\]\);/)?.[0]||'';
+  for(const [assetId,expected] of Object.entries(definitions)) {
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(assetBlock,new RegExp(`name:'${expected.name}'`));
+    assert.match(assetBlock,/category:'飛行器'/);
+    assert.match(assetBlock,new RegExp(`price:${expected.price}`));
+    assert.match(assetBlock,/rarity:'限定'/);
+    assert.match(assetBlock,new RegExp(`buff:'${expected.buff}',buffMultiplier:${expected.buffMultiplier}`));
+    assert.match(assetBlock,/forSale:true/);
+    assert.match(assetBlock,new RegExp(`image:'${expected.image.replaceAll('/','\\/')}'`));
+    assert.match(airliners,new RegExp(`'${assetId}'`));
+    const image=readFileSync(new URL(`../assets/${expected.image}`,import.meta.url));
+    assert.equal(image.subarray(1,4).toString(),'PNG');
+    const width=image.readUInt32BE(16),height=image.readUInt32BE(20);
+    assert.ok(width>=1500&&height>=800&&width>height,`${expected.name} 圖片規格錯誤：${width}x${height}`);
+  }
+});
+
 test('航空航線基礎營收下修 25% 且不影響其他交通事業',()=>{
   const airlineBlock=source.match(/const airlineRoutes=\{[\s\S]+?\n\};/)?.[0]||'';
   const expectedRevenue={

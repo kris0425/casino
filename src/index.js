@@ -1721,7 +1721,9 @@ const assetCatalog={
   boeing_787_9_snow:{name:'🤍 Boeing 787-9 雪翼夢航',category:'飛行器',price:5200000,description:'全白雪翼塗裝搭配舒適長程客艙，能顯著提高每日體力上限。',image:'aircraft/passenger/three_airliners/boeing_787_9_snow_side.png',images:['aircraft/passenger/three_airliners/boeing_787_9_snow_side.png','aircraft/passenger/three_airliners/boeing_787_9_snow_top.png','aircraft/passenger/three_airliners/boeing_787_9_snow_front.png'],randomImage:true,rarity:'神話',buff:'stamina',buffMultiplier:2.3},
   airbus_a350_1000_snow:{name:'🪽 Airbus A350-1000 白羽旗艦',category:'飛行器',price:5900000,description:'純白塗裝的碳纖維廣體旗艦，以尊榮採購網絡降低商城消費成本。',image:'aircraft/passenger/three_airliners/airbus_a350_1000_snow_side.png',images:['aircraft/passenger/three_airliners/airbus_a350_1000_snow_side.png','aircraft/passenger/three_airliners/airbus_a350_1000_snow_top.png','aircraft/passenger/three_airliners/airbus_a350_1000_snow_front.png'],randomImage:true,rarity:'限定',buff:'discount',buffMultiplier:2.4},
   embraer_e195_e2_snow:{name:'☁️ Embraer E195-E2 白雲快線',category:'飛行器',price:1950000,description:'純白新世代支線客機，以快速周轉航班提供可靠的工作收益。',image:'aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png',images:['aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_top.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_front.png'],randomImage:true,rarity:'史詩',buff:'work',buffMultiplier:1.5},
-  puppy_luxury_airliner:{name:'🐶 萌犬豪華客機',category:'飛行器',price:7880000,description:'粉金珍珠塗裝、萌犬主題套房與雲端甜點吧組成的夢幻廣體客機；限定級舒適客艙可大幅提升每日體力，並以頂級機隊價值提高航空公司航線營收。',image:'aircraft/passenger/puppy_luxury_airliner.png',rarity:'限定',buff:'stamina',buffMultiplier:2.8}
+  puppy_luxury_airliner:{name:'🐶 萌犬豪華客機',category:'飛行器',price:7880000,description:'粉金珍珠塗裝、萌犬主題套房與雲端甜點吧組成的夢幻廣體客機；限定級舒適客艙可大幅提升每日體力，並以頂級機隊價值提高航空公司航線營收。',image:'aircraft/passenger/puppy_luxury_airliner.png',rarity:'限定',buff:'stamina',buffMultiplier:2.8},
+  boeing_777_300er_lucky_wings:{name:'🍀 Boeing 777-300ER 幸運星翼',category:'飛行器',price:8880000,description:'深藍星空、金色幸運紋章與八哥彩繪交織而成的特殊塗裝旗艦；華麗機艙能提升賭場派彩運勢，也可投入航空公司的長程航線。',image:'aircraft/passenger/boeing_777_300er_lucky_wings_special.png',rarity:'限定',buff:'casino',buffMultiplier:3,forSale:true},
+  boeing_777_300er_myna_starlight:{name:'🐦‍⬛ Boeing 777-300ER 八哥星羽',category:'飛行器',price:9280000,description:'以黑灰羽翼、橘金鳥喙與星光金線打造的原創特殊塗裝；頂級遠程客艙可拓展全球商務收益，也可投入航空公司的長程航線。',image:'aircraft/passenger/boeing_777_300er_myna_starlight_special.png',rarity:'限定',buff:'work',buffMultiplier:3.1,forSale:true}
 };
 const shotgunSeries=[
   {key:'classic_pump',name:'經典泵動霰彈槍',price:65000,robber:3,police:3,image:'01-classic-pump.png'},
@@ -1936,7 +1938,8 @@ const passengerAirlinerIds=new Set([
   'boeing_747_400','airbus_a380_800','boeing_777_300er','airbus_a350_1000','boeing_787_9_dreamliner',
   'airbus_a321neo','boeing_737_max_8','airbus_a320neo','embraer_e190_e2','bombardier_crj900',
   'boeing_787_9_midnight','airbus_a350_1000_midnight','embraer_e195_e2_midnight',
-  'boeing_787_9_snow','airbus_a350_1000_snow','embraer_e195_e2_snow','puppy_luxury_airliner'
+  'boeing_787_9_snow','airbus_a350_1000_snow','embraer_e195_e2_snow','puppy_luxury_airliner',
+  'boeing_777_300er_lucky_wings','boeing_777_300er_myna_starlight'
 ]);
 const airlineRoutes={
   regional:{name:'🏝️ 港澳台區域快線',description:'高頻短程航班，適合剛成立的航空公司。',durationMs:10*60*1000,baseRevenue:63750,operatingCost:25000,stamina:10,minTier:1},
