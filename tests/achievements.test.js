@@ -920,6 +920,26 @@ test('火車站配給基礎列車並支援最多 20 格車庫',()=>{
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ledger').get().count,1);
 });
 
+test('陸路交通事業可選擇事業載具並保存到營運紀錄',()=>{
+  assert.match(source,/vehicle_id TEXT/);
+  assert.match(source,/ALTER TABLE transport_business_companies ADD COLUMN vehicle_id TEXT/);
+  assert.match(source,/ALTER TABLE transport_business_operations ADD COLUMN vehicle_id TEXT/);
+  assert.match(source,/function transportBusinessVehicleOptions\(g,u,businessType\)/);
+  assert.match(source,/function selectedTransportBusinessVehicle\(g,u,businessType,company\)/);
+  assert.match(source,/TRANSPORT_COACH_DEFAULT_VEHICLE_ID='coach_basic_fleet'/);
+  assert.match(source,/TRANSPORT_FREIGHT_DEFAULT_VEHICLE_ID='freight_basic_fleet'/);
+  assert.match(source,/setCustomId\(`transport_vehicle:\$\{u\}:\$\{businessType\}`\)/);
+  assert.match(source,/const columns=\{transport_station:'station_id',transport_vehicle:'vehicle_id',transport_route:'route_id'\}/);
+  assert.match(source,/UPDATE transport_business_companies SET vehicle_id=\?/);
+  assert.match(source,/INSERT INTO transport_business_operations\(guild_id,user_id,business_type,station_id,route_id,vehicle_id,train_id,truck_id/);
+  assert.match(source,/assetCatalog\[operation\.vehicle_id\]/);
+  assert.match(source,/事業載具：/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-04-transport-vehicle-selection.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-04-transport-vehicle-selection');
+  assert.match(update.summary,/事業載具/);
+  assert.match(update.changes.join('\n'),/列車.*卡車.*客運/s);
+});
+
 test('搶劫備援與貨運站圖片修復公告完整',()=>{
   const update=JSON.parse(readFileSync(new URL('../updates/2026-07-31-heist-fallback-freight-image.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-07-31-heist-fallback-freight-image');
