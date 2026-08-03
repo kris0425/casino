@@ -9834,6 +9834,7 @@ async function appearancePayload(session) {
     })),
     equipped:{characterId:equipped.character.id,styleId:equipped.style.id},
     backgroundImage:background?.image?`/appearance/backgrounds/${background.image}`:null,
+    homeUrl:gameActivityUrl(g,u,session.channelId),
     expiresAt:session.exp
   };
 }

@@ -97,11 +97,14 @@ test('角色造型系統使用完整圖片並提供管理員上傳後台',()=>{
   assert.match(source,/\/activity\/appearance-admin\/upload/);
   assert.match(source,/\/activity\/appearance-admin\/active/);
   assert.match(source,/舊版分層換裝系統已取消/);
-  for(const id of ['characterTabs','styleGrid','characterImage','equip']) assert.match(html,new RegExp(`id="${id}"`));
+  for(const id of ['backButton','homeButton','characterTabs','styleGrid','characterImage','equip']) assert.match(html,new RegExp(`id="${id}"`));
   for(const id of ['characterSelect','styleName','styleFile','uploadButton','styleGrid']) assert.match(adminHtml,new RegExp(`id="${id}"`));
   assert.doesNotMatch(html,/previewOutfit|previewHeadwear|removeSlot|preset/);
   assert.match(css,/\.style-card/);
   assert.match(js,/\/api\/appearance\/select/);
+  assert.match(source,/homeUrl:gameActivityUrl\(g,u,session\.channelId\)/);
+  assert.match(js,/history\.length>1\)history\.back\(\)/);
+  assert.match(js,/location\.assign\(state\.data\.homeUrl\)/);
   assert.match(adminJs,/\/api\/appearance-admin\/upload/);
   assert.match(adminJs,/\/api\/appearance-admin\/active/);
 });
@@ -258,6 +261,14 @@ test('舊服裝資料清除公告完整',()=>{
   assert.equal(update.version,'2026.08.03.4');
   assert.deepEqual(update.channelNames,['賭場公告']);
   for(const required of ['舊服裝購買','穿戴','快速預設','角色本體','完整造型']) assert.match(text,new RegExp(required));
+});
+
+test('角色造型頁返回與首頁導覽公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-03-character-style-navigation.json',import.meta.url),'utf8'));
+  const text=[update.title,update.summary,...update.changes].join('\n');
+  assert.equal(update.version,'2026.08.03.5');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  for(const required of ['返回上一頁','遊戲首頁','安全連結','手機']) assert.match(text,new RegExp(required));
 });
 
 test('網頁遊戲第一版更新公告完整',()=>{
