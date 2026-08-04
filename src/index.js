@@ -3072,6 +3072,13 @@ function updateTransportBusinessSelection(g,u,businessType,column,value) {
       .run(value,currentRoute?.type===businessType?company.route_id:null,g,u,businessType);
     return;
   }
+  if(column==='vehicle_id') {
+    const vehicle=transportBusinessVehicleOptions(g,u,businessType).find(option=>option.id===value);
+    if(!vehicle) throw new Error('你沒有可用的事業載具');
+    db.prepare('UPDATE transport_business_companies SET vehicle_id=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=? AND business_type=?')
+      .run(value,g,u,businessType);
+    return;
+  }
   if(column==='route_id') {
     const route=transportRoutes[value],station=assetCatalog[company.station_id];
     if(!station||station.transportType!==businessType||assetQuantity(g,u,company.station_id)<1) throw new Error(`請先選擇自己持有的${transportBusinessTypes[businessType].stationLabel}`);
