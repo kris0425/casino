@@ -930,7 +930,10 @@ test('陸路交通事業可選擇事業載具並保存到營運紀錄',()=>{
   assert.match(source,/TRANSPORT_FREIGHT_DEFAULT_VEHICLE_ID='freight_basic_fleet'/);
   assert.match(source,/setCustomId\(`transport_vehicle:\$\{u\}:\$\{businessType\}`\)/);
   assert.match(source,/const columns=\{transport_station:'station_id',transport_vehicle:'vehicle_id',transport_route:'route_id'\}/);
-  assert.match(source,/UPDATE transport_business_companies SET vehicle_id=\?/);
+  const vehicleSelectionBlock=source.match(/function updateTransportBusinessSelection\([\s\S]+?\n\}/)?.[0]||'';
+  assert.match(vehicleSelectionBlock,/if\(column==='vehicle_id'\)/);
+  assert.match(vehicleSelectionBlock,/transportBusinessVehicleOptions\(g,u,businessType\)/);
+  assert.match(vehicleSelectionBlock,/UPDATE transport_business_companies SET vehicle_id=\?/);
   assert.match(source,/INSERT INTO transport_business_operations\(guild_id,user_id,business_type,station_id,route_id,vehicle_id,train_id,truck_id/);
   assert.match(source,/assetCatalog\[operation\.vehicle_id\]/);
   assert.match(source,/事業載具：/);
