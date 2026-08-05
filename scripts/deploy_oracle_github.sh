@@ -51,8 +51,16 @@ echo "ORACLE_BASE_COMMIT_ANCESTOR"
 
 declare -A COPY_SET=()
 declare -A DELETE_SET=()
-add_copy() { is_deploy_path "$1" && COPY_SET["$1"]=1; }
-add_delete() { is_deploy_path "$1" && DELETE_SET["$1"]=1; }
+add_copy() {
+  if is_deploy_path "$1"; then
+    COPY_SET["$1"]=1
+  fi
+}
+add_delete() {
+  if is_deploy_path "$1"; then
+    DELETE_SET["$1"]=1
+  fi
+}
 
 while IFS= read -r path; do [[ -n "$path" ]] && add_copy "$path"; done < <(git diff --name-only --diff-filter=ACMRT "$BASE_COMMIT..$HEAD_COMMIT")
 while IFS= read -r path; do [[ -n "$path" ]] && add_delete "$path"; done < <(git diff --name-only --diff-filter=D "$BASE_COMMIT..$HEAD_COMMIT")
