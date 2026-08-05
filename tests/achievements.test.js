@@ -663,6 +663,20 @@ test('限時拍賣輪替池包含 20 款限量競標載具',()=>{
   assert.match(update.changes.join('\n'),/汽車.*卡車.*機車/s);
 });
 
+test('GitHub Actions 可用 Secrets 自動增量部署 Oracle',()=>{
+  const workflow=readFileSync(new URL('../.github/workflows/deploy-oracle.yml',import.meta.url),'utf8');
+  const deployScript=readFileSync(new URL('../scripts/deploy_oracle_github.sh',import.meta.url),'utf8');
+  assert.match(workflow,/branches: \[main\]/);
+  assert.match(workflow,/npm test/);
+  for(const secret of ['ORACLE_HOST','ORACLE_SSH_KEY','ORACLE_KNOWN_HOSTS']) assert.match(workflow,new RegExp(`secrets\\.${secret}`));
+  assert.match(workflow,/scripts\/deploy_oracle_github\.sh/);
+  assert.match(deployScript,/ORACLE_SSH_KEY/);
+  assert.match(deployScript,/StrictHostKeyChecking=yes/);
+  assert.match(deployScript,/git diff --name-only/);
+  assert.match(deployScript,/deploy_oracle_remote\.sh/);
+  assert.doesNotMatch(deployScript,/BEGIN (?:RSA|OPENSSH) PRIVATE KEY/);
+});
+
 test('賭場強化保全與限時拍賣每六小時提醒',()=>{
   assert.match(source,/const CASINO_VAULT_LOOT_RATE=0\.50/);
   assert.match(source,/const CASINO_VAULT_MAX_SUCCESS_RATE=25/);

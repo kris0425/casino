@@ -1,0 +1,53 @@
+name: Deploy Discord Casino to Oracle
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      update_file:
+        description: '要發布的 updates/*.json；留空會自動選本次提交的更新公告'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord-casino-production
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    name: Test and deploy Oracle
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run syntax and regression tests
+        run: |
+          node --check src/index.js
+          npm test
+
+      - name: Deploy incrementally to Oracle
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          ORACLE_KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+          ORACLE_PROJECT: /home/ubuntu/discord-casino-bot
+          UPDATE_FILE: ${{ inputs.update_file }}
+        run: bash scripts/deploy_oracle_github.sh
