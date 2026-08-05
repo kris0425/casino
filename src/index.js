@@ -1131,63 +1131,6 @@ function playerAppearance(g,u) {
   }
   return appearance;
 }
-function validateAppearance(g,u,input) {
-  if(!input||typeof input!=='object'||Array.isArray(input)) throw new Error('造型資料格式錯誤');
-  const appearance={};
-  for(const slot of COSMETIC_SLOTS) {
-    const cosmeticId=input[slot]==null||input[slot]===''?null:String(input[slot]);
-    if(cosmeticId) {
-      const item=cosmeticById[cosmeticId];
-      if(!item||item.slot!==slot) throw new Error(`${COSMETIC_SLOT_LABELS[slot]}商品資料錯誤`);
-      if(!ownsCosmetic(g,u,cosmeticId)) throw new Error(`尚未擁有「${item.name}」`);
-    }
-    appearance[slot]=cosmeticId;
-  }
-  return appearance;
-}
-function savePlayerAppearance(g,u,input) {
-  const appearance=validateAppearance(g,u,input);
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const save=db.prepare(`INSERT INTO player_appearance(guild_id,user_id,slot,cosmetic_id)
-      VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id,slot) DO UPDATE SET cosmetic_id=excluded.cosmetic_id,updated_at=CURRENT_TIMESTAMP`);
-    for(const slot of COSMETIC_SLOTS) save.run(g,u,slot,appearance[slot]||'');
-    db.exec('COMMIT');
-    return appearance;
-  } catch(error) { db.exec('ROLLBACK');throw error; }
-}
-function purchaseCosmetic(g,u,cosmeticId) {
-  const item=cosmeticById[cosmeticId];
-  if(!item) throw new Error('找不到這件造型商品');
-  if(item.starter) throw new Error('這是免費基本造型，不需要購買');
-  if(ownsCosmetic(g,u,cosmeticId)) throw new Error('你已經擁有這件造型');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const next=changeBalanceUnlocked(g,u,-item.price,'cosmetic_purchase',u,`個人造型：${item.name}`);
-    db.prepare('INSERT INTO player_cosmetics(guild_id,user_id,cosmetic_id) VALUES(?,?,?)').run(g,u,cosmeticId);
-    db.exec('COMMIT');
-    return {item,balance:next};
-  } catch(error) { db.exec('ROLLBACK');throw error; }
-}
-function appearancePresets(g,u) {
-  return db.prepare('SELECT preset_no,name,appearance_json,updated_at FROM appearance_presets WHERE guild_id=? AND user_id=? ORDER BY preset_no').all(g,u).map(row=>{
-    let appearance=null;
-    try { appearance={...defaultAppearance,...JSON.parse(row.appearance_json)}; } catch {}
-    return {presetNo:row.preset_no,name:row.name,appearance,updatedAt:row.updated_at};
-  });
-}
-function saveAppearancePreset(g,u,presetNo,name,input) {
-  const number=Number(presetNo),trimmed=String(name||`預設 ${number}`).trim().slice(0,20);
-  if(!Number.isInteger(number)||number<1||number>3) throw new Error('預設編號必須是 1～3');
-  const appearance=validateAppearance(g,u,input);
-  db.prepare(`INSERT INTO appearance_presets(guild_id,user_id,preset_no,name,appearance_json)
-    VALUES(?,?,?,?,?) ON CONFLICT(guild_id,user_id,preset_no) DO UPDATE SET name=excluded.name,appearance_json=excluded.appearance_json,updated_at=CURRENT_TIMESTAMP`)
-    .run(g,u,number,trimmed||`預設 ${number}`,JSON.stringify(appearance));
-  return {presetNo:number,name:trimmed||`預設 ${number}`,appearance};
-}
-function appearanceNames(appearance) {
-  return COSMETIC_SLOTS.map(slot=>cosmeticById[appearance?.[slot]]?.name).filter(Boolean);
-}
 function appearanceSummary(g,u) {
   const equipped=equippedCharacterStyle(g,u);
   return equipped?`${equipped.character.name}・${equipped.style.name}`:'尚未設定';
@@ -1856,7 +1799,6 @@ const blindBoxHiddenIds=Object.keys(blindBoxHiddenRates);
 const blindBoxAllIds=[...blindBoxRegularIds,...blindBoxHiddenIds];
 const fordBlindBoxRates={ford_focus:18,ford_explorer:14,ford_f150_raptor:14,ford_focus_rs:13,ford_mustang_gt:12,ford_shelby_gt500:10,ford_gt_2017:7,ford_gt_heritage:6,ford_fiesta_rally:5,ford_mustang_1964_hidden:1};
 const fordBlindBoxIds=Object.keys(fordBlindBoxRates);
-const fordBlindBoxPublicIds=fordBlindBoxIds.filter(assetId=>!assetCatalog[assetId]?.hiddenInPack);
 const fordBlindBoxHiddenIds=fordBlindBoxIds.filter(assetId=>assetCatalog[assetId]?.hiddenInPack);
 const cityBlindBoxRates={blind_mirage:25,blind_yaris:23,blind_corolla_city:22,blind_mazda3:18,blind_accord:10,blind_galant:2};
 const streetBlindBoxRates={blind_silvia_s13:25,blind_galant:20,blind_rx7_fc:18,blind_s2000:15,blind_240z:12,blind_rx7_fd:8,blind_corolla:2};
@@ -2096,9 +2038,6 @@ function ensureStarterTrain(g,u) {
 }
 function ownedBlindBoxTrainRows(g,u) {
   return assetsOf(g,u).filter(row=>trainBlindBoxIds.includes(row.asset_id));
-}
-function ownedBlindBoxTrainCount(g,u) {
-  return ownedBlindBoxTrainRows(g,u).reduce((total,row)=>total+Math.max(0,Number(row.quantity)||0),0);
 }
 function ownedGarageTrainRows(g,u) {
   return assetsOf(g,u).filter(row=>trainAssetIds.includes(row.asset_id)&&row.asset_id!==TRAIN_STARTER_ASSET_ID);
@@ -2740,33 +2679,11 @@ async function notifyCompletedAirlineFlights() {
     airlineCompletionNotificationRunning=false;
   }
 }
-function transportCompany(g,u) {
-  return db.prepare('SELECT * FROM transport_companies WHERE guild_id=? AND user_id=?').get(g,u)||null;
-}
-function transportOperation(g,u) {
-  return db.prepare('SELECT * FROM transport_operations WHERE guild_id=? AND user_id=?').get(g,u)||null;
-}
 function ownedTransportStations(g,u) {
   return transportStationIds.filter(id=>assetQuantity(g,u,id)>0);
 }
 function normalizeTransportCompanyName(value) {
   return String(value||'').trim().replace(/\s+/g,' ').replace(/@/g,'＠');
-}
-function registerTransportCompany(g,u,name) {
-  name=normalizeTransportCompanyName(name);
-  if(name.length<2||name.length>30) throw new Error('公司行號名稱必須是 2～30 個字');
-  if(!ownedTransportStations(g,u).length) throw new Error('請先到資產商城購買火車站、客運站或貨運站');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    if(transportCompany(g,u)) throw new Error('你已經註冊過交通公司行號');
-    changeBalanceUnlocked(g,u,-TRANSPORT_REGISTRATION_FEE,'transport_registration',u,`註冊交通公司行號：${name}`);
-    db.prepare('INSERT INTO transport_companies(guild_id,user_id,company_name) VALUES(?,?,?)').run(g,u,name);
-    db.exec('COMMIT');
-  } catch(error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-  return transportCompany(g,u);
 }
 function transportSelectionName(id,fallback='尚未選擇') {
   return assetCatalog[id]?.name||transportRoutes[id]?.name||fallback;
@@ -2793,159 +2710,6 @@ function transportHubComponents(g,u) {
     new ButtonBuilder().setCustomId(`transport_hub_ground:${u}`).setLabel('火車・客運・貨運').setEmoji('🚉').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`transport_hub_train_box:${u}`).setLabel('列車車庫・盲盒').setEmoji('🚆').setStyle(ButtonStyle.Secondary)
   )];
-}
-function transportDashboardEmbed(g,u,notice='') {
-  const stations=ownedTransportStations(g,u),company=transportCompany(g,u),operation=transportOperation(g,u);
-  if(!stations.length) {
-    return new EmbedBuilder()
-      .setColor(0x607D8B)
-      .setTitle('🚉 交通事業經營中心')
-      .setDescription(`${notice?`${notice}\n\n`:''}你目前沒有可營運的車站資產。\n\n請到 \`/資產商城 分類:房地產\` 購買：\n${transportStationIds.map(id=>`• ${assetCatalog[id].name}｜**${fmt(assetCatalog[id].price)}**｜營收 ×${assetCatalog[id].transportMultiplier}`).join('\n')}\n\n購買任一車站後，需支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}** 手續費註冊公司行號，才能開始營運。`);
-  }
-  if(!company) {
-    return new EmbedBuilder()
-      .setColor(0x1565C0)
-      .setTitle('🚉 交通事業經營中心')
-      .setDescription(`${notice?`${notice}\n\n`:''}你已擁有 **${stations.length} 座交通場站**，下一步是註冊公司行號。\n\n註冊手續費：**${fmt(TRANSPORT_REGISTRATION_FEE)}**\n完成註冊後，可選擇自己的火車站、客運站或貨運站及相符路線開始營運。\n\n目前金庫：**${fmt(balance(g,u))}**`);
-  }
-  const station=assetCatalog[company.station_id],route=transportRoutes[company.route_id];
-  const type=transportBusinessTypes[station?.transportType];
-  const operationText=operation
-    ? Date.now()>=operation.completes_at
-      ? `✅ **${transportBusinessTypes[transportRoutes[operation.route_id]?.type]?.operationLabel||'營運任務'}已完成，可以領取營收**\n${transportSelectionName(operation.route_id)}｜可領營收 **${fmt(operation.gross_revenue)}**`
-      : `${transportBusinessTypes[transportRoutes[operation.route_id]?.type]?.emoji||'🚉'} **${transportBusinessTypes[transportRoutes[operation.route_id]?.type]?.operationLabel||'營運任務'}進行中**\n${transportSelectionName(operation.route_id)}｜<t:${Math.floor(operation.completes_at/1000)}:R> 完成\n預計營收：**${fmt(operation.gross_revenue)}**`
-    : '目前沒有進行中的交通營運任務。';
-  const activeTrain=route?.type==='rail'?bestOwnedTrain(g,u):null,activeTrainAsset=activeTrain&&assetCatalog[activeTrain.asset_id];
-  const trainMultiplier=activeTrainAsset?1+activeTrainAsset.trainRevenueBonus:1;
-  const routeEstimate=station&&route&&station.transportType===route.type
-    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier))}**（另有市場需求浮動）${route.type==='rail'?`\n套用列車：${activeTrainAsset?`${activeTrainAsset.name}｜營收 **+${Math.round(activeTrainAsset.trainRevenueBonus*100)}%**`:'未持有列車｜無額外加成'}`:''}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
-    : '';
-  return new EmbedBuilder()
-    .setColor(operation&&Date.now()>=operation.completes_at?0x35C46A:(type?.color||0x455A64))
-    .setTitle(`${type?.emoji||'🚉'} ${company.company_name}`)
-    .setDescription(`${notice?`${notice}\n\n`:''}**營運配置**\n公司行號：**${company.company_name}**\n事業類別：**${type?.name||'尚未選擇'}**\n營運場站：${transportSelectionName(company.station_id)}\n營運路線：${transportSelectionName(company.route_id)}\n\n**營運狀態**\n${operationText}${routeEstimate}\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
-}
-function transportDashboardComponents(g,u) {
-  const stations=ownedTransportStations(g,u),company=transportCompany(g,u);
-  const homeButton=()=>new ButtonBuilder().setCustomId(`transport_hub_home:${u}`).setLabel('交通事業首頁').setEmoji('🧭').setStyle(ButtonStyle.Secondary);
-  if(!stations.length) return [new ActionRowBuilder().addComponents(homeButton())];
-  if(!company) {
-    return [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`transport_register:${u}`).setLabel(`註冊公司行號｜${fmt(TRANSPORT_REGISTRATION_FEE)}`).setEmoji('🏢').setStyle(ButtonStyle.Success),
-      homeButton()
-    )];
-  }
-  const rows=[],operation=transportOperation(g,u),station=assetCatalog[company.station_id];
-  rows.push(new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId(`transport_station:${u}`)
-      .setPlaceholder('選擇營運場站')
-      .setDisabled(!!operation)
-      .addOptions(stations.map(id=>{
-        const asset=assetCatalog[id],type=transportBusinessTypes[asset.transportType];
-        return {
-          label:asset.name.slice(0,100),
-          value:id,
-          description:`${type.name}｜營收 ×${asset.transportMultiplier}`,
-          default:company.station_id===id
-        };
-      }))
-  ));
-  const routeEntries=Object.entries(transportRoutes).filter(([,route])=>!station||route.type===station.transportType);
-  rows.push(new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId(`transport_route:${u}`)
-      .setPlaceholder(station?`選擇${transportBusinessTypes[station.transportType].name}路線`:'先選擇場站，再選擇營運路線')
-      .setDisabled(!!operation)
-      .addOptions(routeEntries.map(([id,route])=>({
-        label:route.name.slice(0,100),
-        value:id,
-        description:`${airlineDurationLabel(route.durationMs)}｜成本 ${fmt(route.operatingCost)}｜體力 ${route.stamina}`,
-        default:company.route_id===id
-      })))
-  ));
-  const ready=operation&&Date.now()>=operation.completes_at;
-  const validConfiguration=station&&stations.includes(company.station_id)&&transportRoutes[company.route_id]?.type===station.transportType;
-  const actionButtons=[operation
-    ? new ButtonBuilder().setCustomId(ready?`transport_claim:${u}`:`transport_refresh:${u}`).setLabel(ready?'領取交通事業營收':'重新整理營運狀態').setEmoji(ready?'💰':'🔄').setStyle(ready?ButtonStyle.Success:ButtonStyle.Secondary)
-    : new ButtonBuilder().setCustomId(`transport_start:${u}`).setLabel('確認配置並開始營運').setEmoji('🚦').setStyle(ButtonStyle.Primary).setDisabled(!validConfiguration)];
-  if(!operation||ready) actionButtons.push(new ButtonBuilder().setCustomId(`transport_refresh:${u}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary));
-  actionButtons.push(homeButton());
-  rows.push(new ActionRowBuilder().addComponents(actionButtons));
-  return rows;
-}
-function updateTransportSelection(g,u,column,value) {
-  const company=transportCompany(g,u);
-  if(!company) throw new Error('請先註冊交通公司行號');
-  if(transportOperation(g,u)) throw new Error('營運進行中，完成並領取營收後才能變更配置');
-  if(column==='station_id') {
-    if(!transportStationIds.includes(value)||assetQuantity(g,u,value)<1) throw new Error('你沒有這座交通場站');
-    const currentRoute=transportRoutes[company.route_id];
-    const nextRouteId=currentRoute?.type===assetCatalog[value].transportType?company.route_id:null;
-    db.prepare('UPDATE transport_companies SET station_id=?,route_id=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?')
-      .run(value,nextRouteId,g,u);
-    return;
-  }
-  if(column==='vehicle_id') {
-    const vehicle=transportBusinessVehicleOptions(g,u,businessType).find(option=>option.id===value);
-    if(!vehicle) throw new Error('你沒有可用的事業載具');
-    db.prepare('UPDATE transport_business_companies SET vehicle_id=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=? AND business_type=?')
-      .run(value,g,u,businessType);
-    return;
-  }
-  if(column==='route_id') {
-    const route=transportRoutes[value],station=assetCatalog[company.station_id];
-    if(!station||!transportStationIds.includes(company.station_id)||assetQuantity(g,u,company.station_id)<1) throw new Error('請先選擇自己持有的交通場站');
-    if(!route||route.type!==station.transportType) throw new Error('這條路線與目前選擇的場站類型不符');
-    db.prepare('UPDATE transport_companies SET route_id=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(value,g,u);
-    return;
-  }
-  throw new Error('無效的交通事業營運選項');
-}
-function startTransportOperation(g,u) {
-  const company=transportCompany(g,u);
-  if(!company) throw new Error('請先註冊交通公司行號');
-  if(transportOperation(g,u)) throw new Error('目前已有交通營運任務進行中');
-  const station=assetCatalog[company.station_id],route=transportRoutes[company.route_id];
-  if(!station||!transportStationIds.includes(company.station_id)||assetQuantity(g,u,company.station_id)<1) throw new Error('請先選擇自己持有的交通場站');
-  if(!route) throw new Error('請先選擇營運路線');
-  if(station.transportType!==route.type) throw new Error('這條路線與目前選擇的場站類型不符');
-  if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理交通事業');
-  const staminaUsed=staminaCost(g,u,route.stamina),currentStamina=stamina(g,u);
-  if(currentStamina<staminaUsed) throw new Error(`體力不足，需要 ${staminaUsed} 點`);
-  if(balance(g,u)<route.operatingCost) throw new Error(`營運資金不足，需要 ${fmt(route.operatingCost)}`);
-  const train=route.type==='rail'?bestOwnedTrain(g,u):null,trainAsset=train&&assetCatalog[train.asset_id];
-  const trainMultiplier=trainAsset?1+trainAsset.trainRevenueBonus:1;
-  const demandMultiplier=0.90+Math.random()*0.21;
-  const grossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*demandMultiplier);
-  const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    changeBalanceUnlocked(g,u,-route.operatingCost,'transport_operation',u,`${company.company_name}｜${route.name} 營運成本`);
-    db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(staminaUsed,g,u);
-    db.prepare('INSERT INTO transport_operations(guild_id,user_id,station_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?)')
-      .run(g,u,company.station_id,company.route_id,grossRevenue,route.operatingCost,startedAt,completesAt);
-    db.exec('COMMIT');
-  } catch(error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-  return {company,station,route,type:transportBusinessTypes[route.type],train:trainAsset,trainMultiplier,grossRevenue,staminaUsed,startedAt,completesAt};
-}
-function claimTransportRevenue(g,u) {
-  const company=transportCompany(g,u),operation=transportOperation(g,u);
-  if(!operation) throw new Error('目前沒有可結算的交通營運任務');
-  if(Date.now()<operation.completes_at) throw new Error('交通營運任務尚未完成，請稍後再領取營收');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const next=changeBalanceUnlocked(g,u,operation.gross_revenue,'transport_revenue',u,`${company?.company_name||'交通公司行號'}｜${transportSelectionName(operation.route_id)} 營運收入`);
-    db.prepare('DELETE FROM transport_operations WHERE guild_id=? AND user_id=?').run(g,u);
-    db.exec('COMMIT');
-    return {operation,next,profit:operation.gross_revenue-operation.operating_cost};
-  } catch(error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
 }
 function requireTransportBusinessType(businessType) {
   if(!transportBusinessTypes[businessType]) throw new Error('找不到這個交通事業類型');
@@ -4079,9 +3843,6 @@ function assetBonusRows(g,u) {
   const permanent=assetsOf(g,u).map(row=>({...row,buff_id:ensureAssetBuff(g,u,row.asset_id),temporary:false}));
   const rentals=activeRentalAssets(g,u).map(row=>({...row,buff_id:row.buff_id||assetCatalog[row.asset_id]?.buff||'stamina'}));
   return [...permanent,...rentals];
-}
-function assetBuffCount(g,u,buffId) {
-  return assetBonusRows(g,u).filter(row=>row.buff_id===buffId).reduce((total,row)=>total+assetBuffPower(row.asset_id),0);
 }
 const assetEffectTotal=(g,u,key)=>assetBonusRows(g,u).reduce((total,row)=>total+(assetBuffs[row.buff_id]?.[key]||0)*assetBuffPower(row.asset_id),0);
 const assetHeistBonus=(g,u)=>Math.max(-20,Math.min(20,assetEffectTotal(g,u,'heist')));
@@ -5556,11 +5317,6 @@ function resolveBet(i,g,u) {
   const bet=allIn?balance(g,u):entered;
   validBet(g,u,bet);
   return bet;
-}
-function addWagerOptions(command,description='自行輸入下注金額') {
-  return command
-    .addIntegerOption(o=>o.setName('下注').setDescription(`${description}（無上限）`).setMinValue(MIN_BET))
-    .addBooleanOption(o=>o.setName('歐印').setDescription('設為「是」會投入目前持有的全部金幣'));
 }
 const miniGameCatalog=[
   {id:'target_shooting',command:'打靶',label:'靶場打靶',emoji:'🎯',description:'先選擇自己的槍枝，再挑戰靶心',setup:'direct'},

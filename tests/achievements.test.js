@@ -959,7 +959,7 @@ test('列車盲盒整合交通事業並套用鐵路營收加成',()=>{
   assert.match(source,/CREATE TABLE IF NOT EXISTS train_blind_box_daily/);
   assert.match(source,/purchase_day===trainBlindBoxDay\(\)/);
   assert.match(source,/bestOwnedTrain\(g,u\)/);
-  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*demandMultiplier/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
   const commandStart=source.indexOf('const commands = ['),commandEnd=source.indexOf('].map(c=>c.toJSON());',commandStart);
   assert.doesNotMatch(source.slice(commandStart,commandEnd),/setName\('列車盲盒'\)/,'列車盲盒應整合在 /交通事業，不新增獨立指令');
 });
@@ -1363,4 +1363,20 @@ test('鐵路、客運與貨運各新增三條可運行路線',()=>{
   assert.equal(Object.values(routes).filter(route=>route.type==='coach').length,6,'客運路線數量不正確');
   assert.equal(Object.values(routes).filter(route=>route.type==='freight').length,6,'貨運路線數量不正確');
   assert.match(source,/Object\.entries\(transportRoutes\)\.filter\(\(\[,route\]\)=>route\.type===businessType\)/,'路線選單應自動包含新增路線');
+});
+
+test('移除未接線的舊版造型、交通與下注輔助碼',()=>{
+  const obsoleteHelpers=[
+    'validateAppearance','savePlayerAppearance','purchaseCosmetic','appearancePresets','saveAppearancePreset','appearanceNames',
+    'ownedBlindBoxTrainCount','transportCompany','transportOperation','registerTransportCompany',
+    'transportDashboardEmbed','transportDashboardComponents','updateTransportSelection','startTransportOperation',
+    'claimTransportRevenue','assetBuffCount','addWagerOptions'
+  ];
+  for(const helper of obsoleteHelpers) {
+    assert.doesNotMatch(source,new RegExp(`function ${helper}\\(`),`舊版未使用函式仍存在：${helper}`);
+  }
+  assert.doesNotMatch(source,/const fordBlindBoxPublicIds=/,'未使用的福特盲盒清單仍存在');
+  for(const activeHelper of ['playerAppearance','transportHubEmbed','registerTransportBusinessCompany','startTransportBusinessOperation']) {
+    assert.match(source,new RegExp(`function ${activeHelper}\\(`),`現行功能不應被誤刪：${activeHelper}`);
+  }
 });
