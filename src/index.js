@@ -3754,7 +3754,7 @@ async function processAssetAuctions() {
     const starts=db.prepare("SELECT * FROM asset_auctions WHERE status='active' AND announced_at IS NULL ORDER BY id").all();
     for(const auction of starts) {
       try {
-        const channel=await casinoAnnouncementChannel(auction.guild_id);
+        const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
         if(!channel) throw new Error('找不到賭場公告頻道');
         const asset=assetCatalog[auction.asset_id],embed=assetAuctionEmbed(auction.guild_id,null,auction,'🔥 **全新系統拍賣已開始！**');
         embed.setDescription(`${embed.data.description}\n\n使用 \`/購買資產\`，在分類選擇「限時資產拍賣」即可參加。`);
@@ -3769,7 +3769,7 @@ async function processAssetAuctions() {
       ORDER BY id`).all(now,now-ASSET_AUCTION_REMINDER_MS);
     for(const auction of reminders) {
       try {
-        const channel=await casinoAnnouncementChannel(auction.guild_id);
+        const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
         if(!channel) throw new Error('找不到賭場公告頻道');
         const asset=assetCatalog[auction.asset_id],embed=assetAuctionEmbed(auction.guild_id,null,auction,'⏰ **限時資產拍賣｜每 6 小時即時提醒**');
         embed.setDescription(`${embed.data.description}\n\n使用 \`/購買資產\`，在分類選擇「限時資產拍賣」即可立即出價。`);
@@ -3780,7 +3780,7 @@ async function processAssetAuctions() {
     const closed=db.prepare("SELECT * FROM asset_auctions WHERE status IN ('completed','expired') AND closed_announced_at IS NULL ORDER BY id").all();
     for(const auction of closed) {
       try {
-        const channel=await casinoAnnouncementChannel(auction.guild_id);
+        const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
         if(!channel) throw new Error('找不到賭場公告頻道');
         const asset=assetCatalog[auction.asset_id],won=auction.status==='completed'&&auction.winner_id;
         const embed=new EmbedBuilder().setColor(won?0xFFD700:0x607D8B).setTitle(won?'🏆 限時資產拍賣結標':'⌛ 限時資產拍賣流標')
@@ -4542,6 +4542,17 @@ async function casinoAnnouncementChannel(guildId) {
   const fetched=await guild.channels.fetch();
   matches=casinoAnnouncementTextChannels([...fetched.values()].filter(Boolean));
   return matches[0]||null;
+}
+async function casinoAuctionAnnouncementChannel(guildId) {
+  if(CASINO_ANNOUNCEMENT_CHANNEL_ID) {
+    const configured=await client.channels.fetch(CASINO_ANNOUNCEMENT_CHANNEL_ID).catch(()=>null);
+    if(configured
+      &&[ChannelType.GuildText,ChannelType.GuildAnnouncement].includes(configured.type)
+      &&typeof configured.send==='function'
+    ) return configured;
+    console.warn(`跨服拍賣公告頻道設定無效 channel=${CASINO_ANNOUNCEMENT_CHANNEL_ID}`);
+  }
+  return casinoAnnouncementChannel(guildId);
 }
 async function announceCasinoAllInEvent(eventId) {
   if(allInBroadcastsInFlight.has(eventId)) return false;

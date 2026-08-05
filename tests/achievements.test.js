@@ -724,6 +724,14 @@ test('企業升級與限時拍賣公告完整',()=>{
   assert.deepEqual(update.channelNames,['賭場公告']);
 });
 
+test('限時資產拍賣可指定跨伺服器公告頻道',()=>{
+  const scheduler=source.match(/async function processAssetAuctions\(\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(source,/async function casinoAuctionAnnouncementChannel\(guildId\)/);
+  assert.match(source,/跨服拍賣公告頻道設定無效/);
+  assert.match(scheduler,/casinoAuctionAnnouncementChannel\(auction\.guild_id\)/);
+  assert.doesNotMatch(scheduler,/casinoAnnouncementChannel\(auction\.guild_id\)/);
+});
+
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
   const block=source.match(/async function publishLatestHeistResult\(interaction,payload\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少搶劫最終結果發布函式');
