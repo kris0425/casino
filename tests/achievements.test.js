@@ -371,6 +371,8 @@ test('完成歐印時排入賭場公告自動播報',()=>{
   assert.match(source,/allIn\?recordCasinoAllIn\(g,u,game,bet\):null/);
   assert.match(source,/CREATE TABLE IF NOT EXISTS casino_all_in_events/);
   assert.match(source,/CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD='賭場公告'/);
+  assert.match(source,/CASINO_ANNOUNCEMENT_CHANNEL_ID=String\(process\.env\.CASINO_ANNOUNCEMENT_CHANNEL_ID\|\|''\)\.trim\(\)/);
+  assert.match(source,/client\.channels\.fetch\(CASINO_ANNOUNCEMENT_CHANNEL_ID\)/);
   assert.doesNotMatch(source,/FREE_LOBBY_CHANNEL_KEYWORD|自由大廳自動播報/);
   assert.match(source,/setInterval\(\(\)=>notifyPendingCasinoAllIns\(\)\.catch/);
   assert.match(source,/allowedMentions:\{parse:\[\]\}/);

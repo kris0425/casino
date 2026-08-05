@@ -4508,6 +4508,7 @@ function playerTitle(g,u) {
 const ALL_IN_HERO_TARGET=50;
 const allInTitleNotificationsInFlight=new Set();
 const CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD='賭場公告';
+const CASINO_ANNOUNCEMENT_CHANNEL_ID=String(process.env.CASINO_ANNOUNCEMENT_CHANNEL_ID||'').trim();
 const allInBroadcastsInFlight=new Set();
 function casinoAllInCount(g,u) {
   return db.prepare('SELECT all_in_count FROM casino_all_in_stats WHERE guild_id=? AND user_id=?').get(g,u)?.all_in_count||0;
@@ -4527,6 +4528,15 @@ function casinoAnnouncementTextChannels(channels) {
 }
 async function casinoAnnouncementChannel(guildId) {
   const guild=client.guilds.cache.get(guildId)||await client.guilds.fetch(guildId);
+  if(CASINO_ANNOUNCEMENT_CHANNEL_ID) {
+    const configured=await client.channels.fetch(CASINO_ANNOUNCEMENT_CHANNEL_ID).catch(()=>null);
+    if(configured
+      &&configured.guildId===guild.id
+      &&[ChannelType.GuildText,ChannelType.GuildAnnouncement].includes(configured.type)
+      &&typeof configured.send==='function'
+    ) return configured;
+    console.warn(`賭場公告頻道設定無效 guild=${guild.id} channel=${CASINO_ANNOUNCEMENT_CHANNEL_ID}`);
+  }
   let matches=casinoAnnouncementTextChannels(guild.channels.cache.values());
   if(matches.length) return matches[0];
   const fetched=await guild.channels.fetch();
