@@ -5666,14 +5666,28 @@ function targetShootingWeaponEntries(g,u) {
 function targetShootingAccuracy(weapon) {
   return Math.min(93,42+Math.max(1,Number(weapon?.precision)||1)*5);
 }
-function targetShootingResult(accuracy,random=Math.random) {
+const targetShootingProfiles=[
+  {name:'慢速靶',emoji:'🟢',accuracyBonus:10,rewardMultiplier:0.75},
+  {name:'標準靶',emoji:'🟡',accuracyBonus:0,rewardMultiplier:1},
+  {name:'快速靶',emoji:'🔴',accuracyBonus:-10,rewardMultiplier:1.25}
+];
+function targetShootingTargets(random=Math.random) {
+  const targets=[...targetShootingProfiles];
+  for(let index=targets.length-1;index>0;index--) {
+    const swap=Math.floor(Math.min(0.9999999999999999,Math.max(0,Number(random())||0))*(index+1));
+    [targets[index],targets[swap]]=[targets[swap],targets[index]];
+  }
+  return targets.map((target,index)=>({...target,index}));
+}
+function targetShootingResult(accuracy,random=Math.random,rewardMultiplier=1) {
   const normalized=Math.min(0.9999999999999999,Math.max(0,Number(random())||0)),hitChance=Math.min(0.93,Math.max(0.01,Number(accuracy)||0)/100);
   if(normalized>=hitChance) return {hit:false,ring:'脫靶',score:0,reward:0};
   const precision=normalized/hitChance;
-  if(precision<0.12) return {hit:true,ring:'紅心靶',score:10,reward:6000};
-  if(precision<0.32) return {hit:true,ring:'內圈',score:8,reward:4200};
-  if(precision<0.62) return {hit:true,ring:'中圈',score:5,reward:2600};
-  return {hit:true,ring:'外圈',score:3,reward:1500};
+  const payout=(ring,score,baseReward)=>({hit:true,ring,score,reward:Math.floor(baseReward*Math.max(0,Number(rewardMultiplier)||0))});
+  if(precision<0.12) return payout('紅心靶',10,1600);
+  if(precision<0.32) return payout('內圈',8,1100);
+  if(precision<0.62) return payout('中圈',5,700);
+  return payout('外圈',3,400);
 }
 function targetShootingCooldownRemaining(g,u,now=Date.now()) {
   const last=db.prepare('SELECT last_played_at FROM target_shooting_records WHERE guild_id=? AND user_id=?').get(g,u)?.last_played_at||0;
@@ -5685,7 +5699,7 @@ function targetShootingCooldownText(milliseconds) {
 }
 function createTargetShootingSession(g,u) {
   const token=Math.random().toString(36).slice(2,10),weapons=targetShootingWeaponEntries(g,u);
-  const session={token,guildId:g,userId:u,weapons,weaponId:weapons[0].weaponId,resolved:false};
+  const session={token,guildId:g,userId:u,weapons,weaponId:weapons[0].weaponId,started:false,resolved:false,round:0,totalReward:0,totalScore:0,shots:[],targets:[]};
   targetShootingSessions.set(token,session);
   setTimeout(()=>{if(targetShootingSessions.get(token)===session) targetShootingSessions.delete(token);},5*60*1000);
   return session;
@@ -5696,8 +5710,8 @@ function targetShootingSelectedWeapon(session) {
 function targetShootingEmbed(session,notice='選擇槍枝後開始本次靶場訓練。') {
   const weapon=targetShootingSelectedWeapon(session),accuracy=targetShootingAccuracy(weapon);
   return new EmbedBuilder().setColor(0xE67E22).setTitle('🎯 靶場打靶｜槍枝選擇')
-    .setDescription(`${notice}\n\n目前槍枝：**${weapon.name}**${weapon.owned?'':'（靶場提供）'}\n預估命中率：**${accuracy}%**\n\n消耗體力：**${TARGET_SHOOTING_STAMINA_COST}**\n靶場訓練不消耗彈藥，完成後冷卻 **10 分鐘**。\n獎勵：紅心靶 **6,000**｜內圈 **4,200**｜中圈 **2,600**｜外圈 **1,500** 金幣。`)
-    .setFooter({text:'只能選擇自己持有的槍枝；持有武器越精準，越容易命中。'});
+    .setDescription(`${notice}\n\n目前槍枝：**${weapon.name}**${weapon.owned?'':'（靶場提供）'}\n基礎命中率：**${accuracy}%**\n\n進入靶位後共有 **3 發互動射擊**：每發從左、中、右三個目標中選擇。\n🟢 慢速靶命中率 +10%，獎勵 ×0.75\n🟡 標準靶無修正，獎勵 ×1\n🔴 快速靶命中率 -10%，獎勵 ×1.25\n\n消耗體力：**${TARGET_SHOOTING_STAMINA_COST}**｜全場最高獎勵：**6,000 金幣**\n靶場訓練不消耗彈藥，完成後冷卻 **10 分鐘**。`)
+    .setFooter({text:'只能選擇自己持有的槍枝；每一發都要親自選擇目標。'});
 }
 function targetShootingRows(session) {
   const selected=targetShootingSelectedWeapon(session);
@@ -5705,9 +5719,23 @@ function targetShootingRows(session) {
     session.weapons.map(weapon=>({label:weapon.name.slice(0,100),value:weapon.weaponId,description:`預估命中率 ${targetShootingAccuracy(weapon)}%${weapon.owned?'｜自有武器':'｜免費借用'}`,default:weapon.weaponId===selected.weaponId}))
   );
   return [new ActionRowBuilder().addComponents(menu),new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`target_shooting_fire:${session.token}`).setLabel('開始打靶').setEmoji('🎯').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`target_shooting_start:${session.token}`).setLabel('進入靶位').setEmoji('🎯').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`target_shooting_cancel:${session.token}`).setLabel('取消').setEmoji('✖️').setStyle(ButtonStyle.Secondary)
   )];
+}
+function targetShootingAimEmbed(session,notice='選擇本發要射擊的目標。') {
+  const weapon=targetShootingSelectedWeapon(session),baseAccuracy=targetShootingAccuracy(weapon),shotLog=session.shots.length
+    ?session.shots.map((shot,index)=>`第 ${index+1} 發：${shot.target.emoji} ${shot.target.name}｜${shot.result.ring} ${shot.result.score} 環｜${fmt(shot.result.reward)} 金幣`).join('\n')
+    :'尚未射擊';
+  const targetText=session.targets.map((target,index)=>`${['左','中','右'][index]}：${target.emoji} **${target.name}**｜命中率 ${target.accuracyBonus>=0?'+':''}${target.accuracyBonus}%｜獎勵 ×${target.rewardMultiplier}`).join('\n');
+  return new EmbedBuilder().setColor(0xD35400).setTitle(`🎯 靶場打靶｜第 ${session.round+1}／3 發`)
+    .setDescription(`${notice}\n\n使用槍枝：**${weapon.name}**\n基礎命中率：**${baseAccuracy}%**\n\n**本發目標**\n${targetText}\n\n**目前成績**\n${shotLog}\n累積環數：**${session.totalScore}**｜暫計獎勵：**${fmt(session.totalReward)} 金幣**`)
+    .setFooter({text:'每次選擇目標後會立刻射擊；完成第 3 發自動結算。'});
+}
+function targetShootingAimRows(session) {
+  return [new ActionRowBuilder().addComponents(session.targets.map((target,index)=>
+    new ButtonBuilder().setCustomId(`target_shooting_aim:${session.token}:${session.round}:${index}`).setLabel(`${['左','中','右'][index]}｜${target.name} ×${target.rewardMultiplier}`).setEmoji(target.emoji).setStyle(index===1?ButtonStyle.Primary:index===2?ButtonStyle.Danger:ButtonStyle.Success)
+  ))];
 }
 const jengaPayoutMultipliers=[1.1,1.3,1.65,2.2,3,4.4];
 const jengaRiskProfiles=[
@@ -7006,7 +7034,7 @@ async function handleInteraction(i) {
   }
   if(i.isStringSelectMenu()&&i.customId.startsWith('target_shooting_weapon:')&&i.guildId) {
     const token=i.customId.split(':')[1],session=targetShootingSessions.get(token),weaponId=i.values[0];
-    if(!session||session.guildId!==i.guildId||session.resolved) return i.reply({content:'⚠️ 這次靶場訓練已經失效，請重新使用 `/小遊戲`。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId||session.resolved||session.started) return i.reply({content:'⚠️ 這次靶場訓練已經失效，請重新使用 `/小遊戲`。',ephemeral:true});
     if(i.user.id!==session.userId) return i.reply({content:'⚠️ 只有開啟靶場訓練的玩家可以選擇槍枝。',ephemeral:true});
     if(!session.weapons.some(weapon=>weapon.weaponId===weaponId)) return i.reply({content:'⚠️ 只能選擇本次列表中的槍枝。',ephemeral:true});
     session.weaponId=weaponId;
@@ -7019,7 +7047,7 @@ async function handleInteraction(i) {
     targetShootingSessions.delete(token);
     return i.update({content:'✅ 已取消本次靶場訓練，未消耗體力。',embeds:[],components:[]});
   }
-  if(i.isButton()&&i.customId.startsWith('target_shooting_fire:')&&i.guildId) {
+  if(i.isButton()&&i.customId.startsWith('target_shooting_start:')&&i.guildId) {
     const token=i.customId.split(':')[1],session=targetShootingSessions.get(token);
     if(!session||session.guildId!==i.guildId||session.resolved) return i.reply({content:'⚠️ 這次靶場訓練已經失效，請重新使用 `/小遊戲`。',ephemeral:true});
     if(i.user.id!==session.userId) return i.reply({content:'⚠️ 只有開啟靶場訓練的玩家可以開始。',ephemeral:true});
@@ -7030,17 +7058,38 @@ async function handleInteraction(i) {
     if(weapon.owned&&assetQuantity(i.guildId,i.user.id,weapon.weaponId)<1) return i.reply({content:'⚠️ 這把槍已不在你的武器庫，請重新選擇。',ephemeral:true});
     const cost=staminaCost(i.guildId,i.user.id,TARGET_SHOOTING_STAMINA_COST);
     if(stamina(i.guildId,i.user.id)<cost) return i.reply({content:`⚠️ 體力不足，需要 ${cost} 點。`,ephemeral:true});
-    session.resolved=true;
-    const accuracy=targetShootingAccuracy(weapon),result=targetShootingResult(accuracy);
     consumeStamina(i.guildId,i.user.id,cost);
     db.prepare('INSERT INTO target_shooting_records(guild_id,user_id,last_played_at) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET last_played_at=excluded.last_played_at').run(i.guildId,i.user.id,Date.now());
-    if(result.reward>0) {
-      changeBalance(i.guildId,i.user.id,result.reward,'payout',i.user.id,'打靶');
+    session.started=true;
+    session.targets=targetShootingTargets();
+    return i.update({embeds:[targetShootingAimEmbed(session,`✅ 已進入靶位並消耗 ${cost} 體力，請選擇第一個目標。`)],components:targetShootingAimRows(session)});
+  }
+  if(i.isButton()&&i.customId.startsWith('target_shooting_aim:')&&i.guildId) {
+    const [,token,roundText,indexText]=i.customId.split(':'),session=targetShootingSessions.get(token),targetRound=Number(roundText),targetIndex=Number(indexText);
+    if(!session||session.guildId!==i.guildId||session.resolved||!session.started) return i.reply({content:'⚠️ 這次靶場訓練已經失效，請重新使用 `/小遊戲`。',ephemeral:true});
+    if(i.user.id!==session.userId) return i.reply({content:'⚠️ 只有開啟靶場訓練的玩家可以射擊。',ephemeral:true});
+    if(!Number.isInteger(targetRound)||targetRound!==session.round) return i.reply({content:'⚠️ 這個目標已經移動，請使用目前畫面選擇。',ephemeral:true});
+    const target=session.targets[targetIndex];
+    if(!target||!Number.isInteger(targetIndex)) return i.reply({content:'⚠️ 找不到這個目標，請重新選擇。',ephemeral:true});
+    const weapon=targetShootingSelectedWeapon(session),effectiveAccuracy=Math.min(95,Math.max(1,targetShootingAccuracy(weapon)+target.accuracyBonus));
+    const result=targetShootingResult(effectiveAccuracy,Math.random,target.rewardMultiplier);
+    session.round+=1;
+    session.totalReward+=result.reward;
+    session.totalScore+=result.score;
+    session.shots.push({target,result,effectiveAccuracy});
+    if(session.round<3) {
+      session.targets=targetShootingTargets();
+      return i.update({embeds:[targetShootingAimEmbed(session,`${result.hit?'🎯 命中':'💨 脫靶'}｜${target.name}｜${result.ring} ${result.score} 環${result.reward?`｜+${fmt(result.reward)} 金幣`:''}\n請選擇下一發目標。`)],components:targetShootingAimRows(session)});
+    }
+    session.resolved=true;
+    if(session.totalReward>0) {
+      changeBalance(i.guildId,i.user.id,session.totalReward,'payout',i.user.id,'打靶');
       recordCasinoGameWin(i.guildId,i.user.id,'打靶');
     }
     targetShootingSessions.delete(token);
-    return i.update({embeds:[new EmbedBuilder().setColor(result.hit?0x35C46A:0x95A5A6).setTitle(result.hit?'🎯 打靶命中！':'💨 打靶脫靶').setDescription(
-      `使用槍枝：**${weapon.name}**${weapon.owned?'':'（靶場提供）'}\n預估命中率：**${accuracy}%**\n射擊結果：**${result.ring}｜${result.score} 環**\n${result.reward?`獲得獎勵：**${fmt(result.reward)} 金幣**`:'本次未獲得獎勵。'}\n消耗體力：**${cost}**\n\n下次靶場訓練可於 <t:${Math.floor((Date.now()+TARGET_SHOOTING_COOLDOWN_MS)/1000)}:R> 再進行。`
+    const shots=session.shots.map((shot,index)=>`第 ${index+1} 發：${shot.target.emoji} ${shot.target.name}｜${shot.result.ring} ${shot.result.score} 環｜${fmt(shot.result.reward)} 金幣`).join('\n');
+    return i.update({embeds:[new EmbedBuilder().setColor(session.totalReward?0x35C46A:0x95A5A6).setTitle(session.totalReward?'🏁 打靶三發結算':'💨 打靶三發結算｜未命中').setDescription(
+      `使用槍枝：**${weapon.name}**${weapon.owned?'':'（靶場提供）'}\n\n${shots}\n\n總環數：**${session.totalScore}**\n${session.totalReward?`總獎勵：**${fmt(session.totalReward)} 金幣**`:'本次未獲得獎勵。'}\n\n下次靶場訓練可於 <t:${Math.floor((Date.now()+TARGET_SHOOTING_COOLDOWN_MS)/1000)}:R> 再進行。`
     )],components:[]});
   }
   if(i.isStringSelectMenu() && i.customId==='game_help_category') {
