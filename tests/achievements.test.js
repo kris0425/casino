@@ -620,7 +620,7 @@ test('限時資產拍賣使用安全託管、退款、延時與自動結標',()=
   assert.match(source,/const ASSET_AUCTION_EXTENSION_MS=5\*60\*1000/);
   assert.match(source,/const ASSET_AUCTION_MIN_INCREMENT_RATE=0\.05/);
   assert.match(source,/const ASSET_AUCTION_MIN_START_PRICE=5000000/);
-  assert.match(source,/const assetAuctionPool=\[[\s\S]+?'toyota_supra_mk4'[\s\S]+?'ford_mustang_1964_hidden'[\s\S]+?'ford_gt_heritage'[\s\S]+?'ford_shelby_gt500'/);
+  assert.match(source,/const assetAuctionPool=\[\.\.\.auctionLimitedVehicleIds\]/);
 
   const startPriceBlock=source.match(/function assetAuctionStartPrice\(asset\) \{[\s\S]+?\n\}/)?.[0]||'';
   const minimumBidBlock=source.match(/function minimumAssetAuctionBid\(auction\) \{[\s\S]+?\n\}/)?.[0]||'';
@@ -645,6 +645,22 @@ test('限時資產拍賣使用安全託管、退款、延時與自動結標',()=
   assert.match(source,/label:'限時資產拍賣',value:'auction'/);
   assert.match(source,/asset_auction_bid_modal:/);
   assert.doesNotMatch(source,/setName\('資產拍賣'\)/,'拍賣應整合既有資產入口，不新增斜線指令');
+});
+
+test('限時拍賣輪替池包含 20 款限量競標載具',()=>{
+  const definitionBlock=source.match(/const auctionLimitedVehicleDefinitions=\[[\s\S]+?\n\];/)?.[0]||'';
+  assert.equal((definitionBlock.match(/\{id:'/g)||[]).length,20);
+  const imagePaths=[...definitionBlock.matchAll(/image:'([^']+)'/g)].map(match=>match[1]);
+  assert.equal(imagePaths.length,20);
+  for(const imagePath of imagePaths) assert.equal(existsSync(new URL(`../assets/${imagePath}`,import.meta.url)),true,`缺少競標載具圖片：${imagePath}`);
+  assert.match(source,/const auctionLimitedVehicleIds=auctionLimitedVehicleDefinitions\.map\(vehicle=>vehicle\.id\)/);
+  assert.match(source,/const auctionLimitedTruckIds=auctionLimitedVehicleDefinitions\.filter\(vehicle=>vehicle\.category==='卡車'\)/);
+  assert.match(source,/auctionOnly:true/);
+  assert.match(source,/asset\.auctionOnly\?'\\n🏁 \*\*限量競標載具\*\*/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-05-limited-auction-vehicles.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-05-limited-auction-vehicles');
+  assert.match(update.summary,/20 款限量/);
+  assert.match(update.changes.join('\n'),/汽車.*卡車.*機車/s);
 });
 
 test('賭場強化保全與限時拍賣每六小時提醒',()=>{

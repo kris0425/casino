@@ -1800,6 +1800,33 @@ luxuryPixelSupercarIds.forEach((assetId,index)=>{
     blindBoxPack:'supercar'
   };
 });
+const auctionLimitedVehicleDefinitions=[
+  {id:'auction_vehicle_crimson_comet',name:'🏎️ 緋紅彗星｜競標特仕版',category:'汽車',price:4200000,image:'blindbox/luxury_supercars/rare-pixel-supercar-01.png',rarity:'傳說',buff:'getaway',buffMultiplier:2.8,description:'以轉子戰魂為基底打造的限量競標特仕版，只有系統拍賣輪替才有機會收藏。'},
+  {id:'auction_vehicle_obsidian_m7',name:'🏁 黑曜 M7｜競標特仕版',category:'汽車',price:5600000,image:'blindbox/luxury_supercars/rare-pixel-supercar-02.png',rarity:'傳說',buff:'getaway',buffMultiplier:2.5,description:'黑曜夜色與高性能豪華房車的限量聯名款，適合高端收藏家。'},
+  {id:'auction_vehicle_sapphire_nismo',name:'💙 藍寶石 Nismo｜競標特仕版',category:'汽車',price:6800000,image:'blindbox/luxury_supercars/rare-pixel-supercar-03.png',rarity:'神話',buff:'getaway',buffMultiplier:3.1,description:'四輪驅動與賽道空力全面強化的限量性能座駕。'},
+  {id:'auction_vehicle_ember_nsx',name:'🔥 餘燼 NSX｜競標特仕版',category:'汽車',price:5200000,image:'blindbox/luxury_supercars/rare-pixel-supercar-04.png',rarity:'傳說',buff:'casino',buffMultiplier:2.7,description:'中置引擎與赤焰車身交織出的限量收藏，為賭場之夜帶來好運。'},
+  {id:'auction_vehicle_royal_bentley',name:'👑 皇家 Bentley｜競標特仕版',category:'汽車',price:7800000,image:'blindbox/luxury_supercars/rare-pixel-supercar-05.png',rarity:'神話',buff:'work',buffMultiplier:2.8,description:'英倫手工豪華房車的限量皇家規格，象徵頂級商務地位。'},
+  {id:'auction_vehicle_aurora_phantom',name:'🌌 極光 Phantom｜競標特仕版',category:'汽車',price:9800000,image:'blindbox/luxury_supercars/rare-pixel-supercar-06.png',rarity:'限定',buff:'stamina',buffMultiplier:3.2,description:'極光內裝與靜謐後座打造的限量旗艦，讓長途行動後依然保持體力。'},
+  {id:'auction_vehicle_jade_century',name:'🦅 翡翠 Century｜競標特仕版',category:'汽車',price:6400000,image:'blindbox/luxury_supercars/rare-pixel-supercar-07.png',rarity:'神話',buff:'discount',buffMultiplier:2.6,description:'低調御用旗艦的翡翠限定塗裝，提供珍稀的採購禮遇。'},
+  {id:'auction_vehicle_violet_maybach',name:'💜 紫晶 Maybach｜競標特仕版',category:'汽車',price:8800000,image:'blindbox/luxury_supercars/rare-pixel-supercar-08.png',rarity:'限定',buff:'casino',buffMultiplier:3.3,description:'紫晶車艙與總裁級禮遇組成的限量移動行宮。'},
+  {id:'auction_vehicle_midnight_gr86',name:'🌙 午夜 GR86｜競標特仕版',category:'汽車',price:4600000,image:'blindbox/luxury_supercars/rare-pixel-supercar-09.png',rarity:'傳說',buff:'getaway',buffMultiplier:2.9,description:'蒼藍落日典藏的午夜競標版，售罄後不再進入一般商城。'},
+  {id:'auction_vehicle_copper_supra',name:'🐉 銅焰 Supra｜競標特仕版',category:'汽車',price:7200000,image:'blindbox/luxury_supercars/rare-pixel-supercar-10.png',rarity:'神話',buff:'getaway',buffMultiplier:3.4,description:'2JZ 渦輪傳奇搭配銅焰寬體套件的限量街頭王者。'},
+  {id:'auction_vehicle_copper_hauler',name:'🟠 銅峽谷重載車｜競標特仕版',category:'卡車',price:3600000,image:'trucks/copper_canyon_hauler.png',rarity:'傳說',buff:'freight',truckRevenueBonus:0.38,description:'沙漠長途貨運專用的限量重卡，競標得標後可投入貨運事業。'},
+  {id:'auction_vehicle_azure_coldchain',name:'🔵 藍潮冷鏈王｜競標特仕版',category:'卡車',price:5200000,image:'trucks/azure_tide_refrigerated.png',rarity:'傳說',buff:'freight',truckRevenueBonus:0.45,description:'港區冷鏈專用限量車組，能提升貨運事業收益。'},
+  {id:'auction_vehicle_crimson_climber',name:'🔴 赤紅攀登者｜競標特仕版',category:'卡車',price:7600000,image:'trucks/crimson_mountain_climber.png',rarity:'神話',buff:'freight',truckRevenueBonus:0.52,description:'征服雪山與陡坡的限量六輪越野貨卡。'},
+  {id:'auction_vehicle_silver_frost',name:'❄️ 銀霜快運｜競標特仕版',category:'卡車',price:9800000,image:'trucks/silver_frost_express.png',rarity:'神話',buff:'freight',truckRevenueBonus:0.58,description:'極寒環境仍能準時交付的限量冷凍快運車。'},
+  {id:'auction_vehicle_obsidian_titan',name:'🖤 黑曜泰坦｜競標特仕版',category:'卡車',price:14800000,image:'trucks/obsidian_titan_transporter.png',rarity:'限定',buff:'freight',truckRevenueBonus:0.68,description:'多軸重型運輸平台的限量旗艦，專攻超大型跨境物流。'},
+  {id:'auction_vehicle_starlight_longhaul',name:'✨ 星光長運車｜競標特仕版',category:'卡車',price:18800000,image:'trucks/starlight_silver_longhaul.png',rarity:'限定',buff:'freight',truckRevenueBonus:0.75,description:'自動駕駛與超長程貨艙兼備的限量終極物流車。'},
+  {id:'auction_vehicle_bage_blackgold',name:'🐦‍⬛ BAGE 黑金猛禽｜競標特仕版',category:'卡車',price:24800000,image:'trucks/bage_blackgold_rival.png',rarity:'限定',buff:'freight',truckRevenueBonus:0.82,description:'黑金猛禽漫畫塗裝的限量競標版，可投入物流貨運並永久收藏。'},
+  {id:'auction_vehicle_neon_nuclear_bike',name:'🌈 霓虹核能戰駒｜競標特仕版',category:'機車',price:2800000,image:'motorcycles/neon_nuclear.png',rarity:'神話',buff:'getaway',buffMultiplier:2.5,description:'賽博龐克發光核心與限量競標塗裝結合的未來機車。'},
+  {id:'auction_vehicle_shadow_hoverbike',name:'🚀 幽影噴射飛車｜競標特仕版',category:'機車',price:6400000,image:'motorcycles/shadow_hoverbike.png',rarity:'限定',buff:'getaway',buffMultiplier:3.6,description:'具備短距離懸浮能力的限量噴射座駕，競標得標後永久入庫。'},
+  {id:'auction_vehicle_platinum_tourer',name:'🏍️ 白金陸上郵輪｜競標特仕版',category:'機車',price:4200000,image:'motorcycles/platinum_tourer.png',rarity:'神話',buff:'stamina',buffMultiplier:2.9,description:'大型風鏡、豪華後座與白金塗裝組成的限量旅行車。'}
+];
+const auctionLimitedVehicleIds=auctionLimitedVehicleDefinitions.map(vehicle=>vehicle.id);
+const auctionLimitedTruckIds=auctionLimitedVehicleDefinitions.filter(vehicle=>vehicle.category==='卡車').map(vehicle=>vehicle.id);
+for(const vehicle of auctionLimitedVehicleDefinitions) {
+  assetCatalog[vehicle.id]={...vehicle,forSale:false,auctionOnly:true};
+}
 function assetIsForSale(asset,now=Date.now()) {
   if(!asset||asset.forSale===false) return false;
   if(asset.saleStartsAt&&now<asset.saleStartsAt) return false;
@@ -1925,9 +1952,7 @@ const ASSET_AUCTION_EXTENSION_MS=5*60*1000;
 const ASSET_AUCTION_MIN_INCREMENT=100000;
 const ASSET_AUCTION_MIN_INCREMENT_RATE=0.05;
 const ASSET_AUCTION_MIN_START_PRICE=5000000;
-const assetAuctionPool=[
-  'toyota_supra_mk4','ford_mustang_1964_hidden','ford_gt_2017','ford_gt_heritage','ford_shelby_gt500'
-];
+const assetAuctionPool=[...auctionLimitedVehicleIds];
 const CASINO_VAULT_LOOT_RATE=0.50;
 const CASINO_VAULT_MAX_SUCCESS_RATE=25;
 const CASINO_SECURITY_BASE_HP=24;
@@ -2025,7 +2050,8 @@ const freightTruckIds=[
   'truck_crimson_mountain_climber','truck_sapphire_coastal_freighter','truck_golden_sun_bulkmaster','truck_midnight_stealth_carrier',
   'truck_jade_river_tanker','truck_silver_frost_express','truck_neon_lotus_cityrunner','truck_ironwood_heavy_lifter',
   'truck_coral_reef_logistics','truck_violet_comet_courier','truck_emberforge_armored','truck_aurora_polar_freighter',
-  'truck_harbor_blue_containerliner','truck_sunset_peach_foodliner','truck_obsidian_titan_transporter','truck_starlight_silver_longhaul','truck_bage_blackgold_rival'
+  'truck_harbor_blue_containerliner','truck_sunset_peach_foodliner','truck_obsidian_titan_transporter','truck_starlight_silver_longhaul','truck_bage_blackgold_rival',
+  ...auctionLimitedTruckIds
 ];
 const TRANSPORT_COACH_DEFAULT_VEHICLE_ID='coach_basic_fleet';
 const TRANSPORT_FREIGHT_DEFAULT_VEHICLE_ID='freight_basic_fleet';
@@ -3701,8 +3727,9 @@ function assetAuctionEmbed(g,u,auction,notice='') {
   const current=auction.current_bid>0?`**${fmt(auction.current_bid)}**`:'尚無出價';
   const leader=auction.current_bidder_id?`<@${auction.current_bidder_id}>`:'尚無領先者';
   const walletText=u?`\n\n你的金庫：**${fmt(balance(g,u))}**`:'';
+  const limitedVehicleText=asset.auctionOnly?'\n🏁 **限量競標載具**｜本款僅透過系統拍賣輪替取得，得標後永久收藏。':'';
   return new EmbedBuilder().setColor(0xFF6D00).setTitle(`🔥 限時資產拍賣｜${asset.name}`)
-    .setDescription(`${notice?`${notice}\n\n`:''}${asset.description}\n\n稀有度：**${asset.rarity||'一般'}**\n參考價值：**${fmt(asset.price)}**\n起標價：**${fmt(auction.start_price)}**\n目前最高價：${current}\n目前領先：${leader}\n累計出價：**${auction.bid_count} 次**\n最低下一標：**${fmt(minimum)}**\n結束時間：<t:${Math.floor(auction.ends_at/1000)}:F>（<t:${Math.floor(auction.ends_at/1000)}:R>）${walletText}\n\n出價會立即託管；被超標時完整退款。得標款由系統回收，不會進入賭場寶庫。最後 5 分鐘出價會延長 5 分鐘。`)
+    .setDescription(`${notice?`${notice}\n\n`:''}${asset.description}${limitedVehicleText}\n\n稀有度：**${asset.rarity||'一般'}**\n參考價值：**${fmt(asset.price)}**\n起標價：**${fmt(auction.start_price)}**\n目前最高價：${current}\n目前領先：${leader}\n累計出價：**${auction.bid_count} 次**\n最低下一標：**${fmt(minimum)}**\n結束時間：<t:${Math.floor(auction.ends_at/1000)}:F>（<t:${Math.floor(auction.ends_at/1000)}:R>）${walletText}\n\n出價會立即託管；被超標時完整退款。得標款由系統回收，不會進入賭場寶庫。最後 5 分鐘出價會延長 5 分鐘。`)
     .setFooter({text:'每服同時只有一場系統拍賣｜請只輸入能負擔的安全整數金額'});
 }
 function assetAuctionComponents(token,u,auction) {
