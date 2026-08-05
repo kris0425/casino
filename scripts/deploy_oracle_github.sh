@@ -42,9 +42,12 @@ is_deploy_path() {
 
 BASE_COMMIT="$(ssh_remote "cat '$ORACLE_PROJECT/.deployed_commit' 2>/dev/null || true" | tr -d '\r\n')"
 BASE_COMMIT="${BASE_COMMIT:-$INITIAL_BASE_COMMIT}"
+echo "ORACLE_BASE_COMMIT=$BASE_COMMIT"
 [[ "$BASE_COMMIT" =~ ^[0-9a-f]{7,40}$ ]] || { echo "invalid Oracle base commit" >&2; exit 2; }
 git cat-file -e "${BASE_COMMIT}^{commit}"
+echo "ORACLE_BASE_COMMIT_PRESENT"
 git merge-base --is-ancestor "$BASE_COMMIT" "$HEAD_COMMIT"
+echo "ORACLE_BASE_COMMIT_ANCESTOR"
 
 declare -A COPY_SET=()
 declare -A DELETE_SET=()
@@ -70,6 +73,7 @@ mapfile -t DELETE_PATHS < <(printf '%s\n' "${!DELETE_SET[@]}" | sort)
 for relative in "${COPY_PATHS[@]}"; do [[ -f "$relative" ]] || { echo "missing deployment file: $relative" >&2; exit 2; }; done
 printf '%s\n' "${COPY_PATHS[@]}" > "$COPY_LIST"
 printf '%s\n' "${DELETE_PATHS[@]}" > "$DELETE_LIST"
+echo "ORACLE_INCREMENTAL_FILES copy=${#COPY_PATHS[@]} delete=${#DELETE_PATHS[@]}"
 
 tar -cf "$BUNDLE" -T "$COPY_LIST"
 ssh_remote "mkdir -p '$REMOTE_STAGE/source' '/home/ubuntu/release-backups/$SHORT_COMMIT'"
