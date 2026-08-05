@@ -316,6 +316,7 @@ const raceSessions=new Map();
 const pvpRaceSessions=new Map();
 const liarDiceSessions=new Map();
 const jengaGames=new Map();
+const targetShootingSessions=new Map();
 const vehicleModSessions=new Map();
 const activeHideoutRaids=new Map();
 const TRANSPORT_PANEL_IDLE_MS=3*60*1000;
@@ -611,6 +612,10 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS lucky_wheel_daily (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, spin_day TEXT NOT NULL,
     spins INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+  );
+  CREATE TABLE IF NOT EXISTS target_shooting_records (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, last_played_at INTEGER NOT NULL,
     PRIMARY KEY (guild_id, user_id)
   );
   CREATE TABLE IF NOT EXISTS player_pets (
@@ -5558,6 +5563,7 @@ function addWagerOptions(command,description='自行輸入下注金額') {
     .addBooleanOption(o=>o.setName('歐印').setDescription('設為「是」會投入目前持有的全部金幣'));
 }
 const miniGameCatalog=[
+  {id:'target_shooting',command:'打靶',label:'靶場打靶',emoji:'🎯',description:'先選擇自己的槍枝，再挑戰靶心',setup:'direct'},
   {id:'jenga',command:'抽積木',label:'抽積木',emoji:'🧱',description:'抽出積木後選擇繼續冒險或收手',setup:'bet'},
   {id:'highlow',command:'比大小',label:'比大小',emoji:'🃏',description:'與莊家各抽一張牌',setup:'bet'},
   {id:'dragon',command:'射龍門',label:'射龍門',emoji:'🚪',description:'第三張牌射進兩張門牌之間',setup:'bet'},
@@ -5577,7 +5583,7 @@ const miniGameCatalog=[
   {id:'duel',command:'決鬥',label:'PvP 輪盤決鬥',emoji:'🔫',description:'指定玩家進行虛構槍械決鬥',setup:'pvp'}
 ];
 function miniGameLauncherEmbed() {
-  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🎮 小遊戲大廳').setDescription(`所有 **17 款遊戲**已整合到此入口；從下方選單選擇遊戲，機器人會接著開啟下注、號碼或對手設定。\n\n🧱 **圖片版網頁遊戲：堆積木**\n完成下注後會取得專屬網站連結；網站會以圖片呈現穩定、搖晃及倒塌的積木塔。每回合從左、中、右三塊積木中選一塊，成功後可安全收手或繼續挑戰。完成六次的基礎派彩為 **4.4 倍**，高風險積木成功時還會累加額外倍率。\n\n下注欄可輸入金額，想投入全部金幣時輸入「**歐印**」。\n\n個別遊戲舊指令已移除；工作與搶劫請使用 \`/賺錢\`、\`/團隊搶銀行\`。`);
+  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🎮 小遊戲大廳').setDescription(`所有 **18 款遊戲**已整合到此入口；從下方選單選擇遊戲，機器人會接著開啟下注、號碼或對手設定。\n\n🎯 **靶場打靶**\n開始前可從自己的武器庫選擇槍枝；槍枝的精準加成會提高命中率。靶場不消耗彈藥，每次消耗 8 體力、完成後冷卻 10 分鐘，命中靶心最高可獲得 **6,000 金幣**。\n\n🧱 **圖片版網頁遊戲：堆積木**\n完成下注後會取得專屬網站連結；網站會以圖片呈現穩定、搖晃及倒塌的積木塔。每回合從左、中、右三塊積木中選一塊，成功後可安全收手或繼續挑戰。完成六次的基礎派彩為 **4.4 倍**，高風險積木成功時還會累加額外倍率。\n\n下注欄可輸入金額，想投入全部金幣時輸入「**歐印**」。\n\n個別遊戲舊指令已移除；工作與搶劫請使用 \`/賺錢\`、\`/團隊搶銀行\`。`);
 }
 function miniGameMenuRow(ownerId) {
   return new ActionRowBuilder().addComponents(
@@ -5645,6 +5651,63 @@ function miniGameBetValues(rawValue) {
   const bet=Number(normalized);
   if(!Number.isSafeInteger(bet)||bet<MIN_BET) throw new Error(`下注至少需要 ${fmt(MIN_BET)} 金幣`);
   return {下注:bet,歐印:false};
+}
+const TARGET_SHOOTING_STAMINA_COST=8;
+const TARGET_SHOOTING_COOLDOWN_MS=10*60*1000;
+function targetShootingWeaponEntries(g,u) {
+  const unique=new Map();
+  for(const weapon of Object.values(heistWeapons)) {
+    if(unique.has(weapon.assetId)||assetQuantity(g,u,weapon.assetId)<1) continue;
+    unique.set(weapon.assetId,{weaponId:weapon.assetId,name:weapon.name,precision:weapon.police,owned:true});
+  }
+  const owned=[...unique.values()].sort((a,b)=>b.precision-a.precision||a.name.localeCompare(b.name,'zh-Hant')).slice(0,24);
+  return [{weaponId:'range_pistol',name:'🏷️ 靶場借用手槍',precision:1,owned:false},...owned];
+}
+function targetShootingAccuracy(weapon) {
+  return Math.min(93,42+Math.max(1,Number(weapon?.precision)||1)*5);
+}
+function targetShootingResult(accuracy,random=Math.random) {
+  const normalized=Math.min(0.9999999999999999,Math.max(0,Number(random())||0)),hitChance=Math.min(0.93,Math.max(0.01,Number(accuracy)||0)/100);
+  if(normalized>=hitChance) return {hit:false,ring:'脫靶',score:0,reward:0};
+  const precision=normalized/hitChance;
+  if(precision<0.12) return {hit:true,ring:'紅心靶',score:10,reward:6000};
+  if(precision<0.32) return {hit:true,ring:'內圈',score:8,reward:4200};
+  if(precision<0.62) return {hit:true,ring:'中圈',score:5,reward:2600};
+  return {hit:true,ring:'外圈',score:3,reward:1500};
+}
+function targetShootingCooldownRemaining(g,u,now=Date.now()) {
+  const last=db.prepare('SELECT last_played_at FROM target_shooting_records WHERE guild_id=? AND user_id=?').get(g,u)?.last_played_at||0;
+  return Math.max(0,last+TARGET_SHOOTING_COOLDOWN_MS-now);
+}
+function targetShootingCooldownText(milliseconds) {
+  const seconds=Math.ceil(Math.max(0,milliseconds)/1000);
+  return `${Math.floor(seconds/60)} 分 ${seconds%60} 秒`;
+}
+function createTargetShootingSession(g,u) {
+  const token=Math.random().toString(36).slice(2,10),weapons=targetShootingWeaponEntries(g,u);
+  const session={token,guildId:g,userId:u,weapons,weaponId:weapons[0].weaponId,resolved:false};
+  targetShootingSessions.set(token,session);
+  setTimeout(()=>{if(targetShootingSessions.get(token)===session) targetShootingSessions.delete(token);},5*60*1000);
+  return session;
+}
+function targetShootingSelectedWeapon(session) {
+  return session.weapons.find(weapon=>weapon.weaponId===session.weaponId)||session.weapons[0];
+}
+function targetShootingEmbed(session,notice='選擇槍枝後開始本次靶場訓練。') {
+  const weapon=targetShootingSelectedWeapon(session),accuracy=targetShootingAccuracy(weapon);
+  return new EmbedBuilder().setColor(0xE67E22).setTitle('🎯 靶場打靶｜槍枝選擇')
+    .setDescription(`${notice}\n\n目前槍枝：**${weapon.name}**${weapon.owned?'':'（靶場提供）'}\n預估命中率：**${accuracy}%**\n\n消耗體力：**${TARGET_SHOOTING_STAMINA_COST}**\n靶場訓練不消耗彈藥，完成後冷卻 **10 分鐘**。\n獎勵：紅心靶 **6,000**｜內圈 **4,200**｜中圈 **2,600**｜外圈 **1,500** 金幣。`)
+    .setFooter({text:'只能選擇自己持有的槍枝；持有武器越精準，越容易命中。'});
+}
+function targetShootingRows(session) {
+  const selected=targetShootingSelectedWeapon(session);
+  const menu=new StringSelectMenuBuilder().setCustomId(`target_shooting_weapon:${session.token}`).setPlaceholder('選擇本次靶場使用的槍枝').addOptions(
+    session.weapons.map(weapon=>({label:weapon.name.slice(0,100),value:weapon.weaponId,description:`預估命中率 ${targetShootingAccuracy(weapon)}%${weapon.owned?'｜自有武器':'｜免費借用'}`,default:weapon.weaponId===selected.weaponId}))
+  );
+  return [new ActionRowBuilder().addComponents(menu),new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`target_shooting_fire:${session.token}`).setLabel('開始打靶').setEmoji('🎯').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`target_shooting_cancel:${session.token}`).setLabel('取消').setEmoji('✖️').setStyle(ButtonStyle.Secondary)
+  )];
 }
 const jengaPayoutMultipliers=[1.1,1.3,1.65,2.2,3,4.4];
 const jengaRiskProfiles=[
@@ -6517,7 +6580,7 @@ function riotRow(token,disabled=false) {
   );
 }
 const gameHelpDetails={
-  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/日常 領取\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 3 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n所有 17 款遊戲統一由 \`/小遊戲\` 進入；一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限，也可以輸入「歐印」。`},
+  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/日常 領取\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🎯 靶場訓練｜打靶前可選擇自己的槍枝，精準槍枝提高命中率\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 3 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n所有 18 款遊戲統一由 \`/小遊戲\` 進入；打靶每次消耗 **8 體力**、冷卻 10 分鐘且不消耗彈藥。一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限，也可以輸入「歐印」。`},
   highlow:{label:'比大小',emoji:'🃏',hint:'與莊家各抽一張牌',title:'🃏 比大小',body:'你與莊家各抽一張牌，點數與花色較大者獲勝。勝利獲得下注額 **2 倍**，平手退回下注，落敗則失去下注。'},
   dragon:{label:'射龍門',emoji:'🚪',hint:'判斷第三張牌是否落在門牌中間',title:'🚪 射龍門',body:'先開出兩張門牌，再選擇射牌或不射。第三張牌嚴格落在兩張門牌之間即獲得 **2 倍**；撞柱或射偏會失去下注，不射則退回下注。'},
   horse:{label:'賽馬',emoji:'🏇',hint:'選擇一匹馬觀看即時競賽',title:'🏇 賽馬',body:'從 1～4 號馬選擇一匹下注，畫面會即時更新到衝線。猜中冠軍獲得下注額 **4 倍**。'},
@@ -6940,6 +7003,45 @@ async function handleInteraction(i) {
     } catch(error) {
       return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
     }
+  }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('target_shooting_weapon:')&&i.guildId) {
+    const token=i.customId.split(':')[1],session=targetShootingSessions.get(token),weaponId=i.values[0];
+    if(!session||session.guildId!==i.guildId||session.resolved) return i.reply({content:'⚠️ 這次靶場訓練已經失效，請重新使用 `/小遊戲`。',ephemeral:true});
+    if(i.user.id!==session.userId) return i.reply({content:'⚠️ 只有開啟靶場訓練的玩家可以選擇槍枝。',ephemeral:true});
+    if(!session.weapons.some(weapon=>weapon.weaponId===weaponId)) return i.reply({content:'⚠️ 只能選擇本次列表中的槍枝。',ephemeral:true});
+    session.weaponId=weaponId;
+    return i.update({embeds:[targetShootingEmbed(session,'✅ 已更換槍枝，確認後即可開始。')],components:targetShootingRows(session)});
+  }
+  if(i.isButton()&&i.customId.startsWith('target_shooting_cancel:')&&i.guildId) {
+    const token=i.customId.split(':')[1],session=targetShootingSessions.get(token);
+    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次靶場訓練已經失效。',ephemeral:true});
+    if(i.user.id!==session.userId) return i.reply({content:'⚠️ 只有開啟靶場訓練的玩家可以取消。',ephemeral:true});
+    targetShootingSessions.delete(token);
+    return i.update({content:'✅ 已取消本次靶場訓練，未消耗體力。',embeds:[],components:[]});
+  }
+  if(i.isButton()&&i.customId.startsWith('target_shooting_fire:')&&i.guildId) {
+    const token=i.customId.split(':')[1],session=targetShootingSessions.get(token);
+    if(!session||session.guildId!==i.guildId||session.resolved) return i.reply({content:'⚠️ 這次靶場訓練已經失效，請重新使用 `/小遊戲`。',ephemeral:true});
+    if(i.user.id!==session.userId) return i.reply({content:'⚠️ 只有開啟靶場訓練的玩家可以開始。',ephemeral:true});
+    const remaining=targetShootingCooldownRemaining(i.guildId,i.user.id);
+    if(remaining>0) return i.reply({content:`⚠️ 靶場訓練冷卻中，還要 ${targetShootingCooldownText(remaining)}。`,ephemeral:true});
+    if(jailRemaining(i.guildId,i.user.id)||hospitalRemaining(i.guildId,i.user.id)) return i.reply({content:'⚠️ 你目前無法前往靶場。',ephemeral:true});
+    const weapon=targetShootingSelectedWeapon(session);
+    if(weapon.owned&&assetQuantity(i.guildId,i.user.id,weapon.weaponId)<1) return i.reply({content:'⚠️ 這把槍已不在你的武器庫，請重新選擇。',ephemeral:true});
+    const cost=staminaCost(i.guildId,i.user.id,TARGET_SHOOTING_STAMINA_COST);
+    if(stamina(i.guildId,i.user.id)<cost) return i.reply({content:`⚠️ 體力不足，需要 ${cost} 點。`,ephemeral:true});
+    session.resolved=true;
+    const accuracy=targetShootingAccuracy(weapon),result=targetShootingResult(accuracy);
+    consumeStamina(i.guildId,i.user.id,cost);
+    db.prepare('INSERT INTO target_shooting_records(guild_id,user_id,last_played_at) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET last_played_at=excluded.last_played_at').run(i.guildId,i.user.id,Date.now());
+    if(result.reward>0) {
+      changeBalance(i.guildId,i.user.id,result.reward,'payout',i.user.id,'打靶');
+      recordCasinoGameWin(i.guildId,i.user.id,'打靶');
+    }
+    targetShootingSessions.delete(token);
+    return i.update({embeds:[new EmbedBuilder().setColor(result.hit?0x35C46A:0x95A5A6).setTitle(result.hit?'🎯 打靶命中！':'💨 打靶脫靶').setDescription(
+      `使用槍枝：**${weapon.name}**${weapon.owned?'':'（靶場提供）'}\n預估命中率：**${accuracy}%**\n射擊結果：**${result.ring}｜${result.score} 環**\n${result.reward?`獲得獎勵：**${fmt(result.reward)} 金幣**`:'本次未獲得獎勵。'}\n消耗體力：**${cost}**\n\n下次靶場訓練可於 <t:${Math.floor((Date.now()+TARGET_SHOOTING_COOLDOWN_MS)/1000)}:R> 再進行。`
+    )],components:[]});
   }
   if(i.isStringSelectMenu() && i.customId==='game_help_category') {
     const categoryKey=i.values[0] in commandHelpCategories?i.values[0]:'casino';
@@ -8879,6 +8981,12 @@ async function handleInteraction(i) {
     }
     if(i.commandName==='小遊戲') {
       return i.reply({embeds:[miniGameLauncherEmbed()],components:[miniGameMenuRow(u)]});
+    }
+    if(i.commandName==='打靶') {
+      const remaining=targetShootingCooldownRemaining(g,u);
+      if(remaining>0) throw new Error(`靶場訓練冷卻中，還要 ${targetShootingCooldownText(remaining)}`);
+      const session=createTargetShootingSession(g,u);
+      return i.reply({embeds:[targetShootingEmbed(session)],components:targetShootingRows(session)});
     }
     if (i.commandName==='玩法') {
       return i.reply({embeds:[commandHelpOverviewEmbed('casino')],components:commandHelpComponents('casino')});

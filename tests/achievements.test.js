@@ -68,7 +68,7 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   assert.match(source,/日常:\{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'\}/);
   assert.match(source,/補給:\{商城:'商城',背包:'背包',購買:'購買',使用:'使用'\}/);
   assert.match(source,/寵物:\{商店:'寵物店',我的:'我的寵物'\}/);
-  for(const game of ['比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','骰盅吹牛','大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥']) {
+  for(const game of ['打靶','比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','骰盅吹牛','大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥']) {
     assert.match(source,new RegExp(`command:'${game}'`),`/${game} 移除後未保留在小遊戲選單`);
   }
   assert.match(source,/miniGameProxyInteraction\(i,game\.command/);
@@ -107,6 +107,29 @@ test('角色造型系統使用完整圖片並提供管理員上傳後台',()=>{
   assert.match(js,/location\.assign\(state\.data\.homeUrl\)/);
   assert.match(adminJs,/\/api\/appearance-admin\/upload/);
   assert.match(adminJs,/\/api\/appearance-admin\/active/);
+});
+
+test('靶場打靶可先選擇自有槍枝並以精準度影響安全獎勵',()=>{
+  assert.match(source,/\{id:'target_shooting',command:'打靶',label:'靶場打靶'/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS target_shooting_records/);
+  assert.match(source,/const TARGET_SHOOTING_STAMINA_COST=8/);
+  assert.match(source,/const TARGET_SHOOTING_COOLDOWN_MS=10\*60\*1000/);
+  const choices=source.match(/function targetShootingWeaponEntries\(g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(choices,/assetQuantity\(g,u,weapon\.assetId\)<1/);
+  assert.match(choices,/range_pistol/,'沒有自有槍枝時仍可借用靶場手槍');
+  const resultBlock=source.match(/function targetShootingResult\(accuracy,random=Math\.random\) \{[\s\S]+?\n\}/)?.[0]||'';
+  const resolveResult=new Function(`${resultBlock}; return targetShootingResult;`)();
+  assert.deepEqual(resolveResult(50,()=>0),{hit:true,ring:'紅心靶',score:10,reward:6000});
+  assert.deepEqual(resolveResult(50,()=>0.99),{hit:false,ring:'脫靶',score:0,reward:0});
+  assert.match(source,/target_shooting_weapon:/);
+  assert.match(source,/target_shooting_fire:/);
+  assert.match(source,/weapon\.owned&&assetQuantity\(i\.guildId,i\.user\.id,weapon\.weaponId\)<1/);
+  assert.match(source,/consumeStamina\(i\.guildId,i\.user\.id,cost\)/);
+  assert.match(source,/changeBalance\(i\.guildId,i\.user\.id,result\.reward,'payout'/);
+  assert.match(source,/靶場訓練不消耗彈藥/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-05-target-shooting.json',import.meta.url),'utf8'));
+  assert.match(update.summary,/打靶/);
+  assert.ok(update.changes.some(change=>change.includes('自有槍枝')));
 });
 
 test('人物大廳六名全身角色使用透明 PNG 並加入商城',()=>{
