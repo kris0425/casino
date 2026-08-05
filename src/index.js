@@ -71,7 +71,7 @@ const ECONOMY_SINK_LABELS={
   cosmetic_purchase:'個人造型商城',
   transfer_fee:'玩家轉帳手續費'
 };
-const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund']);
+const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund','auction_legacy_refund']);
 const BASE_STAMINA = 800;
 const assetPath=name=>resolve(process.cwd(),'assets',name);
 const CHARACTER_STYLE_ROOT=resolve(process.cwd(),'data','appearance-styles');
@@ -3672,6 +3672,27 @@ function settleAssetAuction(auctionId,now=Date.now()) {
     throw error;
   }
 }
+function retireLegacyAssetAuctions(now=Date.now()) {
+  const legacyAuctions=db.prepare("SELECT * FROM asset_auctions WHERE status='active'").all()
+    .filter(auction=>!auctionLimitedVehicleIds.includes(auction.asset_id));
+  if(!legacyAuctions.length) return 0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const expire=db.prepare("UPDATE asset_auctions SET status='expired',settled_at=?,closed_announced_at=? WHERE id=? AND status='active'");
+    for(const auction of legacyAuctions) {
+      if(auction.current_bidder_id&&auction.current_bid>0) {
+        const assetName=assetCatalog[auction.asset_id]?.name||auction.asset_id;
+        changeBalanceUnlocked(auction.guild_id,auction.current_bidder_id,auction.current_bid,'auction_legacy_refund',null,`${assetName}｜舊版拍賣品下架，退回拍賣託管`);
+      }
+      expire.run(now,now,auction.id);
+    }
+    db.exec('COMMIT');
+    return legacyAuctions.length;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
 function createAssetAuction(g,now=Date.now()) {
   const current=activeAssetAuction(g);
   if(current) return current;
@@ -3749,6 +3770,8 @@ async function processAssetAuctions() {
   assetAuctionProcessing=true;
   try {
     const now=Date.now(),guildIds=new Set([...client.guilds.cache.keys(),...db.prepare('SELECT DISTINCT guild_id FROM asset_auctions').all().map(row=>row.guild_id)]);
+    const retired=retireLegacyAssetAuctions(now);
+    if(retired) console.log(`已下架 ${retired} 場舊版限時拍賣，並完成託管退款`);
     for(const auction of db.prepare("SELECT id FROM asset_auctions WHERE status='active' AND ends_at<=? ORDER BY ends_at").all(now)) settleAssetAuction(auction.id,now);
     for(const guildId of guildIds) ensureActiveAssetAuction(guildId,now);
     const starts=db.prepare("SELECT * FROM asset_auctions WHERE status='active' AND announced_at IS NULL ORDER BY id").all();

@@ -665,6 +665,21 @@ test('限時拍賣輪替池包含 20 款限量競標載具',()=>{
   assert.match(update.changes.join('\n'),/汽車.*卡車.*機車/s);
 });
 
+test('舊版限時拍賣會下架、退回託管且不影響既有收藏',()=>{
+  const retirement=source.match(/function retireLegacyAssetAuctions\(now=Date\.now\(\)\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(retirement,/status='active'/);
+  assert.match(retirement,/!auctionLimitedVehicleIds\.includes\(auction\.asset_id\)/,'僅保留 20 款新限量載具');
+  assert.match(retirement,/'auction_legacy_refund'/);
+  assert.match(retirement,/status='expired',settled_at=\?,closed_announced_at=\?/,'下架場次不應再發流標公告');
+  assert.match(retirement,/changeBalanceUnlocked\(auction\.guild_id,auction\.current_bidder_id,auction\.current_bid/,'既有出價必須完整退回');
+  assert.match(source,/ECONOMY_TRANSFER_KINDS=new Set\([^\n]+auction_legacy_refund/);
+  const scheduler=source.match(/async function processAssetAuctions\(\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(scheduler,/retireLegacyAssetAuctions\(now\)/,'排程啟動時先清除舊版進行中拍賣');
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-05-auction-legacy-cleanup.json',import.meta.url),'utf8'));
+  assert.match(update.summary,/只保留 20 款/);
+  assert.ok(update.changes.some(change=>change.includes('完整退回')));
+});
+
 test('GitHub Actions 可用 Secrets 自動增量部署 Oracle',()=>{
   const workflowUrl=new URL('../.github/workflows/deploy-oracle.yml',import.meta.url);
   const deployScript=readFileSync(new URL('../scripts/deploy_oracle_github.sh',import.meta.url),'utf8');
