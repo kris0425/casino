@@ -3315,7 +3315,8 @@ function propertyBusinessComponents(g,u,propertyId=null) {
     actions.push(new ButtonBuilder().setCustomId(`${operationAction}:${u}:${selected.asset_id}`).setLabel(ready?'領取本期租金':operation?'重新整理':'開始招商').setEmoji(ready?'💰':operation?'🔄':'🏗️').setStyle(ready?ButtonStyle.Success:operation?ButtonStyle.Secondary:ButtonStyle.Primary));
     actions.push(new ButtonBuilder().setCustomId(`property_upgrade:${u}:${selected.asset_id}`).setLabel('升級建築').setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(propertyUpgradeCost(asset,business)===null||!!operation));
   }
-  actions.push(new ButtonBuilder().setCustomId(`property_refresh:${u}:${selected.asset_id}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary));
+  // 招商進行中時，主按鈕本身就是重新整理；不可再建立同一個 custom ID，否則 Discord 會拒絕整個訊息。
+  if(!operation) actions.push(new ButtonBuilder().setCustomId(`property_refresh:${u}:${selected.asset_id}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary));
   rows.push(new ActionRowBuilder().addComponents(actions));
   return rows;
 }
@@ -9000,7 +9001,8 @@ async function handleInteraction(i) {
       return i.reply({embeds:[new EmbedBuilder().setColor(0x1565C0).setAuthor({name:`${target.username} 的資產`,iconURL:target.displayAvatarURL()}).setDescription(`${list}\n\n🏚️ 目前藏身處：**${hideoutLabel||'尚未設定'}**\n資產原價總值：**${fmt(totalValue)}**`)]});
     }
     if(i.commandName==='房地產') {
-      return i.reply(propertyBusinessPayload(g,u));
+      await i.deferReply();
+      return i.editReply(propertyBusinessPayload(g,u));
     }
     if(i.commandName==='藏身處') {
       const properties=ownedHideoutProperties(g,u);
