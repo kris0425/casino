@@ -1437,6 +1437,8 @@ test('世界首領提供共享血量、體力挑戰、貢獻排行與寶庫比�
   assert.match(source,/CREATE TABLE IF NOT EXISTS world_boss_contributions/);
   assert.match(source,/const WORLD_BOSS_MAX_HP=9_000_000/);
   assert.match(source,/const WORLD_BOSS_STAMINA_COST=25/);
+  assert.match(source,/WORLD_BOSS_WEEKDAY_WINDOWS/);
+  assert.match(source,/WORLD_BOSS_WEEKEND_WINDOWS/);
   for(const helper of ['worldBossForGuild','worldBossAttack','worldBossEmbed','worldBossComponents']) {
     assert.match(source,new RegExp(`function ${helper}\\(`),`缺少世界首領功能：${helper}`);
   }
@@ -1447,4 +1449,5 @@ test('世界首領提供共享血量、體力挑戰、貢獻排行與寶庫比�
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-06-world-boss.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-08-06-world-boss');
   assert.match(update.changes.join('\n'),/最後一擊/);
+  assert.match(update.changes.join('\n'),/平日 12:00–14:00/);
 });

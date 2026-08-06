@@ -1303,12 +1303,42 @@ function changeCasinoVault(g,delta,kind,userId=null,reason='') {
   } catch(error) { db.exec('ROLLBACK'); throw error; }
 }
 const WORLD_BOSS_MAX_HP=9_000_000;
-const WORLD_BOSS_DURATION_MS=8*60*60*1000;
 const WORLD_BOSS_RESPAWN_MS=2*60*60*1000;
 const WORLD_BOSS_ATTACK_COOLDOWN_MS=30*1000;
 const WORLD_BOSS_STAMINA_COST=25;
+const WORLD_BOSS_TAIPEI_OFFSET_MS=8*60*60*1000;
+const WORLD_BOSS_WEEKDAY_WINDOWS=[[12,14],[18,20]];
+const WORLD_BOSS_WEEKEND_WINDOWS=[[10,12],[14,16],[18,20]];
 const WORLD_BOSS_DEFINITION={id:'neon_tide_behemoth',name:'霓虹黑潮・巨獸',emoji:'🌊',description:'從澳門外海霓虹風暴中現身的巨型異獸，正在吞噬賭城的能量核心。'};
 const WORLD_BOSS_IMAGE='world_boss/neon-tide-behemoth.png';
+function worldBossWindowsForTaipeiDate(taipeiDate) {
+  return [0,6].includes(taipeiDate.getUTCDay())?WORLD_BOSS_WEEKEND_WINDOWS:WORLD_BOSS_WEEKDAY_WINDOWS;
+}
+function worldBossWindowAt(now=Date.now()) {
+  const taipeiNow=new Date(now+WORLD_BOSS_TAIPEI_OFFSET_MS);
+  const dayStart=Date.UTC(taipeiNow.getUTCFullYear(),taipeiNow.getUTCMonth(),taipeiNow.getUTCDate())-WORLD_BOSS_TAIPEI_OFFSET_MS;
+  const minute=taipeiNow.getUTCHours()*60+taipeiNow.getUTCMinutes();
+  const windows=worldBossWindowsForTaipeiDate(taipeiNow);
+  const active=windows.find(([startHour,endHour])=>minute>=startHour*60&&minute<endHour*60);
+  if(active) {
+    const [startHour,endHour]=active;
+    const nextStart=windows.find(([startHour])=>startHour*60>minute)?.[0];
+    return {active:true,startAt:dayStart+startHour*60*60*1000,endAt:dayStart+endHour*60*60*1000,nextAt:nextStart?dayStart+nextStart*60*60*1000:worldBossNextWindowAfter(dayStart+24*60*60*1000)};
+  }
+  return {active:false,nextAt:worldBossNextWindowAfter(now)};
+}
+function worldBossNextWindowAfter(now) {
+  const taipeiNow=new Date(now+WORLD_BOSS_TAIPEI_OFFSET_MS);
+  for(let offset=0;offset<8;offset++) {
+    const date=new Date(Date.UTC(taipeiNow.getUTCFullYear(),taipeiNow.getUTCMonth(),taipeiNow.getUTCDate()+offset));
+    const dayStart=Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate())-WORLD_BOSS_TAIPEI_OFFSET_MS;
+    for(const [startHour] of worldBossWindowsForTaipeiDate(date)) {
+      const startAt=dayStart+startHour*60*60*1000;
+      if(startAt>now) return startAt;
+    }
+  }
+  return now+24*60*60*1000;
+}
 function worldBossRow(g) {
   return db.prepare('SELECT * FROM world_bosses WHERE guild_id=?').get(g)||null;
 }
@@ -1317,19 +1347,25 @@ function worldBossCooldownUntil(boss) {
   return Number(boss.defeated_at||boss.expires_at||0)+WORLD_BOSS_RESPAWN_MS;
 }
 function worldBossForGuild(g,{spawn=true}={}) {
-  let boss=worldBossRow(g),now=Date.now();
-  if(boss?.status==='active'&&now>=boss.expires_at) {
+  let boss=worldBossRow(g),now=Date.now(),window=worldBossWindowAt(now);
+  if(boss?.status==='active'&&(!window.active||boss.started_at<window.startAt||now>=window.endAt)) {
     db.prepare("UPDATE world_bosses SET status='escaped' WHERE guild_id=? AND status='active'").run(g);
     boss=worldBossRow(g);
   }
+  if(boss?.status==='active'&&boss.expires_at!==window.endAt) {
+    db.prepare("UPDATE world_bosses SET expires_at=? WHERE guild_id=? AND status='active'").run(window.endAt,g);
+    boss=worldBossRow(g);
+  }
   if(boss?.status==='active'||!spawn) return boss;
+  if(!window.active) return boss?{...boss,cooldown_until:Math.max(worldBossCooldownUntil(boss),window.nextAt)}:null;
+  if(boss&&Number(boss.expires_at)>=window.startAt) return {...boss,cooldown_until:window.nextAt};
   const cooldownUntil=worldBossCooldownUntil(boss);
   if(cooldownUntil>now) return {...boss,cooldown_until:cooldownUntil};
   const vault=casinoVaultBalance(g);
   const rewardPool=Math.min(8_000_000,Math.max(1_000_000,Math.floor(vault*0.001)));
   const created={
     guildId:g,bossId:`${WORLD_BOSS_DEFINITION.id}_${now.toString(36)}`,name:WORLD_BOSS_DEFINITION.name,
-    maxHp:WORLD_BOSS_MAX_HP,currentHp:WORLD_BOSS_MAX_HP,rewardPool,status:'active',startedAt:now,expiresAt:now+WORLD_BOSS_DURATION_MS
+    maxHp:WORLD_BOSS_MAX_HP,currentHp:WORLD_BOSS_MAX_HP,rewardPool,status:'active',startedAt:window.startAt,expiresAt:window.endAt
   };
   db.prepare(`INSERT INTO world_bosses(guild_id,boss_id,name,max_hp,current_hp,reward_pool,status,started_at,expires_at,defeated_at,last_killer_id)
     VALUES(?,?,?,?,?,?,?,?,?,NULL,NULL)
@@ -1350,7 +1386,7 @@ function worldBossDamage(g,u) {
 function worldBossAttack(g,u) {
   const boss=worldBossForGuild(g,{spawn:false});
   if(!boss||boss.status!=='active') throw new Error('目前沒有可挑戰的世界首領，請稍後再查看。');
-  if(Date.now()>=boss.expires_at) { worldBossForGuild(g); throw new Error('世界首領已撤離，下一位首領正在集結。'); }
+  if(!worldBossWindowAt().active||Date.now()>=boss.expires_at) { worldBossForGuild(g); throw new Error('本期世界首領已撤離，請等待下一個固定時段。'); }
   if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法參與世界首領討伐。');
   const currentStamina=stamina(g,u);
   if(currentStamina<WORLD_BOSS_STAMINA_COST) throw new Error(`體力不足，需要 ${WORLD_BOSS_STAMINA_COST} 點。`);
@@ -1401,7 +1437,7 @@ function worldBossHpBar(boss) {
 }
 function worldBossEmbed(g,u,boss=worldBossForGuild(g),notice='') {
   if(!boss||boss.status!=='active') {
-    const cooldown=worldBossCooldownUntil(boss);
+    const cooldown=Number(boss?.cooldown_until||Math.max(worldBossCooldownUntil(boss),worldBossWindowAt().nextAt));
     const text=cooldown>Date.now()?`下一位世界首領將在 <t:${Math.floor(cooldown/1000)}:R> 集結。`:'世界首領正在集結，按下重新整理呼叫下一場討伐。';
     return new EmbedBuilder().setColor(0x455A64).setTitle('🌐 世界首領').setDescription(`${notice?`${notice}\n\n`:''}${text}\n\n討伐成功時，獎勵會從賭場中央寶庫依傷害比例發放，最後一擊另有額外獎勵。`);
   }
@@ -1410,7 +1446,7 @@ function worldBossEmbed(g,u,boss=worldBossForGuild(g),notice='') {
   const ranks=leaderboard.length?leaderboard.map((row,index)=>`#${index+1} <@${row.user_id}>｜**${fmt(row.damage)}** 傷害`).join('\n'):'尚未有人造成傷害。';
   return new EmbedBuilder().setColor(0x5B2C83).setTitle(`${WORLD_BOSS_DEFINITION.emoji} 世界首領｜${boss.name}`)
     .setDescription(`${notice?`${notice}\n\n`:''}${WORLD_BOSS_DEFINITION.description}\n\n**生命值**：${worldBossHpBar(boss)}\n**${fmt(boss.current_hp)} / ${fmt(boss.max_hp)} HP**\n\n⏳ 撤離倒數：<t:${Math.floor(boss.expires_at/1000)}:R>\n🎁 獎勵池：**${fmt(boss.reward_pool)}**（取自賭場中央寶庫）\n⚡ 每次攻擊：${WORLD_BOSS_STAMINA_COST} 體力｜冷卻 ${WORLD_BOSS_ATTACK_COOLDOWN_MS/1000} 秒\n\n**你的貢獻**：**${fmt(mine?.damage||0)}** 傷害｜${cooldown>0?`下次攻擊 <t:${Math.floor((Date.now()+cooldown)/1000)}:R>`:'可以發動攻擊'}\n\n**傷害排行**\n${ranks}`)
-    .setFooter({text:'擊殺後依傷害比例自動發獎；最後一擊另有額外獎勵。'});
+    .setFooter({text:'固定時間（台北）：平日 12–14、18–20；週末 10–12、14–16、18–20。'});
 }
 function worldBossComponents(g,u,boss=worldBossForGuild(g)) {
   const mine=boss?.status==='active'?worldBossContribution(g,boss.boss_id,u):null;
