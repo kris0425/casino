@@ -1431,3 +1431,20 @@ test('房地產事業提供建築外觀、維護、牌照、升級與市場事�
   assert.match(update.changes.join('\n'),/維護與保險/);
   assert.match(update.changes.join('\n'),/Lv\.10/);
 });
+
+test('世界首領提供共享血量、體力挑戰、貢獻排行與寶庫比例獎勵',()=>{
+  assert.match(source,/CREATE TABLE IF NOT EXISTS world_bosses/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS world_boss_contributions/);
+  assert.match(source,/const WORLD_BOSS_MAX_HP=9_000_000/);
+  assert.match(source,/const WORLD_BOSS_STAMINA_COST=25/);
+  for(const helper of ['worldBossForGuild','worldBossAttack','worldBossEmbed','worldBossComponents']) {
+    assert.match(source,new RegExp(`function ${helper}\\(`),`缺少世界首領功能：${helper}`);
+  }
+  assert.match(source,/setName\('世界首領'\)/);
+  assert.match(source,/world_boss_attack/);
+  assert.match(source,/changeCasinoVaultUnlocked\(g,-payoutPool,'world_boss_reward'/);
+  assert.match(source,/changeBalanceUnlocked\(g,row\.user_id,reward,'world_boss_reward'/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-06-world-boss.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-06-world-boss');
+  assert.match(update.changes.join('\n'),/最後一擊/);
+});

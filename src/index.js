@@ -682,6 +682,31 @@ db.exec(`
     reason TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS world_bosses (
+    guild_id TEXT PRIMARY KEY,
+    boss_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    max_hp INTEGER NOT NULL,
+    current_hp INTEGER NOT NULL,
+    reward_pool INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active','defeated','escaped')),
+    started_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    defeated_at INTEGER,
+    last_killer_id TEXT
+  );
+  CREATE TABLE IF NOT EXISTS world_boss_contributions (
+    guild_id TEXT NOT NULL,
+    boss_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    damage INTEGER NOT NULL DEFAULT 0,
+    attack_count INTEGER NOT NULL DEFAULT 0,
+    last_attack_at INTEGER NOT NULL DEFAULT 0,
+    reward INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id,boss_id,user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_world_boss_contributions_rank
+    ON world_boss_contributions(guild_id,boss_id,damage DESC);
   CREATE TABLE IF NOT EXISTS player_transfers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id TEXT NOT NULL,
@@ -1276,6 +1301,123 @@ function changeCasinoVault(g,delta,kind,userId=null,reason='') {
     db.exec('COMMIT');
     return next;
   } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+const WORLD_BOSS_MAX_HP=9_000_000;
+const WORLD_BOSS_DURATION_MS=8*60*60*1000;
+const WORLD_BOSS_RESPAWN_MS=2*60*60*1000;
+const WORLD_BOSS_ATTACK_COOLDOWN_MS=30*1000;
+const WORLD_BOSS_STAMINA_COST=25;
+const WORLD_BOSS_DEFINITION={id:'neon_tide_behemoth',name:'霓虹黑潮・巨獸',emoji:'🌊',description:'從澳門外海霓虹風暴中現身的巨型異獸，正在吞噬賭城的能量核心。'};
+function worldBossRow(g) {
+  return db.prepare('SELECT * FROM world_bosses WHERE guild_id=?').get(g)||null;
+}
+function worldBossCooldownUntil(boss) {
+  if(!boss||boss.status==='active') return 0;
+  return Number(boss.defeated_at||boss.expires_at||0)+WORLD_BOSS_RESPAWN_MS;
+}
+function worldBossForGuild(g,{spawn=true}={}) {
+  let boss=worldBossRow(g),now=Date.now();
+  if(boss?.status==='active'&&now>=boss.expires_at) {
+    db.prepare("UPDATE world_bosses SET status='escaped' WHERE guild_id=? AND status='active'").run(g);
+    boss=worldBossRow(g);
+  }
+  if(boss?.status==='active'||!spawn) return boss;
+  const cooldownUntil=worldBossCooldownUntil(boss);
+  if(cooldownUntil>now) return {...boss,cooldown_until:cooldownUntil};
+  const vault=casinoVaultBalance(g);
+  const rewardPool=Math.min(8_000_000,Math.max(1_000_000,Math.floor(vault*0.001)));
+  const created={
+    guildId:g,bossId:`${WORLD_BOSS_DEFINITION.id}_${now.toString(36)}`,name:WORLD_BOSS_DEFINITION.name,
+    maxHp:WORLD_BOSS_MAX_HP,currentHp:WORLD_BOSS_MAX_HP,rewardPool,status:'active',startedAt:now,expiresAt:now+WORLD_BOSS_DURATION_MS
+  };
+  db.prepare(`INSERT INTO world_bosses(guild_id,boss_id,name,max_hp,current_hp,reward_pool,status,started_at,expires_at,defeated_at,last_killer_id)
+    VALUES(?,?,?,?,?,?,?,?,?,NULL,NULL)
+    ON CONFLICT(guild_id) DO UPDATE SET boss_id=excluded.boss_id,name=excluded.name,max_hp=excluded.max_hp,current_hp=excluded.current_hp,reward_pool=excluded.reward_pool,status=excluded.status,started_at=excluded.started_at,expires_at=excluded.expires_at,defeated_at=NULL,last_killer_id=NULL`)
+    .run(created.guildId,created.bossId,created.name,created.maxHp,created.currentHp,created.rewardPool,created.status,created.startedAt,created.expiresAt);
+  return worldBossRow(g);
+}
+function worldBossContribution(g,bossId,u) {
+  return db.prepare('SELECT * FROM world_boss_contributions WHERE guild_id=? AND boss_id=? AND user_id=?').get(g,bossId,u)||null;
+}
+function worldBossDamage(g,u) {
+  const assetValue=assetsOf(g,u).reduce((sum,row)=>sum+(assetCatalog[row.asset_id]?.price||0)*Number(row.quantity||0),0);
+  const assetPower=Math.min(70_000,Math.floor(assetValue/25_000));
+  const critical=Math.random()<0.12;
+  const damage=(85_000+assetPower+Math.floor(Math.random()*45_001))*(critical?2:1);
+  return {damage,critical,assetPower};
+}
+function worldBossAttack(g,u) {
+  const boss=worldBossForGuild(g,{spawn:false});
+  if(!boss||boss.status!=='active') throw new Error('目前沒有可挑戰的世界首領，請稍後再查看。');
+  if(Date.now()>=boss.expires_at) { worldBossForGuild(g); throw new Error('世界首領已撤離，下一位首領正在集結。'); }
+  if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法參與世界首領討伐。');
+  const currentStamina=stamina(g,u);
+  if(currentStamina<WORLD_BOSS_STAMINA_COST) throw new Error(`體力不足，需要 ${WORLD_BOSS_STAMINA_COST} 點。`);
+  const contribution=worldBossContribution(g,boss.boss_id,u),remainingCooldown=(contribution?.last_attack_at||0)+WORLD_BOSS_ATTACK_COOLDOWN_MS-Date.now();
+  if(remainingCooldown>0) throw new Error(`攻擊冷卻中，請於 ${Math.ceil(remainingCooldown/1000)} 秒後再試。`);
+  const hit=worldBossDamage(g,u),now=Date.now();
+  let defeated=false,rewards=[],payoutPool=0;
+  let dealtDamage=0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const locked=worldBossRow(g);
+    if(!locked||locked.status!=='active') throw new Error('世界首領已被其他玩家擊敗。');
+    const lockedContribution=worldBossContribution(g,locked.boss_id,u),lockedCooldown=(lockedContribution?.last_attack_at||0)+WORLD_BOSS_ATTACK_COOLDOWN_MS-now;
+    if(lockedCooldown>0) throw new Error(`攻擊冷卻中，請於 ${Math.ceil(lockedCooldown/1000)} 秒後再試。`);
+    const dealt=Math.min(Number(locked.current_hp),hit.damage);
+    dealtDamage=dealt;
+    db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(WORLD_BOSS_STAMINA_COST,g,u);
+    db.prepare(`INSERT INTO world_boss_contributions(guild_id,boss_id,user_id,damage,attack_count,last_attack_at)
+      VALUES(?,?,?,?,?,?) ON CONFLICT(guild_id,boss_id,user_id) DO UPDATE SET damage=damage+excluded.damage,attack_count=attack_count+1,last_attack_at=excluded.last_attack_at`)
+      .run(g,locked.boss_id,u,dealt,1,now);
+    const hpAfter=Math.max(0,Number(locked.current_hp)-dealt);
+    db.prepare('UPDATE world_bosses SET current_hp=? WHERE guild_id=? AND boss_id=? AND status=\'active\'').run(hpAfter,g,locked.boss_id);
+    if(hpAfter===0) {
+      defeated=true;
+      const rows=db.prepare('SELECT user_id,damage FROM world_boss_contributions WHERE guild_id=? AND boss_id=? ORDER BY damage DESC').all(g,locked.boss_id);
+      const totalDamage=rows.reduce((sum,row)=>sum+Number(row.damage),0),available=Math.max(0,casinoVaultBalance(g));
+      payoutPool=Math.min(Number(locked.reward_pool),available);
+      const killerBonus=Math.min(500_000,Math.floor(payoutPool*0.10)),contributionPool=payoutPool-killerBonus;
+      for(const row of rows) {
+        const reward=Math.floor(contributionPool*Number(row.damage)/Math.max(1,totalDamage))+(row.user_id===u?killerBonus:0);
+        if(reward>0) {
+          changeBalanceUnlocked(g,row.user_id,reward,'world_boss_reward',u,`世界首領 ${locked.name} 討伐獎勵`);
+          db.prepare('UPDATE world_boss_contributions SET reward=? WHERE guild_id=? AND boss_id=? AND user_id=?').run(reward,g,locked.boss_id,row.user_id);
+        }
+        rewards.push({userId:row.user_id,damage:Number(row.damage),reward});
+      }
+      if(payoutPool>0) changeCasinoVaultUnlocked(g,-payoutPool,'world_boss_reward',u,`世界首領 ${locked.name} 討伐獎勵池`);
+      db.prepare("UPDATE world_bosses SET status='defeated',defeated_at=?,last_killer_id=? WHERE guild_id=? AND boss_id=?").run(now,u,g,locked.boss_id);
+    }
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  const updated=worldBossRow(g),mine=worldBossContribution(g,boss.boss_id,u);
+  return {boss:updated,damage:dealtDamage,critical:hit.critical,defeated,rewards,payoutPool,mine};
+}
+function worldBossHpBar(boss) {
+  const size=14,filled=Math.max(0,Math.min(size,Math.ceil(Number(boss.current_hp)/Math.max(1,Number(boss.max_hp))*size)));
+  return `${'🟥'.repeat(filled)}${'⬛'.repeat(size-filled)}`;
+}
+function worldBossEmbed(g,u,boss=worldBossForGuild(g),notice='') {
+  if(!boss||boss.status!=='active') {
+    const cooldown=worldBossCooldownUntil(boss);
+    const text=cooldown>Date.now()?`下一位世界首領將在 <t:${Math.floor(cooldown/1000)}:R> 集結。`:'世界首領正在集結，按下重新整理呼叫下一場討伐。';
+    return new EmbedBuilder().setColor(0x455A64).setTitle('🌐 世界首領').setDescription(`${notice?`${notice}\n\n`:''}${text}\n\n討伐成功時，獎勵會從賭場中央寶庫依傷害比例發放，最後一擊另有額外獎勵。`);
+  }
+  const leaderboard=db.prepare('SELECT user_id,damage,reward FROM world_boss_contributions WHERE guild_id=? AND boss_id=? ORDER BY damage DESC LIMIT 5').all(g,boss.boss_id);
+  const mine=worldBossContribution(g,boss.boss_id,u),cooldown=(mine?.last_attack_at||0)+WORLD_BOSS_ATTACK_COOLDOWN_MS-Date.now();
+  const ranks=leaderboard.length?leaderboard.map((row,index)=>`#${index+1} <@${row.user_id}>｜**${fmt(row.damage)}** 傷害`).join('\n'):'尚未有人造成傷害。';
+  return new EmbedBuilder().setColor(0x5B2C83).setTitle(`${WORLD_BOSS_DEFINITION.emoji} 世界首領｜${boss.name}`)
+    .setDescription(`${notice?`${notice}\n\n`:''}${WORLD_BOSS_DEFINITION.description}\n\n**生命值**：${worldBossHpBar(boss)}\n**${fmt(boss.current_hp)} / ${fmt(boss.max_hp)} HP**\n\n⏳ 撤離倒數：<t:${Math.floor(boss.expires_at/1000)}:R>\n🎁 獎勵池：**${fmt(boss.reward_pool)}**（取自賭場中央寶庫）\n⚡ 每次攻擊：${WORLD_BOSS_STAMINA_COST} 體力｜冷卻 ${WORLD_BOSS_ATTACK_COOLDOWN_MS/1000} 秒\n\n**你的貢獻**：**${fmt(mine?.damage||0)}** 傷害｜${cooldown>0?`下次攻擊 <t:${Math.floor((Date.now()+cooldown)/1000)}:R>`:'可以發動攻擊'}\n\n**傷害排行**\n${ranks}`)
+    .setFooter({text:'擊殺後依傷害比例自動發獎；最後一擊另有額外獎勵。'});
+}
+function worldBossComponents(g,u,boss=worldBossForGuild(g)) {
+  const mine=boss?.status==='active'?worldBossContribution(g,boss.boss_id,u):null;
+  const disabled=!boss||boss.status!=='active'||Date.now()>=boss.expires_at||((mine?.last_attack_at||0)+WORLD_BOSS_ATTACK_COOLDOWN_MS>Date.now())||stamina(g,u)<WORLD_BOSS_STAMINA_COST;
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('world_boss_attack').setLabel(`挑戰首領｜${WORLD_BOSS_STAMINA_COST} 體力`).setEmoji('⚔️').setStyle(ButtonStyle.Danger).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('world_boss_refresh').setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary)
+  )];
 }
 const playerTransferFee=amount=>Math.max(1,Math.ceil(amount*PLAYER_TRANSFER_FEE_RATE));
 function createPlayerTransfer(g,senderId,recipientId,amount) {
@@ -6875,6 +7017,7 @@ const commands = [
   new SlashCommandBuilder().setName('二手市場').setDescription('查看其他玩家刊登的二手資產')
     .addIntegerOption(o=>o.setName('編號').setDescription('從下拉選擇市場商品').setMinValue(1).setAutocomplete(true)),
   new SlashCommandBuilder().setName('小遊戲').setDescription('從下拉式選單開啟所有小遊戲（不含工作與搶劫）'),
+  new SlashCommandBuilder().setName('世界首領').setDescription('挑戰全伺服器共享生命值的世界首領'),
   new SlashCommandBuilder().setName('玩法').setDescription('快速查看賭場玩法與常用指令'),
   new SlashCommandBuilder().setName('賭場寶庫').setDescription('查看玩家消費累積的賭場中央寶庫'),
   new SlashCommandBuilder().setName('隊伍').setDescription('建立與管理搶銀行隊伍')
@@ -7153,6 +7296,23 @@ async function handleInteraction(i) {
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有房地產擁有者可以管理這棟建築。',ephemeral:true});
     if(!ownedPropertyBusinessAssets(i.guildId,ownerId).some(row=>row.asset_id===propertyId)) return i.reply({content:'⚠️ 這棟建築已不在你的資產中。',ephemeral:true});
     return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId));
+  }
+  if(i.isButton()&&['world_boss_attack','world_boss_refresh'].includes(i.customId)&&i.guildId) {
+    try {
+      await i.deferUpdate();
+      let notice='';
+      if(i.customId==='world_boss_attack') {
+        const result=worldBossAttack(i.guildId,i.user.id);
+        notice=result.defeated
+          ? `🏆 **${i.user.username}** 完成最後一擊！世界首領已被討伐，已從賭場中央寶庫發放 **${fmt(result.payoutPool)}** 給所有參戰者。`
+          : `${result.critical?'💥 暴擊！':'⚔️ 命中！'} 本次造成 **${fmt(result.damage)}** 傷害，消耗 ${WORLD_BOSS_STAMINA_COST} 體力。`;
+      }
+      const boss=worldBossForGuild(i.guildId);
+      return i.editReply({embeds:[worldBossEmbed(i.guildId,i.user.id,boss,notice)],components:worldBossComponents(i.guildId,i.user.id,boss)});
+    } catch(error) {
+      console.error(`世界首領互動失敗 guild=${i.guildId} user=${i.user.id}: ${error.message}`);
+      return i.followUp({content:`⚠️ ${error.message}`,ephemeral:true});
+    }
   }
   if(i.isButton()&&i.customId.startsWith('property_')&&i.guildId) {
     const [action,ownerId,propertyId]=i.customId.split(':');
@@ -9000,6 +9160,11 @@ async function handleInteraction(i) {
         return owned.length?`**${category}**\n${owned.map(row=>`${assetCatalog[row.asset_id].name} × **${row.quantity}**｜${assetBuffLabel(row.asset_id,row.buff_id)}${row.temporary?`｜⏳ <t:${Math.floor(row.expires_at/1000)}:R>`:''}`).join('\n')}`:null;
       }).filter(Boolean).join('\n\n'):'目前沒有任何房地產或載具。';
       return i.reply({embeds:[new EmbedBuilder().setColor(0x1565C0).setAuthor({name:`${target.username} 的資產`,iconURL:target.displayAvatarURL()}).setDescription(`${list}\n\n🏚️ 目前藏身處：**${hideoutLabel||'尚未設定'}**\n資產原價總值：**${fmt(totalValue)}**`)]});
+    }
+    if(i.commandName==='世界首領') {
+      await i.deferReply();
+      const boss=worldBossForGuild(g);
+      return i.editReply({embeds:[worldBossEmbed(g,u,boss)],components:worldBossComponents(g,u,boss)});
     }
     if(i.commandName==='房地產') {
       await i.deferReply();
