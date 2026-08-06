@@ -70,6 +70,7 @@ const ECONOMY_SINK_LABELS={
   transport_maintenance:'交通事業維修費',
   transport_insurance:'交通事業保險費',
   transport_license:'交通公司牌照續期',
+  transport_strike_resolution:'交通事業員工罷工協調費',
   enterprise_upgrade:'交通企業升級',
   auction_payment:'限時資產拍賣得標款',
   train_blind_box:'列車盲盒',
@@ -329,6 +330,7 @@ const transportPanelDeletionTimers=new Map();
 const transportPanelCustomIdPrefixes=[
   'transport_hub_','transport_business:','transport_register:','transport_register_modal:',
   'transport_station:','transport_route:','transport_start:','transport_claim:','transport_refresh:',
+  'transport_strike_pay:',
   'train_blind_box_','train_garage_upgrade:','airline_register:','airline_register_modal:',
   'airline_airport:','airline_aircraft:','airline_route:','airline_start:','airline_buy_slot:',
   'airline_claim_select:','airline_claim:','airline_refresh:','enterprise_upgrade:'
@@ -808,6 +810,7 @@ db.exec(`
     route_id TEXT NOT NULL,
     gross_revenue INTEGER NOT NULL,
     operating_cost INTEGER NOT NULL,
+    event_id TEXT,
     started_at INTEGER NOT NULL,
     completes_at INTEGER NOT NULL,
     dm_notified_at INTEGER,
@@ -867,6 +870,7 @@ db.exec(`
     truck_id TEXT,
     gross_revenue INTEGER NOT NULL,
     operating_cost INTEGER NOT NULL,
+    event_id TEXT,
     started_at INTEGER NOT NULL,
     completes_at INTEGER NOT NULL,
     dm_notified_at INTEGER,
@@ -883,6 +887,17 @@ db.exec(`
     operation_count INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id,user_id,business_type,operation_day)
+  );
+  CREATE TABLE IF NOT EXISTS transport_incidents (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    business_type TEXT NOT NULL CHECK (business_type IN ('airline','rail','coach','freight')),
+    route_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    resolution_fee INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id,user_id,business_type)
   );
   CREATE TABLE IF NOT EXISTS train_garages (
     guild_id TEXT NOT NULL,
@@ -1033,6 +1048,12 @@ if(!db.prepare('PRAGMA table_info(transport_business_companies)').all().some(col
 }
 if(!db.prepare('PRAGMA table_info(transport_business_operations)').all().some(column=>column.name==='vehicle_id')) {
   db.exec('ALTER TABLE transport_business_operations ADD COLUMN vehicle_id TEXT');
+}
+if(!db.prepare('PRAGMA table_info(transport_business_operations)').all().some(column=>column.name==='event_id')) {
+  db.exec('ALTER TABLE transport_business_operations ADD COLUMN event_id TEXT');
+}
+if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='event_id')) {
+  db.exec('ALTER TABLE airline_flights ADD COLUMN event_id TEXT');
 }
 if(!db.prepare('PRAGMA table_info(asset_auctions)').all().some(column=>column.name==='last_reminder_at')) {
   db.exec('ALTER TABLE asset_auctions ADD COLUMN last_reminder_at INTEGER');
@@ -2478,7 +2499,8 @@ function airlineDashboardEmbed(g,u,notice='') {
     const status=Date.now()>=flight.completes_at
       ? '✅ 已抵達，可從下方選單領取營收'
       : `🛫 執飛中，<t:${Math.floor(flight.completes_at/1000)}:R> 抵達`;
-    return `**機位 #${flight.flight_slot}**｜${status}\n└ ${airlineSelectionName(flight.aircraft_id)}｜${airlineSelectionName(flight.route_id)}｜**${fmt(flight.gross_revenue)}**`;
+    const event=transportEventById(flight.event_id);
+    return `**機位 #${flight.flight_slot}**｜${status}\n└ ${airlineSelectionName(flight.aircraft_id)}｜${airlineSelectionName(flight.route_id)}｜**${fmt(flight.gross_revenue)}**${event?`\n└ ${event.emoji} ${event.name}`:''}`;
   }).join('\n');
   const routeEstimate=airport&&aircraft&&route
     ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*companyMultiplier*nextDailyMultiplier))}**（已套用今日第 ${dailyRuns+1} 趟 ×${nextDailyMultiplier.toFixed(2)}，另有市場需求浮動）\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜航程：**${airlineDurationLabel(route.durationMs)}**`
@@ -2546,7 +2568,72 @@ function updateAirlineSelection(g,u,column,value) {
   if(!airlineCompany(g,u)) throw new Error('請先註冊航空公司');
   db.prepare(`UPDATE airline_companies SET ${column}=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?`).run(value,g,u);
 }
-function startAirlineFlight(g,u) {
+const transportRandomEvents=[
+  {id:'tailwind',emoji:'🌬️',name:'順風加速',text:'天候與路況都很理想，行程更快、載運效率提高。',revenueMultiplier:1.15,durationMultiplier:0.90},
+  {id:'vip_contract',emoji:'💼',name:'VIP 加急合約',text:'臨時接到高價企業與 VIP 客戶的加急委託。',revenueMultiplier:1.25},
+  {id:'smart_dispatch',emoji:'🛰️',name:'智慧調度成功',text:'系統找出更省油的調度方案，降低本次營運成本。',operatingCostMultiplier:0.82},
+  {id:'safety_inspection',emoji:'🛠️',name:'臨時安全檢查',text:'主管機關要求加做安全檢查，行程延長且收益略受影響。',revenueMultiplier:0.90,durationMultiplier:1.20},
+  {id:'staff_strike',emoji:'📣',name:'員工罷工',text:'輪班人員集體停工，必須支付協調費才能讓本次任務出發。',requiresResolution:true}
+];
+const transportEventById=id=>transportRandomEvents.find(event=>event.id===id)||null;
+function rollTransportRandomEvent(random=Math.random) {
+  if(random()>=0.45) return null;
+  return transportRandomEvents[Math.floor(random()*transportRandomEvents.length)];
+}
+function activeTransportIncident(g,u,businessType) {
+  const row=db.prepare('SELECT * FROM transport_incidents WHERE guild_id=? AND user_id=? AND business_type=?').get(g,u,businessType)||null;
+  if(row&&Date.now()>=row.expires_at) {
+    db.prepare('DELETE FROM transport_incidents WHERE guild_id=? AND user_id=? AND business_type=?').run(g,u,businessType);
+    return null;
+  }
+  return row;
+}
+function prepareTransportRandomEvent(g,u,businessType,route,{random=Math.random}={}) {
+  const pending=activeTransportIncident(g,u,businessType);
+  if(pending) return {requiresStrikeResolution:true,event:transportEventById(pending.event_id),incident:pending};
+  const event=rollTransportRandomEvent(random);
+  if(!event?.requiresResolution) return {event,incident:null,requiresStrikeResolution:false};
+  const fee=Math.max(50000,Math.round(route.operatingCost*0.60));
+  const incident={guildId:g,userId:u,businessType,routeId:route.id||'',eventId:event.id,resolutionFee:fee,expiresAt:Date.now()+15*60*1000};
+  db.prepare(`INSERT INTO transport_incidents(guild_id,user_id,business_type,route_id,event_id,resolution_fee,created_at,expires_at)
+    VALUES(?,?,?,?,?,?,?,?)`).run(g,u,businessType,incident.routeId,event.id,fee,Date.now(),incident.expiresAt);
+  return {requiresStrikeResolution:true,event,incident};
+}
+function resolveTransportStrike(g,u,businessType) {
+  const incident=activeTransportIncident(g,u,businessType),event=incident&&transportEventById(incident.event_id);
+  if(!incident||event?.id!=='staff_strike') throw new Error('目前沒有待處理的員工罷工事件。');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    changeBalanceUnlocked(g,u,-incident.resolution_fee,'transport_strike_resolution',u,`${transportBusinessTypes[businessType]?.name||'航空'}｜員工罷工協調費`);
+    db.prepare('DELETE FROM transport_incidents WHERE guild_id=? AND user_id=? AND business_type=?').run(g,u,businessType);
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  return {event,incident};
+}
+function transportStrikeEmbed(g,u,businessType,incident) {
+  const type=businessType==='airline'?{emoji:'✈️',name:'航空運輸'}:transportBusinessTypes[businessType];
+  return new EmbedBuilder().setColor(0xD94A4A).setTitle('📣 交通事業突發事件｜員工罷工')
+    .setDescription(`${type?.emoji||'🚉'} **${type?.name||'交通事業'}** 的輪班人員集體停工，本次任務尚未扣除營運成本或體力。\n\n支付 **${fmt(incident.resolution_fee||incident.resolutionFee)}** 協調費後，系統會立即以原本配置派遣本次任務。\n\n事件將於 <t:${Math.floor((incident.expires_at||incident.expiresAt)/1000)}:R> 失效；逾時後可重新嘗試派遣。\n目前金庫：**${fmt(balance(g,u))}**`)
+    .setFooter({text:'協調費會進入賭場中央寶庫，不會自動扣款。'});
+}
+function transportStrikeComponents(u,businessType,incident) {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`transport_strike_pay:${u}:${businessType}`).setLabel(`支付協調費｜${fmt(incident.resolution_fee||incident.resolutionFee)}`).setEmoji('🤝').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(businessType==='airline'?`airline_refresh:${u}`:`transport_refresh:${u}:${businessType}`).setLabel('暫不處理').setEmoji('⏳').setStyle(ButtonStyle.Secondary)
+  )];
+}
+function transportOperationStartedNotice(result,businessType) {
+  const eventNotice=result.event?`\n${result.event.emoji} 突發事件：**${result.event.name}**｜${result.event.text}`:'';
+  const upkeepNotice=result.upkeep.graceActivated
+    ? '\n🆕 維持費新制寬限已啟用，本次免收；牌照 7 天後續期。'
+    : result.upkeep.totalPaid>0?`\n🧾 本次另繳維修／保險／牌照：**${fmt(result.upkeep.totalPaid)}**`:'';
+  if(businessType==='airline') {
+    return `🛫 **機位 #${result.flightSlot}｜${result.route.name} 已起飛！**\n客機：${result.aircraft.name}\n已支付營運成本：**${fmt(result.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n今日第 **${result.dailyRunNumber}** 趟｜收益係數：**×${result.dailyMultiplier.toFixed(2)}**${eventNotice}${upkeepNotice}\n抵達時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+  }
+  const vehicleText=result.vehicle?`\n事業載具：${transportBusinessVehicleName(result.vehicle)}${result.vehicle.bonus?`｜營收 **+${Math.round(result.vehicle.bonus*100)}%**`:''}`:'';
+  return `${result.type.emoji} **${result.route.name} 已開始營運！**\n場站：${result.station.name}${vehicleText}\n已支付營運成本：**${fmt(result.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n今日第 **${result.dailyRunNumber}** 趟｜收益係數：**×${result.dailyMultiplier.toFixed(2)}**${eventNotice}${upkeepNotice}\n完成時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+}
+function startAirlineFlight(g,u,{skipRandomEvent=false,resolvedEvent=null}={}) {
   const company=airlineCompany(g,u);
   if(!company) throw new Error('請先註冊航空公司');
   const flights=airlineFlights(g,u);
@@ -2561,22 +2648,29 @@ function startAirlineFlight(g,u) {
   if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理航空公司');
   const staminaUsed=staminaCost(g,u,route.stamina),currentStamina=stamina(g,u);
   if(currentStamina<staminaUsed) throw new Error(`體力不足，需要 ${staminaUsed} 點`);
+  const eventDecision=skipRandomEvent
+    ? {event:resolvedEvent,requiresStrikeResolution:false,incident:null}
+    : prepareTransportRandomEvent(g,u,'airline',route);
+  if(eventDecision.requiresStrikeResolution) return {requiresStrikeResolution:true,event:eventDecision.event,incident:eventDecision.incident};
+  const event=eventDecision.event;
   const dailyRuns=transportDailyOperationCount(g,u,'airline'),dailyMultiplier=transportDailyRevenueMultiplier(dailyRuns);
-  const upkeepQuote=transportUpkeepQuote(g,u,'airline',company),requiredFunds=route.operatingCost+upkeepQuote.totalDue;
+  const operatingCost=Math.floor(route.operatingCost*(event?.operatingCostMultiplier||1));
+  const upkeepQuote=transportUpkeepQuote(g,u,'airline',company),requiredFunds=operatingCost+upkeepQuote.totalDue;
   if(balance(g,u)<requiredFunds) throw new Error(`營運資金不足，需要 ${fmt(requiredFunds)}（含本次到期維持費 ${fmt(upkeepQuote.totalDue)}）`);
   const demandMultiplier=0.90+Math.random()*0.21;
-  const grossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
-  const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
+  const baseGrossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
+  const grossRevenue=Math.floor(baseGrossRevenue*(event?.revenueMultiplier||1));
+  const startedAt=Date.now(),completesAt=startedAt+Math.floor(route.durationMs*(event?.durationMultiplier||1));
   const flightSlot=Array.from({length:slots},(_,index)=>index+1).find(slot=>!flights.some(flight=>flight.flight_slot===slot));
   let flightId=0;
   let upkeep;
   db.exec('BEGIN IMMEDIATE');
   try {
     upkeep=settleTransportUpkeepUnlocked(g,u,'airline',company);
-    changeBalanceUnlocked(g,u,-route.operatingCost,'airline_operation',u,`${company.company_name}｜${route.name} 營運成本`);
+    changeBalanceUnlocked(g,u,-operatingCost,'airline_operation',u,`${company.company_name}｜${route.name} 營運成本`);
     db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(staminaUsed,g,u);
-    const inserted=db.prepare('INSERT INTO airline_flights(guild_id,user_id,flight_slot,airport_id,aircraft_id,route_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
-      .run(g,u,flightSlot,company.airport_id,company.aircraft_id,company.route_id,grossRevenue,route.operatingCost,startedAt,completesAt);
+    const inserted=db.prepare('INSERT INTO airline_flights(guild_id,user_id,flight_slot,airport_id,aircraft_id,route_id,gross_revenue,operating_cost,event_id,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+      .run(g,u,flightSlot,company.airport_id,company.aircraft_id,company.route_id,grossRevenue,operatingCost,event?.id||null,startedAt,completesAt);
     recordTransportDailyOperationUnlocked(g,u,'airline');
     flightId=Number(inserted.lastInsertRowid);
     db.exec('COMMIT');
@@ -2584,7 +2678,7 @@ function startAirlineFlight(g,u) {
     db.exec('ROLLBACK');
     throw error;
   }
-  return {company,airport,aircraft,route,grossRevenue,staminaUsed,startedAt,completesAt,flightId,flightSlot,dailyRunNumber:dailyRuns+1,dailyMultiplier,upkeep};
+  return {company,airport,aircraft,route,event,operatingCost,grossRevenue,staminaUsed,startedAt,completesAt,flightId,flightSlot,dailyRunNumber:dailyRuns+1,dailyMultiplier,upkeep};
 }
 function buyAdditionalAirlineSlot(g,u) {
   const company=airlineCompany(g,u);
@@ -2825,10 +2919,11 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
   const companyLevel=enterpriseLevel(company),companyMultiplier=enterpriseRevenueMultiplier(company);
   const dailyRuns=transportDailyOperationCount(g,u,businessType),nextDailyMultiplier=transportDailyRevenueMultiplier(dailyRuns);
   const upkeepText=transportUpkeepText(g,u,businessType,company);
+  const operationEvent=transportEventById(operation?.event_id);
   const operationText=operation
     ? Date.now()>=operation.completes_at
-      ? `✅ **${type.operationLabel}已完成，可以領取營收**\n${transportSelectionName(operation.route_id)}｜可領營收 **${fmt(operation.gross_revenue)}**`
-      : `${type.emoji} **${type.operationLabel}進行中**\n${transportSelectionName(operation.route_id)}｜<t:${Math.floor(operation.completes_at/1000)}:R> 完成\n預計營收：**${fmt(operation.gross_revenue)}**`
+      ? `✅ **${type.operationLabel}已完成，可以領取營收**\n${transportSelectionName(operation.route_id)}｜可領營收 **${fmt(operation.gross_revenue)}**${operationEvent?`\n${operationEvent.emoji} ${operationEvent.name}`:''}`
+      : `${type.emoji} **${type.operationLabel}進行中**\n${transportSelectionName(operation.route_id)}｜<t:${Math.floor(operation.completes_at/1000)}:R> 完成\n預計營收：**${fmt(operation.gross_revenue)}**${operationEvent?`\n${operationEvent.emoji} ${operationEvent.name}`:''}`
     : `目前沒有進行中的${type.operationLabel}。`;
   const fallbackFreightTruck=businessType==='freight'?bestOwnedFreightTruck(g,u):null;
   const selectedVehicle=selectedTransportBusinessVehicle(g,u,businessType,company);
@@ -2917,7 +3012,7 @@ function updateTransportBusinessSelection(g,u,businessType,column,value) {
   }
   throw new Error('無效的交通事業營運選項');
 }
-function startTransportBusinessOperation(g,u,businessType) {
+function startTransportBusinessOperation(g,u,businessType,{skipRandomEvent=false,resolvedEvent=null}={}) {
   requireTransportBusinessType(businessType);
   if(businessType==='rail') ensureStarterTrain(g,u);
   const company=businessTransportCompany(g,u,businessType);
@@ -2936,29 +3031,36 @@ function startTransportBusinessOperation(g,u,businessType) {
   if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理交通事業');
   const staminaUsed=staminaCost(g,u,route.stamina),currentStamina=stamina(g,u);
   if(currentStamina<staminaUsed) throw new Error(`體力不足，需要 ${staminaUsed} 點`);
+  const eventDecision=skipRandomEvent
+    ? {event:resolvedEvent,requiresStrikeResolution:false,incident:null}
+    : prepareTransportRandomEvent(g,u,businessType,route);
+  if(eventDecision.requiresStrikeResolution) return {requiresStrikeResolution:true,event:eventDecision.event,incident:eventDecision.incident};
+  const event=eventDecision.event;
   const dailyRuns=transportDailyOperationCount(g,u,businessType),dailyMultiplier=transportDailyRevenueMultiplier(dailyRuns);
-  const upkeepQuote=transportUpkeepQuote(g,u,businessType,company),requiredFunds=route.operatingCost+upkeepQuote.totalDue;
+  const operatingCost=Math.floor(route.operatingCost*(event?.operatingCostMultiplier||1));
+  const upkeepQuote=transportUpkeepQuote(g,u,businessType,company),requiredFunds=operatingCost+upkeepQuote.totalDue;
   if(balance(g,u)<requiredFunds) throw new Error(`營運資金不足，需要 ${fmt(requiredFunds)}（含本次到期維持費 ${fmt(upkeepQuote.totalDue)}）`);
   const trainMultiplier=trainAsset?1+trainAsset.trainRevenueBonus:1;
   const truckMultiplier=truckAsset?1+truckAsset.truckRevenueBonus:1;
   const demandMultiplier=0.90+Math.random()*0.21;
-  const grossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
-  const startedAt=Date.now(),completesAt=startedAt+route.durationMs;
+  const baseGrossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
+  const grossRevenue=Math.floor(baseGrossRevenue*(event?.revenueMultiplier||1));
+  const startedAt=Date.now(),completesAt=startedAt+Math.floor(route.durationMs*(event?.durationMultiplier||1));
   let upkeep;
   db.exec('BEGIN IMMEDIATE');
   try {
     upkeep=settleTransportUpkeepUnlocked(g,u,businessType,company);
-    changeBalanceUnlocked(g,u,-route.operatingCost,'transport_operation',u,`${company.company_name}｜${route.name} 營運成本`);
+    changeBalanceUnlocked(g,u,-operatingCost,'transport_operation',u,`${company.company_name}｜${route.name} 營運成本`);
     db.prepare('UPDATE player_stats SET stamina=stamina-? WHERE guild_id=? AND user_id=?').run(staminaUsed,g,u);
-    db.prepare('INSERT INTO transport_business_operations(guild_id,user_id,business_type,station_id,route_id,vehicle_id,train_id,truck_id,gross_revenue,operating_cost,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(g,u,businessType,company.station_id,company.route_id,selectedVehicle.id,train?.asset_id||null,truck?.asset_id||null,grossRevenue,route.operatingCost,startedAt,completesAt);
+    db.prepare('INSERT INTO transport_business_operations(guild_id,user_id,business_type,station_id,route_id,vehicle_id,train_id,truck_id,gross_revenue,operating_cost,event_id,started_at,completes_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(g,u,businessType,company.station_id,company.route_id,selectedVehicle.id,train?.asset_id||null,truck?.asset_id||null,grossRevenue,operatingCost,event?.id||null,startedAt,completesAt);
     recordTransportDailyOperationUnlocked(g,u,businessType);
     db.exec('COMMIT');
   } catch(error) {
     db.exec('ROLLBACK');
     throw error;
   }
-  return {company,station,route,type:transportBusinessTypes[businessType],vehicle:selectedVehicle,train:trainAsset,truck:truckAsset,trainMultiplier,truckMultiplier,grossRevenue,staminaUsed,startedAt,completesAt,dailyRunNumber:dailyRuns+1,dailyMultiplier,upkeep};
+  return {company,station,route,type:transportBusinessTypes[businessType],event,operatingCost,vehicle:selectedVehicle,train:trainAsset,truck:truckAsset,trainMultiplier,truckMultiplier,grossRevenue,staminaUsed,startedAt,completesAt,dailyRunNumber:dailyRuns+1,dailyMultiplier,upkeep};
 }
 function claimTransportBusinessRevenue(g,u,businessType) {
   const company=businessTransportCompany(g,u,businessType),operation=businessTransportOperation(g,u,businessType);
@@ -8264,15 +8366,31 @@ async function handleInteraction(i) {
       return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
     }
   }
+  if(i.isButton()&&i.customId.startsWith('transport_strike_pay:')&&i.guildId) {
+    const [,ownerId,businessType]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有公司行號擁有者可以處理員工罷工。',ephemeral:true});
+    try {
+      const resolved=resolveTransportStrike(i.guildId,ownerId,businessType);
+      const result=businessType==='airline'
+        ? startAirlineFlight(i.guildId,ownerId,{skipRandomEvent:true,resolvedEvent:resolved.event})
+        : startTransportBusinessOperation(i.guildId,ownerId,businessType,{skipRandomEvent:true,resolvedEvent:resolved.event});
+      if(result.requiresStrikeResolution) return i.update({embeds:[transportStrikeEmbed(i.guildId,ownerId,businessType,result.incident)],components:transportStrikeComponents(ownerId,businessType,result.incident)});
+      const notice=`🤝 **員工罷工已協調完成！** 已支付 **${fmt(resolved.incident.resolution_fee||resolved.incident.resolutionFee)}** 協調費。\n\n${transportOperationStartedNotice(result,businessType)}`;
+      return i.update({
+        embeds:[businessType==='airline'?airlineDashboardEmbed(i.guildId,ownerId,notice):transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,notice)],
+        components:businessType==='airline'?airlineDashboardComponents(i.guildId,ownerId):transportBusinessDashboardComponents(i.guildId,ownerId,businessType)
+      });
+    } catch(error) {
+      return i.reply({content:`⚠️ 無法處理員工罷工：${error.message}`,ephemeral:true});
+    }
+  }
   if(i.isButton()&&i.customId.startsWith('airline_start:')&&i.guildId) {
     const ownerId=i.customId.split(':')[1];
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以開啟航線。',ephemeral:true});
     try {
       const result=startAirlineFlight(i.guildId,ownerId);
-      const upkeepNotice=result.upkeep.graceActivated
-        ? '\n🆕 維持費新制寬限已啟用，本次免收；牌照 7 天後續期。'
-        : result.upkeep.totalPaid>0?`\n🧾 本次另繳維修／保險／牌照：**${fmt(result.upkeep.totalPaid)}**`:'';
-      const notice=`🛫 **機位 #${result.flightSlot}｜${result.route.name} 已起飛！**\n客機：${result.aircraft.name}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n今日第 **${result.dailyRunNumber}** 趟｜收益係數：**×${result.dailyMultiplier.toFixed(2)}**${upkeepNotice}\n抵達時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+      if(result.requiresStrikeResolution) return i.update({embeds:[transportStrikeEmbed(i.guildId,ownerId,'airline',result.incident)],components:transportStrikeComponents(ownerId,'airline',result.incident)});
+      const notice=transportOperationStartedNotice(result,'airline');
       return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法開啟航線：${error.message}`,ephemeral:true});
@@ -8355,11 +8473,8 @@ async function handleInteraction(i) {
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有公司行號擁有者可以開始營運。',ephemeral:true});
     try {
       const result=startTransportBusinessOperation(i.guildId,ownerId,businessType);
-      const vehicleText=result.vehicle?`\n事業載具：${transportBusinessVehicleName(result.vehicle)}${result.vehicle.bonus?`｜營收 **+${Math.round(result.vehicle.bonus*100)}%**`:''}`:'';
-      const upkeepNotice=result.upkeep.graceActivated
-        ? '\n🆕 維持費新制寬限已啟用，本次免收；牌照 7 天後續期。'
-        : result.upkeep.totalPaid>0?`\n🧾 本次另繳維修／保險／牌照：**${fmt(result.upkeep.totalPaid)}**`:'';
-      const notice=`${result.type.emoji} **${result.route.name} 已開始營運！**\n場站：${result.station.name}${vehicleText}\n已支付營運成本：**${fmt(result.route.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n今日第 **${result.dailyRunNumber}** 趟｜收益係數：**×${result.dailyMultiplier.toFixed(2)}**${upkeepNotice}\n完成時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+      if(result.requiresStrikeResolution) return i.update({embeds:[transportStrikeEmbed(i.guildId,ownerId,businessType,result.incident)],components:transportStrikeComponents(ownerId,businessType,result.incident)});
+      const notice=transportOperationStartedNotice(result,businessType);
       return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,notice)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法開始營運：${error.message}`,ephemeral:true});

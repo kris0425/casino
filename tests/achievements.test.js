@@ -611,7 +611,8 @@ test('交通維修保險牌照、每日遞減及高額賭局抽成完整',()=>{
   for(const block of [airlineStart,groundStart]) {
     assert.match(block,/settleTransportUpkeepUnlocked/);
     assert.match(block,/recordTransportDailyOperationUnlocked/);
-    assert.match(block,/requiredFunds=route\.operatingCost\+upkeepQuote\.totalDue/);
+    assert.match(block,/const operatingCost=Math\.floor\(route\.operatingCost\*\(event\?\.operatingCostMultiplier\|\|1\)\)/);
+    assert.match(block,/requiredFunds=operatingCost\+upkeepQuote\.totalDue/);
   }
   const trigger=source.match(/CREATE TRIGGER ledger_collect_casino_vault[\s\S]+?END;/)?.[0]||'';
   assert.match(trigger,/'transport_maintenance','transport_insurance','transport_license'/,'交通維持費應永久回收，不流入賭場寶庫');
@@ -876,7 +877,7 @@ test('三種交通場站分開註冊公司並可同時營運',()=>{
   assert.match(source,/changeBalanceUnlocked\(g,u,-TRANSPORT_REGISTRATION_FEE,'transport_registration'/);
   assert.match(source,/transport_register_modal:\$\{ownerId\}:\$\{businessType\}/);
   assert.match(source,/transport_business:\$\{u\}:\$\{businessType\}/);
-  assert.match(source,/changeBalanceUnlocked\(g,u,-route\.operatingCost,'transport_operation'/);
+  assert.match(source,/changeBalanceUnlocked\(g,u,-operatingCost,'transport_operation'/);
   assert.match(source,/changeBalanceUnlocked\(g,u,operation\.gross_revenue,'transport_revenue'/);
   assert.match(source,/setInterval\(notifyCompletedTransportOperations,60000\)/);
 
@@ -1003,6 +1004,23 @@ test('火車站配給基礎列車並支援最多 20 格車庫',()=>{
   assert.equal(quantity,1);
   assert.equal(buffCount,1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ledger').get().count,1);
+});
+
+test('交通事業五種隨機事件會套用收益、成本或時間，員工罷工需玩家支付協調費',()=>{
+  assert.match(source,/const transportRandomEvents=\[/);
+  for(const eventId of ['tailwind','vip_contract','smart_dispatch','safety_inspection','staff_strike']) {
+    assert.match(source,new RegExp(`id:'${eventId}'`),`缺少交通隨機事件 ${eventId}`);
+  }
+  assert.match(source,/CREATE TABLE IF NOT EXISTS transport_incidents/);
+  assert.match(source,/function prepareTransportRandomEvent\(/);
+  assert.match(source,/function resolveTransportStrike\(/);
+  assert.match(source,/transport_strike_resolution/);
+  assert.match(source,/transport_strike_pay:\$\{u\}:\$\{businessType\}/);
+  assert.match(source,/if\(eventDecision\.requiresStrikeResolution\) return \{requiresStrikeResolution:true/);
+  assert.match(source,/event\?\.revenueMultiplier\|\|1/);
+  assert.match(source,/event\?\.durationMultiplier\|\|1/);
+  assert.match(source,/event\?\.operatingCostMultiplier\|\|1/);
+  assert.ok(existsSync(new URL('../updates/2026-08-06-transport-random-events.json',import.meta.url)),'缺少交通隨機事件公告');
 });
 
 test('陸路交通事業可選擇事業載具並保存到營運紀錄',()=>{
