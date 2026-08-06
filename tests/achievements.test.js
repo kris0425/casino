@@ -1380,3 +1380,30 @@ test('移除未接線的舊版造型、交通與下注輔助碼',()=>{
     assert.match(source,new RegExp(`function ${activeHelper}\\(`),`現行功能不應被誤刪：${activeHelper}`);
   }
 });
+
+test('房地產事業提供建築外觀、維護、牌照、升級與市場事件',()=>{
+  const properties=[
+    ['jade_bay_serviced_residences','properties/real-estate/jade-bay-residences.png'],
+    ['obsidian_finance_center','properties/real-estate/obsidian-finance-center.png'],
+    ['crown_harbor_grand_hotel','properties/real-estate/crown-harbor-grand-hotel.png']
+  ];
+  for(const [assetId,imagePath] of properties) {
+    const block=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(block,/category:'房地產'/);
+    assert.match(block,/propertyBusiness:\{/);
+    assert.match(block,new RegExp(`image:'${imagePath.replace(/[/.]/g,'\\$&')}'`));
+    const image=readFileSync(new URL(`../assets/${imagePath}`,import.meta.url));
+    assert.equal(image.subarray(1,4).toString(),'PNG',`${assetId} 缺少 PNG 外觀素材`);
+    assert.ok(image.readUInt32BE(16)>image.readUInt32BE(20),`${assetId} 建築外觀必須為橫向`);
+  }
+  for(const table of ['property_businesses','property_operations']) assert.match(source,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
+  for(const helper of ['registerPropertyBusiness','startPropertyOperation','claimPropertyRevenue','upgradePropertyBusiness','propertyBusinessPayload']) {
+    assert.match(source,new RegExp(`function ${helper}\\(`),`缺少房地產功能：${helper}`);
+  }
+  assert.match(source,/propertyRevenueEvents=/);
+  assert.match(source,/setName\('房地產'\)/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-06-real-estate-business.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-06-real-estate-business');
+  assert.match(update.changes.join('\n'),/維護與保險/);
+  assert.match(update.changes.join('\n'),/Lv\.10/);
+});

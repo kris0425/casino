@@ -49,6 +49,11 @@ const BURGLARY_MAX_SUCCESS_RATE = 0.30;
 const ECONOMY_SINK_LABELS={
   asset_purchase:'房地產／永久資產',
   asset_rental:'套房／限時租賃',
+  property_registration:'房地產公司註冊費',
+  property_operation:'房地產營運成本',
+  property_maintenance:'房地產維護與保險',
+  property_license:'房地產營業牌照續期',
+  property_upgrade:'房地產升級',
   shop:'食物與商城',
   medical:'醫療費用',
   heist_weapon:'搶劫槍枝',
@@ -557,6 +562,32 @@ db.exec(`
     rented_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id, user_id, asset_id)
   );
+  CREATE TABLE IF NOT EXISTS property_businesses (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    property_id TEXT NOT NULL,
+    level INTEGER NOT NULL DEFAULT 1,
+    condition INTEGER NOT NULL DEFAULT 100,
+    maintenance_day TEXT,
+    insurance_day TEXT,
+    license_week TEXT,
+    total_collected INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, user_id, property_id)
+  );
+  CREATE TABLE IF NOT EXISTS property_operations (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    property_id TEXT NOT NULL,
+    gross_revenue INTEGER NOT NULL,
+    operating_cost INTEGER NOT NULL,
+    event_id TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    completes_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, user_id, property_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_property_operations_completion
+    ON property_operations(completes_at);
   CREATE TABLE IF NOT EXISTS asset_bonuses (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, asset_id TEXT NOT NULL, buff_id TEXT NOT NULL,
     assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1431,6 +1462,9 @@ const assetCatalog={
   cute_dog_den:{name:'🐶 萌犬的窩',category:'房地產',price:128000,description:'以柔軟床墊、暖色燈光與皇冠裝飾打造的萌犬專屬小宮殿，讓主人與犬類夥伴都能獲得更充分的休息。',image:'pets/cute_dog_den.jpg',rarity:'史詩',buff:'stamina',buffMultiplier:1.5},
   apartment:{name:'🏢 市中心公寓',category:'房地產',price:50000,description:'適合新手投資人的第一間房。',image:'properties/downtown_apartment.jpg'},
   villa:{name:'🏡 海景別墅',category:'房地產',price:250000,description:'能眺望賭場燈火的豪華別墅。',image:'properties/ocean_view_villa.jpg'},
+  jade_bay_serviced_residences:{name:'🌴 翡翠灣服務式公寓',category:'房地產',price:18000000,description:'面向海灣的高級服務式住宅，適合經營長租公寓。每日首輪營運會收取維護與保險費，每週續期營業牌照；可升級至 Lv.10 提升租金。',image:'properties/real-estate/jade-bay-residences.png',rarity:'傳說',propertyBusiness:{type:'residence',label:'長租公寓',baseRevenue:430000,operatingCost:120000,durationMs:90*60*1000,maintenanceRate:0.002,insuranceRate:0.0008,licenseRate:0.0015}},
+  obsidian_finance_center:{name:'🏙️ 黑曜金融中心',category:'房地產',price:95000000,description:'雙塔玻璃帷幕與空中連廊組成的企業核心地標，可經營商辦出租。每日首輪營運會收取維護與保險費，每週續期營業牌照；可升級至 Lv.10 提升租金。',image:'properties/real-estate/obsidian-finance-center.png',rarity:'神話',propertyBusiness:{type:'office',label:'商辦出租',baseRevenue:2100000,operatingCost:700000,durationMs:2*60*60*1000,maintenanceRate:0.0025,insuranceRate:0.001,licenseRate:0.002}},
+  crown_harbor_grand_hotel:{name:'👑 皇冠港大飯店',category:'房地產',price:320000000,description:'坐擁海港的頂級飯店與宴會地標，可經營高端住宿與會展。每日首輪營運會收取維護與保險費，每週續期營業牌照；可升級至 Lv.10 提升租金。',image:'properties/real-estate/crown-harbor-grand-hotel.png',rarity:'限定',propertyBusiness:{type:'hotel',label:'飯店營運',baseRevenue:7200000,operatingCost:2800000,durationMs:3*60*60*1000,maintenanceRate:0.003,insuranceRate:0.0012,licenseRate:0.0025}},
   casino_suite:{name:'🏨 賭場豪華頂樓公寓',category:'房地產',price:600000,description:'坐擁賭城夜景、豪華臥室、景觀浴室與私人客廳的頂樓尊榮住所。',images:['properties/casino_penthouse_bathroom.jpg','properties/casino_penthouse_bedroom.jpg','properties/casino_penthouse_livingroom.jpg']},
   luxury_palace:{name:'👑 豪華宮殿',category:'房地產',price:8888888,description:'金碧輝煌的頂級私人宮殿，擁有宏偉外觀、奢華寢宮、宴會廳、衣帽間與宮廷庭園，是身分與財富的終極象徵。',image:'properties/luxury_palace.jpg',rarity:'神話'},
   macau_bay_international_airport:{name:'🛫 澳門海灣國際機場',category:'房地產',price:8888888,description:'面向港澳台與鄰近城市的區域航空樞紐。購買後可註冊航空公司，使用自己的客機經營區域及東亞航線。',image:'properties/airports/macau_bay_international_airport.png',rarity:'傳說',unique:true,airportTier:1,airlineMultiplier:1},
@@ -3045,6 +3079,154 @@ async function notifyCompletedTransportOperations() {
   }
 }
 const HIDEOUT_MAX_LEVEL=5;
+const PROPERTY_BUSINESS_MAX_LEVEL=10;
+const PROPERTY_REGISTRATION_FEE=500000;
+const propertyRevenueEvents=[
+  {id:'quiet',name:'淡季空置',emoji:'🌧️',multiplier:0.72,text:'本期租客到訪偏低，入住率不如預期。'},
+  {id:'steady',name:'穩定出租',emoji:'🏠',multiplier:1,text:'租客與商戶如期續約，營收維持穩定。'},
+  {id:'premium',name:'高端長約',emoji:'📈',multiplier:1.22,text:'高端住客／企業客戶簽下長約。'},
+  {id:'event',name:'城市盛事',emoji:'🎆',multiplier:1.55,text:'城市活動帶來大量訂房與商務需求。'}
+];
+function propertyBusinessWeek() {
+  const date=new Date(`${taipeiDay()}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate()-((date.getUTCDay()+6)%7));
+  return date.toISOString().slice(0,10);
+}
+function ownedPropertyBusinessAssets(g,u) {
+  return assetsOf(g,u)
+    .filter(row=>assetCatalog[row.asset_id]?.propertyBusiness&&row.quantity>0)
+    .sort((a,b)=>(assetCatalog[b.asset_id].price||0)-(assetCatalog[a.asset_id].price||0));
+}
+function propertyBusinessRecord(g,u,propertyId) {
+  return db.prepare('SELECT * FROM property_businesses WHERE guild_id=? AND user_id=? AND property_id=?').get(g,u,propertyId)||null;
+}
+function propertyOperation(g,u,propertyId) {
+  return db.prepare('SELECT * FROM property_operations WHERE guild_id=? AND user_id=? AND property_id=?').get(g,u,propertyId)||null;
+}
+function propertyUpgradeCost(asset,business) {
+  const level=Number(business?.level||1);
+  if(level>=PROPERTY_BUSINESS_MAX_LEVEL) return null;
+  return Math.round(asset.price*(0.025+level*0.0125));
+}
+function propertyUpkeep(g,u,asset,business) {
+  const today=taipeiDay(),week=propertyBusinessWeek(),definition=asset.propertyBusiness;
+  const charges=[];
+  if(business.maintenance_day!==today) charges.push({kind:'property_maintenance',label:'日常維護',amount:Math.round(asset.price*definition.maintenanceRate)});
+  if(business.insurance_day!==today) charges.push({kind:'property_maintenance',label:'營運保險',amount:Math.round(asset.price*definition.insuranceRate)});
+  if(business.license_week!==week) charges.push({kind:'property_license',label:'營業牌照續期',amount:Math.round(asset.price*definition.licenseRate)});
+  return {today,week,charges,total:charges.reduce((sum,charge)=>sum+charge.amount,0)};
+}
+function registerPropertyBusiness(g,u,propertyId) {
+  const asset=assetCatalog[propertyId];
+  if(!asset?.propertyBusiness||assetQuantity(g,u,propertyId)<1) throw new Error('你沒有可營運的房地產，請先到資產商城購買。');
+  if(propertyBusinessRecord(g,u,propertyId)) throw new Error('這棟房地產已完成公司登記。');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    changeBalanceUnlocked(g,u,-PROPERTY_REGISTRATION_FEE,'property_registration',u,`房地產公司登記｜${asset.name}`);
+    db.prepare('INSERT INTO property_businesses(guild_id,user_id,property_id) VALUES(?,?,?)').run(g,u,propertyId);
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  return propertyBusinessRecord(g,u,propertyId);
+}
+function startPropertyOperation(g,u,propertyId) {
+  const asset=assetCatalog[propertyId],definition=asset?.propertyBusiness,business=propertyBusinessRecord(g,u,propertyId);
+  if(!definition||assetQuantity(g,u,propertyId)<1) throw new Error('這棟房地產已不在你的資產中。');
+  if(!business) throw new Error('請先完成房地產公司登記。');
+  if(propertyOperation(g,u,propertyId)) throw new Error('這棟房地產已有一筆營運中的招商案件。');
+  if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理房地產事業。');
+  const upkeep=propertyUpkeep(g,u,asset,business),baseCost=definition.operatingCost,totalCost=baseCost+upkeep.total;
+  if(balance(g,u)<totalCost) throw new Error(`營運資金不足，需要 ${fmt(totalCost)}`);
+  const event=propertyRevenueEvents[Math.floor(Math.random()*propertyRevenueEvents.length)];
+  const condition=business.maintenance_day!==upkeep.today?100:Number(business.condition||100);
+  const conditionMultiplier=0.75+Math.max(40,Math.min(100,condition))/400;
+  const levelMultiplier=1+(Math.max(1,Number(business.level||1))-1)*0.08;
+  const grossRevenue=Math.floor(definition.baseRevenue*levelMultiplier*conditionMultiplier*event.multiplier);
+  const startedAt=Date.now(),completesAt=startedAt+definition.durationMs,conditionAfter=Math.max(40,condition-(6+Math.floor(Math.random()*7)));
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for(const charge of upkeep.charges) changeBalanceUnlocked(g,u,-charge.amount,charge.kind,u,`${asset.name}｜${charge.label}`);
+    changeBalanceUnlocked(g,u,-baseCost,'property_operation',u,`${asset.name}｜${definition.label}招商成本`);
+    db.prepare(`UPDATE property_businesses
+      SET condition=?,maintenance_day=?,insurance_day=?,license_week=?,updated_at=CURRENT_TIMESTAMP
+      WHERE guild_id=? AND user_id=? AND property_id=?`)
+      .run(conditionAfter,upkeep.today,upkeep.today,upkeep.week,g,u,propertyId);
+    db.prepare(`INSERT INTO property_operations(guild_id,user_id,property_id,gross_revenue,operating_cost,event_id,started_at,completes_at)
+      VALUES(?,?,?,?,?,?,?,?)`).run(g,u,propertyId,grossRevenue,totalCost,event.id,startedAt,completesAt);
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  return {asset,business:{...business,condition:conditionAfter},event,upkeep,baseCost,totalCost,grossRevenue,startedAt,completesAt};
+}
+function claimPropertyRevenue(g,u,propertyId) {
+  const asset=assetCatalog[propertyId],operation=propertyOperation(g,u,propertyId);
+  if(!operation) throw new Error('目前沒有可領取的房地產營收。');
+  if(Date.now()<operation.completes_at) throw new Error('招商案件尚未完成，請稍後再領取營收。');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const next=changeBalanceUnlocked(g,u,operation.gross_revenue,'property_revenue',u,`${asset?.name||propertyId}｜租金與營運收入`);
+    db.prepare('DELETE FROM property_operations WHERE guild_id=? AND user_id=? AND property_id=?').run(g,u,propertyId);
+    db.prepare('UPDATE property_businesses SET total_collected=total_collected+?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=? AND property_id=?')
+      .run(operation.gross_revenue,g,u,propertyId);
+    db.exec('COMMIT');
+    return {operation,next,profit:operation.gross_revenue-operation.operating_cost};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+function upgradePropertyBusiness(g,u,propertyId) {
+  const asset=assetCatalog[propertyId],business=propertyBusinessRecord(g,u,propertyId);
+  if(!asset?.propertyBusiness||assetQuantity(g,u,propertyId)<1||!business) throw new Error('請先持有並登記這棟房地產。');
+  const cost=propertyUpgradeCost(asset,business);
+  if(cost===null) throw new Error('這棟房地產已達最高等級。');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    changeBalanceUnlocked(g,u,-cost,'property_upgrade',u,`${asset.name}｜營運升級 Lv.${Number(business.level)+1}`);
+    db.prepare('UPDATE property_businesses SET level=level+1,condition=MIN(100,condition+15),updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=? AND property_id=?').run(g,u,propertyId);
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  return {cost,business:propertyBusinessRecord(g,u,propertyId)};
+}
+function propertyBusinessEmbed(g,u,propertyId=null,notice='') {
+  const owned=ownedPropertyBusinessAssets(g,u);
+  if(!owned.length) return new EmbedBuilder().setColor(0x455A64).setTitle('🏙️ 房地產事業').setDescription(`${notice?`${notice}\n\n`:''}你尚未持有可營運的建築。請到 \`/資產商城 分類:房地產\` 購買服務式公寓、商辦中心或大飯店。\n\n房地產不是單純躺賺：每天首次招商會支付維護與保險、每週續期牌照，並可投入資金升級以提高租金。`);
+  const selected=owned.find(row=>row.asset_id===propertyId)||owned[0],asset=assetCatalog[selected.asset_id],definition=asset.propertyBusiness,business=propertyBusinessRecord(g,u,selected.asset_id),operation=propertyOperation(g,u,selected.asset_id);
+  const status=!business
+    ? `尚未登記公司｜一次性登記費 **${fmt(PROPERTY_REGISTRATION_FEE)}**`
+    : operation
+      ? Date.now()>=operation.completes_at
+        ? `✅ **本期${definition.label}已完成**｜可領 **${fmt(operation.gross_revenue)}**`
+        : `🏗️ **${definition.label}招商中**｜<t:${Math.floor(operation.completes_at/1000)}:R> 完成\n預計營收：**${fmt(operation.gross_revenue)}**`
+      : `🟢 可開始下一期${definition.label}`;
+  const upkeep=business?propertyUpkeep(g,u,asset,business):null;
+  const upkeepText=upkeep?.charges.length?upkeep.charges.map(charge=>`${charge.label} ${fmt(charge.amount)}`).join('｜'):'今日維護、保險與本週牌照均已結算';
+  const level=Number(business?.level||1),condition=Number(business?.condition||100),nextCost=business?propertyUpgradeCost(asset,business):null;
+  return new EmbedBuilder().setColor(asset.rarity==='限定'?0xFF2D95:asset.rarity==='神話'?0x9C27B0:0xD4AF37).setTitle(`🏙️ ${asset.name}`)
+    .setDescription(`${notice?`${notice}\n\n`:''}${asset.description}\n\n**營運狀態**\n${status}\n\n**建築資料**\n類型：**${definition.label}**｜營運時間：**${airlineDurationLabel(definition.durationMs)}**\n等級：**Lv.${level}/${PROPERTY_BUSINESS_MAX_LEVEL}**｜建築狀況：**${condition}/100**\n基礎營收：**${fmt(definition.baseRevenue)}**｜招商成本：**${fmt(definition.operatingCost)}**\n今日／本週待結算：${upkeepText}\n${business?`累積領取：**${fmt(business.total_collected)}**\n下級升級：${nextCost===null?'**已滿級**':`**${fmt(nextCost)}**（租金 +8%、狀況 +15）`}`:'完成登記後即可開始經營。'}\n\n金庫：**${fmt(balance(g,u))}**`)
+    .setFooter({text:'租金受建築等級、狀況與市場事件影響；維護、保險、牌照與升級費均會進入賭場中央寶庫。'});
+}
+function propertyBusinessComponents(g,u,propertyId=null) {
+  const owned=ownedPropertyBusinessAssets(g,u);
+  if(!owned.length) return [];
+  const selected=owned.find(row=>row.asset_id===propertyId)||owned[0],asset=assetCatalog[selected.asset_id],business=propertyBusinessRecord(g,u,selected.asset_id),operation=propertyOperation(g,u,selected.asset_id),ready=operation&&Date.now()>=operation.completes_at;
+  const rows=[new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`property_business_select:${u}`).setPlaceholder('選擇要管理的建築').addOptions(owned.slice(0,25).map(row=>({label:assetCatalog[row.asset_id].name.slice(0,100),value:row.asset_id,description:`原價 ${fmt(assetCatalog[row.asset_id].price)}｜${assetCatalog[row.asset_id].propertyBusiness.label}`,default:row.asset_id===selected.asset_id}))))];
+  const actions=[];
+  if(!business) actions.push(new ButtonBuilder().setCustomId(`property_register:${u}:${selected.asset_id}`).setLabel(`登記公司｜${fmt(PROPERTY_REGISTRATION_FEE)}`).setEmoji('📝').setStyle(ButtonStyle.Success));
+  else {
+    const operationAction=ready?'property_claim':operation?'property_refresh':'property_start';
+    actions.push(new ButtonBuilder().setCustomId(`${operationAction}:${u}:${selected.asset_id}`).setLabel(ready?'領取本期租金':operation?'重新整理':'開始招商').setEmoji(ready?'💰':operation?'🔄':'🏗️').setStyle(ready?ButtonStyle.Success:operation?ButtonStyle.Secondary:ButtonStyle.Primary));
+    actions.push(new ButtonBuilder().setCustomId(`property_upgrade:${u}:${selected.asset_id}`).setLabel('升級建築').setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(propertyUpgradeCost(asset,business)===null||!!operation));
+  }
+  actions.push(new ButtonBuilder().setCustomId(`property_refresh:${u}:${selected.asset_id}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary));
+  rows.push(new ActionRowBuilder().addComponents(actions));
+  return rows;
+}
+function propertyBusinessPayload(g,u,propertyId=null,notice='') {
+  const owned=ownedPropertyBusinessAssets(g,u),selected=owned.find(row=>row.asset_id===propertyId)||owned[0],asset=selected&&assetCatalog[selected.asset_id],embed=propertyBusinessEmbed(g,u,selected?.asset_id,notice),payload={embeds:[embed],components:propertyBusinessComponents(g,u,selected?.asset_id),attachments:[],files:[]};
+  const image=asset&&assetDisplayImage(asset,selected.asset_id),path=image&&assetPath(image);
+  if(path&&existsSync(path)) {
+    const imageName=`property_${selected.asset_id}${extname(image)||'.png'}`;
+    embed.setImage(`attachment://${imageName}`);
+    payload.files=[new AttachmentBuilder(path,{name:imageName})];
+  }
+  return payload;
+}
 const hideoutUpgradeCatalog={
   vault:{name:'地下金庫',emoji:'🏦',column:'vault_level',costs:[100000,300000,800000,2000000,5000000],effect:'團隊搶劫戰利品每級 +2%'},
   armory:{name:'武器庫',emoji:'🔫',column:'armory_level',costs:[80000,250000,650000,1500000,4000000],effect:'團隊搶劫成功率每級 +0.5%'},
@@ -6385,7 +6567,7 @@ const gameHelpDetails={
   heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
   money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/日常 領取\` 取得每日獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。可用 \`/日常 體力\` 查看狀態，並從 \`/補給\` 購買及使用恢復用品。`},
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具、**21 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具、**21 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n使用 \`/房地產\` 經營服務式公寓、商辦與飯店：每日首次招商支付維護與保險、每週續期牌照，並可升級至 Lv.10 提高租金；市場事件與建築狀況會影響每期收益。交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
   playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、成就、造型與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 成就`、`/玩家 造型` 與 `/玩家 稱號`，集中管理角色資訊與外觀。'},
   dailyHub:{label:'日常中心',emoji:'📅',hint:'每日獎勵、增益與體力',title:'📅 日常中心',body:'使用 `/日常 領取` 領每日獎勵；`/日常 增益` 查看輪替效果；`/日常 體力` 與 `/日常 回體力` 管理每日體力。'},
@@ -6563,6 +6745,7 @@ const commands = [
   new SlashCommandBuilder().setName('汽車盲盒內容').setDescription('查看指定車包內的所有車款、圖片、機率與增益')
     .addStringOption(o=>o.setName('車包').setDescription('選擇要查看的汽車盲盒').addChoices(...blindBoxPackChoices)),
   new SlashCommandBuilder().setName('我的資產').setDescription('查看玩家擁有的房地產與載具').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
+  new SlashCommandBuilder().setName('房地產').setDescription('經營公寓、商辦與飯店，管理租金、維護與升級'),
   new SlashCommandBuilder().setName('藏身處').setDescription('將現有房地產設為藏身處並進行高階升級'),
   new SlashCommandBuilder().setName('交通事業').setDescription('統一管理機場、火車站、客運站與貨運站事業'),
   new SlashCommandBuilder().setName('車庫').setDescription('查看自己的汽車、機車與資產增益')
@@ -6860,6 +7043,37 @@ async function handleInteraction(i) {
   // Keep previously posted /玩法 messages working after the menu upgrade.
   if(i.isStringSelectMenu() && i.customId==='game_help_select') {
     return i.update({embeds:[commandHelpOverviewEmbed('casino')],components:commandHelpComponents('casino'),attachments:[]});
+  }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('property_business_select:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1],propertyId=i.values[0];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有房地產擁有者可以管理這棟建築。',ephemeral:true});
+    if(!ownedPropertyBusinessAssets(i.guildId,ownerId).some(row=>row.asset_id===propertyId)) return i.reply({content:'⚠️ 這棟建築已不在你的資產中。',ephemeral:true});
+    return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId));
+  }
+  if(i.isButton()&&i.customId.startsWith('property_')&&i.guildId) {
+    const [action,ownerId,propertyId]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有房地產擁有者可以操作。',ephemeral:true});
+    try {
+      if(action==='property_register') {
+        registerPropertyBusiness(i.guildId,ownerId,propertyId);
+        return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId,'✅ 公司登記完成，現在可開始招商。'));
+      }
+      if(action==='property_start') {
+        const result=startPropertyOperation(i.guildId,ownerId,propertyId),upkeep=result.upkeep.charges.length?`\n今日／本週費用：${result.upkeep.charges.map(charge=>`${charge.label} ${fmt(charge.amount)}`).join('｜')}`:'';
+        return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId,`🏗️ 已啟動${result.asset.propertyBusiness.label}。\n市場事件：${result.event.emoji} **${result.event.name}**｜${result.event.text}\n預計營收：**${fmt(result.grossRevenue)}**｜招商成本：**${fmt(result.baseCost)}**${upkeep}`));
+      }
+      if(action==='property_claim') {
+        const result=claimPropertyRevenue(i.guildId,ownerId,propertyId);
+        return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId,`💰 已領取 **${fmt(result.operation.gross_revenue)}** 租金收入，本期淨收益 **${fmt(result.profit)}**。`));
+      }
+      if(action==='property_upgrade') {
+        const result=upgradePropertyBusiness(i.guildId,ownerId,propertyId);
+        return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId,`⬆️ 建築已升至 **Lv.${result.business.level}**，支付 **${fmt(result.cost)}**；下一期租金提高 8%。`));
+      }
+      if(action==='property_refresh') return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId));
+    } catch(error) {
+      return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
+    }
   }
   if(i.isStringSelectMenu()&&i.customId.startsWith('hideout_property:')&&i.guildId) {
     const ownerId=i.customId.split(':')[1],propertyId=i.values[0],property=assetCatalog[propertyId];
@@ -8665,6 +8879,9 @@ async function handleInteraction(i) {
         return owned.length?`**${category}**\n${owned.map(row=>`${assetCatalog[row.asset_id].name} × **${row.quantity}**｜${assetBuffLabel(row.asset_id,row.buff_id)}${row.temporary?`｜⏳ <t:${Math.floor(row.expires_at/1000)}:R>`:''}`).join('\n')}`:null;
       }).filter(Boolean).join('\n\n'):'目前沒有任何房地產或載具。';
       return i.reply({embeds:[new EmbedBuilder().setColor(0x1565C0).setAuthor({name:`${target.username} 的資產`,iconURL:target.displayAvatarURL()}).setDescription(`${list}\n\n🏚️ 目前藏身處：**${hideoutLabel||'尚未設定'}**\n資產原價總值：**${fmt(totalValue)}**`)]});
+    }
+    if(i.commandName==='房地產') {
+      return i.reply(propertyBusinessPayload(g,u));
     }
     if(i.commandName==='藏身處') {
       const properties=ownedHideoutProperties(g,u);
