@@ -3313,7 +3313,8 @@ function propertyBusinessComponents(g,u,propertyId=null) {
   else {
     const operationAction=ready?'property_claim':operation?'property_refresh':'property_start';
     actions.push(new ButtonBuilder().setCustomId(`${operationAction}:${u}:${selected.asset_id}`).setLabel(ready?'領取本期租金':operation?'重新整理':'開始招商').setEmoji(ready?'💰':operation?'🔄':'🏗️').setStyle(ready?ButtonStyle.Success:operation?ButtonStyle.Secondary:ButtonStyle.Primary));
-    actions.push(new ButtonBuilder().setCustomId(`property_upgrade:${u}:${selected.asset_id}`).setLabel('升級建築').setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(propertyUpgradeCost(asset,business)===null||!!operation));
+    // 招商開始時已固定本期營收，升級可在期間進行並從下一期開始生效。
+    actions.push(new ButtonBuilder().setCustomId(`property_upgrade:${u}:${selected.asset_id}`).setLabel('升級建築').setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(propertyUpgradeCost(asset,business)===null));
   }
   // 招商進行中時，主按鈕本身就是重新整理；不可再建立同一個 custom ID，否則 Discord 會拒絕整個訊息。
   if(!operation) actions.push(new ButtonBuilder().setCustomId(`property_refresh:${u}:${selected.asset_id}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary));

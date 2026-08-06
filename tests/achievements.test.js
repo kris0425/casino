@@ -1424,6 +1424,7 @@ test('房地產事業提供建築外觀、維護、牌照、升級與市場事�
   assert.match(propertyInteraction,/await i\.deferUpdate\(\)/,'房地產按鈕應先確認互動，避免升級時逾時');
   assert.match(propertyInteraction,/i\.editReply\(propertyBusinessPayload/,'房地產按鈕確認後應更新原面板');
   assert.match(source,/if\(!operation\) actions\.push\(new ButtonBuilder\(\)\.setCustomId\(`property_refresh:\$\{u\}:\$\{selected\.asset_id\}`\)/,'招商中不可重複建立重新整理按鈕');
+  assert.match(source,/setCustomId\(`property_upgrade:\$\{u\}:\$\{selected\.asset_id\}`\)[\s\S]{0,180}setDisabled\(propertyUpgradeCost\(asset,business\)===null\)/,'招商進行中仍應可升級建築');
   assert.match(source,/if\(i\.commandName==='房地產'\) \{\s+await i\.deferReply\(\);\s+return i\.editReply\(propertyBusinessPayload\(g,u\)\);/,'房地產指令應先確認互動');
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-06-real-estate-business.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-08-06-real-estate-business');
