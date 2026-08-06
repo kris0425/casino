@@ -1420,6 +1420,9 @@ test('房地產事業提供建築外觀、維護、牌照、升級與市場事�
   }
   assert.match(source,/propertyRevenueEvents=/);
   assert.match(source,/setName\('房地產'\)/);
+  const propertyInteraction=source.match(/if\(i\.isButton\(\)&&i\.customId\.startsWith\('property_'\)[\s\S]+?\n  \}/)?.[0]||'';
+  assert.match(propertyInteraction,/await i\.deferUpdate\(\)/,'房地產按鈕應先確認互動，避免升級時逾時');
+  assert.match(propertyInteraction,/i\.editReply\(propertyBusinessPayload/,'房地產按鈕確認後應更新原面板');
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-06-real-estate-business.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-08-06-real-estate-business');
   assert.match(update.changes.join('\n'),/維護與保險/);

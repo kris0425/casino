@@ -7156,25 +7156,29 @@ async function handleInteraction(i) {
     const [action,ownerId,propertyId]=i.customId.split(':');
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有房地產擁有者可以操作。',ephemeral:true});
     try {
+      // 房地產升級會同時寫入帳本、更新資料庫並重新上傳建築圖片；先確認互動，避免行動網路下超過 Discord 的 3 秒回應期限。
+      await i.deferUpdate();
       if(action==='property_register') {
         registerPropertyBusiness(i.guildId,ownerId,propertyId);
-        return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId,'✅ 公司登記完成，現在可開始招商。'));
+        return i.editReply(propertyBusinessPayload(i.guildId,ownerId,propertyId,'✅ 公司登記完成，現在可開始招商。'));
       }
       if(action==='property_start') {
         const result=startPropertyOperation(i.guildId,ownerId,propertyId),upkeep=result.upkeep.charges.length?`\n今日／本週費用：${result.upkeep.charges.map(charge=>`${charge.label} ${fmt(charge.amount)}`).join('｜')}`:'';
-        return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId,`🏗️ 已啟動${result.asset.propertyBusiness.label}。\n市場事件：${result.event.emoji} **${result.event.name}**｜${result.event.text}\n預計營收：**${fmt(result.grossRevenue)}**｜招商成本：**${fmt(result.baseCost)}**${upkeep}`));
+        return i.editReply(propertyBusinessPayload(i.guildId,ownerId,propertyId,`🏗️ 已啟動${result.asset.propertyBusiness.label}。\n市場事件：${result.event.emoji} **${result.event.name}**｜${result.event.text}\n預計營收：**${fmt(result.grossRevenue)}**｜招商成本：**${fmt(result.baseCost)}**${upkeep}`));
       }
       if(action==='property_claim') {
         const result=claimPropertyRevenue(i.guildId,ownerId,propertyId);
-        return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId,`💰 已領取 **${fmt(result.operation.gross_revenue)}** 租金收入，本期淨收益 **${fmt(result.profit)}**。`));
+        return i.editReply(propertyBusinessPayload(i.guildId,ownerId,propertyId,`💰 已領取 **${fmt(result.operation.gross_revenue)}** 租金收入，本期淨收益 **${fmt(result.profit)}**。`));
       }
       if(action==='property_upgrade') {
         const result=upgradePropertyBusiness(i.guildId,ownerId,propertyId);
-        return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId,`⬆️ 建築已升至 **Lv.${result.business.level}**，支付 **${fmt(result.cost)}**；下一期租金提高 8%。`));
+        return i.editReply(propertyBusinessPayload(i.guildId,ownerId,propertyId,`⬆️ 建築已升至 **Lv.${result.business.level}**，支付 **${fmt(result.cost)}**；下一期租金提高 8%。`));
       }
-      if(action==='property_refresh') return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId));
+      if(action==='property_refresh') return i.editReply(propertyBusinessPayload(i.guildId,ownerId,propertyId));
+      return i.editReply(propertyBusinessPayload(i.guildId,ownerId,propertyId));
     } catch(error) {
-      return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
+      console.error(`房地產互動失敗 action=${action} guild=${i.guildId} user=${ownerId}: ${error.message}`);
+      return i.followUp({content:`⚠️ ${error.message}`,ephemeral:true});
     }
   }
   if(i.isStringSelectMenu()&&i.customId.startsWith('hideout_property:')&&i.guildId) {
