@@ -1308,6 +1308,7 @@ const WORLD_BOSS_RESPAWN_MS=2*60*60*1000;
 const WORLD_BOSS_ATTACK_COOLDOWN_MS=30*1000;
 const WORLD_BOSS_STAMINA_COST=25;
 const WORLD_BOSS_DEFINITION={id:'neon_tide_behemoth',name:'霓虹黑潮・巨獸',emoji:'🌊',description:'從澳門外海霓虹風暴中現身的巨型異獸，正在吞噬賭城的能量核心。'};
+const WORLD_BOSS_IMAGE='world_boss/neon-tide-behemoth.png';
 function worldBossRow(g) {
   return db.prepare('SELECT * FROM world_bosses WHERE guild_id=?').get(g)||null;
 }
@@ -1418,6 +1419,16 @@ function worldBossComponents(g,u,boss=worldBossForGuild(g)) {
     new ButtonBuilder().setCustomId('world_boss_attack').setLabel(`挑戰首領｜${WORLD_BOSS_STAMINA_COST} 體力`).setEmoji('⚔️').setStyle(ButtonStyle.Danger).setDisabled(disabled),
     new ButtonBuilder().setCustomId('world_boss_refresh').setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary)
   )];
+}
+function worldBossPayload(g,u,boss=worldBossForGuild(g),notice='') {
+  const embed=worldBossEmbed(g,u,boss,notice);
+  const payload={embeds:[embed],components:worldBossComponents(g,u,boss)};
+  if(boss?.status==='active'&&existsSync(assetPath(WORLD_BOSS_IMAGE))) {
+    const imageName='world-boss-neon-tide-behemoth.png';
+    embed.setImage(`attachment://${imageName}`);
+    payload.files=[new AttachmentBuilder(assetPath(WORLD_BOSS_IMAGE),{name:imageName})];
+  }
+  return payload;
 }
 const playerTransferFee=amount=>Math.max(1,Math.ceil(amount*PLAYER_TRANSFER_FEE_RATE));
 function createPlayerTransfer(g,senderId,recipientId,amount) {
@@ -7308,7 +7319,7 @@ async function handleInteraction(i) {
           : `${result.critical?'💥 暴擊！':'⚔️ 命中！'} 本次造成 **${fmt(result.damage)}** 傷害，消耗 ${WORLD_BOSS_STAMINA_COST} 體力。`;
       }
       const boss=worldBossForGuild(i.guildId);
-      return i.editReply({embeds:[worldBossEmbed(i.guildId,i.user.id,boss,notice)],components:worldBossComponents(i.guildId,i.user.id,boss)});
+      return i.editReply(worldBossPayload(i.guildId,i.user.id,boss,notice));
     } catch(error) {
       console.error(`世界首領互動失敗 guild=${i.guildId} user=${i.user.id}: ${error.message}`);
       return i.followUp({content:`⚠️ ${error.message}`,ephemeral:true});
@@ -9164,7 +9175,7 @@ async function handleInteraction(i) {
     if(i.commandName==='世界首領') {
       await i.deferReply();
       const boss=worldBossForGuild(g);
-      return i.editReply({embeds:[worldBossEmbed(g,u,boss)],components:worldBossComponents(g,u,boss)});
+      return i.editReply(worldBossPayload(g,u,boss));
     }
     if(i.commandName==='房地產') {
       await i.deferReply();
