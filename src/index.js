@@ -624,6 +624,8 @@ db.exec(`
     final_price INTEGER,
     announced_at INTEGER,
     last_reminder_at INTEGER,
+    announcement_channel_id TEXT,
+    announcement_message_id TEXT,
     closed_announced_at INTEGER,
     settled_at INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1082,6 +1084,12 @@ if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.n
 }
 if(!db.prepare('PRAGMA table_info(asset_auctions)').all().some(column=>column.name==='last_reminder_at')) {
   db.exec('ALTER TABLE asset_auctions ADD COLUMN last_reminder_at INTEGER');
+}
+if(!db.prepare('PRAGMA table_info(asset_auctions)').all().some(column=>column.name==='announcement_channel_id')) {
+  db.exec('ALTER TABLE asset_auctions ADD COLUMN announcement_channel_id TEXT');
+}
+if(!db.prepare('PRAGMA table_info(asset_auctions)').all().some(column=>column.name==='announcement_message_id')) {
+  db.exec('ALTER TABLE asset_auctions ADD COLUMN announcement_message_id TEXT');
 }
 if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='dm_notified_at')) {
   db.exec('ALTER TABLE airline_flights ADD COLUMN dm_notified_at INTEGER');
@@ -3969,6 +3977,8 @@ function placeAssetAuctionBid(g,u,auctionId,amount,now=Date.now()) {
     const minimum=minimumAssetAuctionBid(auction);
     if(amount<minimum) throw new Error(`最低出價為 ${fmt(minimum)}`);
     const ownLeadingBid=auction.current_bidder_id===u?auction.current_bid:0;
+    const previousBidderId=auction.current_bidder_id&&auction.current_bidder_id!==u?auction.current_bidder_id:null;
+    const previousBid=previousBidderId?auction.current_bid:0;
     const escrowNeeded=amount-ownLeadingBid;
     if(balance(g,u)<escrowNeeded) throw new Error(`金庫不足，本次還需要託管 ${fmt(escrowNeeded)}`);
     if(auction.current_bidder_id&&auction.current_bidder_id!==u) {
@@ -3981,7 +3991,7 @@ function placeAssetAuctionBid(g,u,auctionId,amount,now=Date.now()) {
       .run(amount,u,endsAt,auction.id);
     db.prepare('INSERT INTO asset_auction_bids(auction_id,guild_id,bidder_id,amount) VALUES(?,?,?,?)').run(auction.id,g,u,amount);
     db.exec('COMMIT');
-    return {auction:assetAuctionById(g,auction.id),amount,escrowNeeded,extended,next:balance(g,u)};
+    return {auction:assetAuctionById(g,auction.id),amount,escrowNeeded,extended,next:balance(g,u),previousBidderId,previousBid,assetId:auction.asset_id};
   } catch(error) {
     db.exec('ROLLBACK');
     throw error;
@@ -4008,6 +4018,53 @@ function assetAuctionPayload(g,u,token,notice='') {
   const auction=ensureActiveAssetAuction(g),asset=assetCatalog[auction.asset_id],embed=assetAuctionEmbed(g,u,auction,notice);
   return {...assetMediaPayload(embed,auction.asset_id,asset),components:assetAuctionComponents(token,u,auction)};
 }
+async function notifyAssetAuctionOutbid(result) {
+  if(!result.previousBidderId) return;
+  const asset=assetCatalog[result.assetId];
+  try {
+    const user=await client.users.fetch(result.previousBidderId);
+    await user.send({embeds:[new EmbedBuilder()
+      .setColor(0xE74C3C)
+      .setTitle('🔔 限時資產拍賣｜你的出價已被超越')
+      .setDescription('拍賣資產：**'+(asset?.name||result.assetId)+'**\n你原本的出價：**'+fmt(result.previousBid)+'**\n目前最高價：**'+fmt(result.amount)+'**\n\n你的託管金幣已全額退回。拍賣結束：<t:'+Math.floor(result.auction.ends_at/1000)+':R>\n請使用 `/購買資產` →「限時資產拍賣」重新出價。')
+      .setTimestamp()]});
+  } catch(error) {
+    console.warn('拍賣超標通知傳送失敗 auction='+result.auction.id+' user='+result.previousBidderId+': '+error.message);
+  }
+}
+async function publishAssetAuctionAnnouncement(auction,notice) {
+  const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
+  if(!channel) throw new Error('找不到賭場公告頻道');
+  const asset=assetCatalog[auction.asset_id],embed=assetAuctionEmbed(auction.guild_id,null,auction,notice);
+  embed.setDescription(embed.data.description+'\n\n使用 `/購買資產`，在分類選擇「限時資產拍賣」即可參加。');
+  if(auction.announcement_channel_id===channel.id&&auction.announcement_message_id) {
+    try {
+      const message=await channel.messages.fetch(auction.announcement_message_id);
+      const imageUrl=message.embeds[0]?.image?.url;
+      if(imageUrl) embed.setImage(imageUrl);
+      await message.edit({embeds:[embed],allowedMentions:{parse:[]}});
+      return {channelId:channel.id,messageId:message.id,updated:true};
+    } catch(error) {
+      console.warn('拍賣公告原訊息無法更新 auction='+auction.id+': '+error.message);
+    }
+  }
+  const message=await channel.send({...assetMediaPayload(embed,auction.asset_id,asset),allowedMentions:{parse:[]}});
+  return {channelId:channel.id,messageId:message.id,updated:false};
+}
+async function adoptExistingAssetAuctionAnnouncement(auction) {
+  if(auction.announcement_message_id||!auction.announced_at) return;
+  const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
+  if(!channel?.messages?.fetch) return;
+  const title='🔥 限時資產拍賣｜'+(assetCatalog[auction.asset_id]?.name||auction.asset_id);
+  const messages=await channel.messages.fetch({limit:50});
+  const matches=[...messages.values()]
+    .filter(message=>message.author?.id===client.user?.id&&message.createdTimestamp>=Number(auction.starts_at)-60_000&&message.createdTimestamp<=Number(auction.ends_at)&&message.embeds.some(embed=>embed.title===title))
+    .sort((a,b)=>b.createdTimestamp-a.createdTimestamp);
+  const [keep,...duplicates]=matches;
+  if(!keep) return;
+  for(const message of duplicates) await message.delete().catch(error=>console.warn('拍賣重複公告清理失敗 auction='+auction.id+' message='+message.id+': '+error.message));
+  db.prepare('UPDATE asset_auctions SET announcement_channel_id=?,announcement_message_id=? WHERE id=? AND announcement_message_id IS NULL').run(channel.id,keep.id,auction.id);
+}
 let assetAuctionProcessing=false;
 async function processAssetAuctions() {
   if(assetAuctionProcessing) return;
@@ -4018,17 +4075,23 @@ async function processAssetAuctions() {
     if(retired) console.log(`已下架 ${retired} 場舊版限時拍賣，並完成託管退款`);
     for(const auction of db.prepare("SELECT id FROM asset_auctions WHERE status='active' AND ends_at<=? ORDER BY ends_at").all(now)) settleAssetAuction(auction.id,now);
     for(const guildId of guildIds) ensureActiveAssetAuction(guildId,now);
+    const legacyAnnouncements=db.prepare("SELECT * FROM asset_auctions WHERE status='active' AND announced_at IS NOT NULL AND announcement_message_id IS NULL").all();
+    for(const auction of legacyAnnouncements) {
+      try { await adoptExistingAssetAuctionAnnouncement(auction); }
+      catch(error) { console.warn('拍賣舊公告接管失敗 auction='+auction.id+': '+error.message); }
+    }
     const starts=db.prepare("SELECT * FROM asset_auctions WHERE status='active' AND announced_at IS NULL ORDER BY id").all();
     for(const auction of starts) {
+      const claim=db.prepare('UPDATE asset_auctions SET announced_at=? WHERE id=? AND status=\'active\' AND announced_at IS NULL').run(Date.now(),auction.id);
+      if(Number(claim.changes)!==1) continue;
       try {
-        const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
-        if(!channel) throw new Error('找不到賭場公告頻道');
-        const asset=assetCatalog[auction.asset_id],embed=assetAuctionEmbed(auction.guild_id,null,auction,'🔥 **全新系統拍賣已開始！**');
-        embed.setDescription(`${embed.data.description}\n\n使用 \`/購買資產\`，在分類選擇「限時資產拍賣」即可參加。`);
-        await channel.send({...assetMediaPayload(embed,auction.asset_id,asset),allowedMentions:{parse:[]}});
+        const published=await publishAssetAuctionAnnouncement(assetAuctionById(auction.guild_id,auction.id),'🔥 **全新系統拍賣已開始！**');
         const announcedAt=Date.now();
-        db.prepare('UPDATE asset_auctions SET announced_at=?,last_reminder_at=? WHERE id=? AND announced_at IS NULL').run(announcedAt,announcedAt,auction.id);
-      } catch(error) { console.error(`限時資產拍賣開場公告失敗 auction=${auction.id}: ${error.message}`); }
+        db.prepare("UPDATE asset_auctions SET announced_at=?,last_reminder_at=?,announcement_channel_id=?,announcement_message_id=? WHERE id=? AND status='active'").run(announcedAt,announcedAt,published.channelId,published.messageId,auction.id);
+      } catch(error) {
+        db.prepare('UPDATE asset_auctions SET announced_at=NULL WHERE id=? AND announcement_message_id IS NULL').run(auction.id);
+        console.error('限時資產拍賣開場公告失敗 auction='+auction.id+': '+error.message);
+      }
     }
     const reminders=db.prepare(`SELECT * FROM asset_auctions
       WHERE status='active' AND announced_at IS NOT NULL AND ends_at>?
@@ -4036,12 +4099,12 @@ async function processAssetAuctions() {
       ORDER BY id`).all(now,now-ASSET_AUCTION_REMINDER_MS);
     for(const auction of reminders) {
       try {
-        const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
-        if(!channel) throw new Error('找不到賭場公告頻道');
-        const asset=assetCatalog[auction.asset_id],embed=assetAuctionEmbed(auction.guild_id,null,auction,'⏰ **限時資產拍賣｜每 6 小時即時提醒**');
-        embed.setDescription(`${embed.data.description}\n\n使用 \`/購買資產\`，在分類選擇「限時資產拍賣」即可立即出價。`);
-        await channel.send({...assetMediaPayload(embed,auction.asset_id,asset),allowedMentions:{parse:[]}});
-        db.prepare("UPDATE asset_auctions SET last_reminder_at=? WHERE id=? AND status='active'").run(Date.now(),auction.id);
+        if(!auction.announcement_message_id) {
+          db.prepare("UPDATE asset_auctions SET last_reminder_at=? WHERE id=? AND status='active'").run(Date.now(),auction.id);
+          continue;
+        }
+        const published=await publishAssetAuctionAnnouncement(auction,'⏰ **限時資產拍賣｜每 6 小時即時提醒（更新原公告）**');
+        db.prepare("UPDATE asset_auctions SET last_reminder_at=?,announcement_channel_id=?,announcement_message_id=? WHERE id=? AND status='active'").run(Date.now(),published.channelId,published.messageId,auction.id);
       } catch(error) { console.error(`限時資產拍賣定時提醒失敗 auction=${auction.id}: ${error.message}`); }
     }
     const closed=db.prepare("SELECT * FROM asset_auctions WHERE status IN ('completed','expired') AND closed_announced_at IS NULL ORDER BY id").all();
@@ -7603,7 +7666,9 @@ async function handleInteraction(i) {
     try {
       const result=placeAssetAuctionBid(i.guildId,ownerId,Number(auctionIdText),amount);
       const notice=`💰 **出價成功！**\n本次最高出價：**${fmt(result.amount)}**｜新增託管：**${fmt(result.escrowNeeded)}**${result.extended?'\n⏱️ 因最後 5 分鐘出價，結束時間已延長 5 分鐘。':''}`;
-      return i.update({...assetAuctionPayload(i.guildId,ownerId,token,notice),attachments:[]});
+      await i.update({...assetAuctionPayload(i.guildId,ownerId,token,notice),attachments:[]});
+      void notifyAssetAuctionOutbid(result);
+      return;
     } catch(error) {
       return i.reply({content:`⚠️ 出價失敗：${error.message}`,ephemeral:true});
     }

@@ -739,6 +739,9 @@ test('賭場強化保全與限時拍賣每六小時提醒',()=>{
   assert.doesNotMatch(source,/casinoVaultBalance\([^\n]+\*0\.8/);
 
   assert.match(source,/last_reminder_at INTEGER/);
+  assert.match(source,/announcement_message_id TEXT/);
+  assert.match(source,/publishAssetAuctionAnnouncement/);
+  assert.match(source,/notifyAssetAuctionOutbid/);
   assert.match(source,/ALTER TABLE asset_auctions ADD COLUMN last_reminder_at INTEGER/);
   assert.match(source,/const ASSET_AUCTION_REMINDER_MS=6\*60\*60\*1000/);
   const scheduler=source.match(/async function processAssetAuctions\(\) \{[\s\S]+?\n\}/)?.[0]||'';
