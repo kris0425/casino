@@ -7157,9 +7157,32 @@ async function announceHeistSuccess(guildId,embed) {
 client.on('error',error=>console.error('Discord client error:',error));
 process.on('unhandledRejection',error=>console.error('Unhandled promise rejection:',error));
 const daily = new Map();
+async function handleWorldBossInteraction(i) {
+  try {
+    await i.deferUpdate();
+  } catch(error) {
+    console.error(`世界首領互動確認失敗 guild=${i.guildId} user=${i.user.id}: ${error.message}`);
+    return;
+  }
+  try {
+    let notice='';
+    if(i.customId==='world_boss_attack') {
+      const result=worldBossAttack(i.guildId,i.user.id);
+      notice=result.defeated
+        ? `🏆 **${i.user.username}** 完成最後一擊！世界首領已被討伐，已從賭場中央寶庫發放 **${fmt(result.payoutPool)}** 給所有參戰者。`
+        : `${result.critical?'💥 暴擊！':'⚔️ 命中！'} 本次造成 **${fmt(result.damage)}** 傷害，消耗 ${WORLD_BOSS_STAMINA_COST} 體力。`;
+    }
+    const boss=worldBossForGuild(i.guildId);
+    return i.editReply(worldBossPayload(i.guildId,i.user.id,boss,notice));
+  } catch(error) {
+    console.error(`世界首領互動處理失敗 guild=${i.guildId} user=${i.user.id}: ${error.stack||error.message}`);
+    return i.editReply({content:`⚠️ 世界首領更新失敗：${error.message}`,embeds:[],components:[],attachments:[]}).catch(()=>null);
+  }
+}
 
 async function handleInteraction(i) {
   touchTransportPanelInteraction(i);
+  if(i.isButton()&&['world_boss_attack','world_boss_refresh'].includes(i.customId)&&i.guildId) return handleWorldBossInteraction(i);
   if(i.isAutocomplete()) {
     const focused=i.options.getFocused(true),query=String(focused.value||'').trim().toLowerCase();
     if(i.commandName==='稱號設定'&&focused.name==='稱號') {
@@ -7343,23 +7366,6 @@ async function handleInteraction(i) {
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有房地產擁有者可以管理這棟建築。',ephemeral:true});
     if(!ownedPropertyBusinessAssets(i.guildId,ownerId).some(row=>row.asset_id===propertyId)) return i.reply({content:'⚠️ 這棟建築已不在你的資產中。',ephemeral:true});
     return i.update(propertyBusinessPayload(i.guildId,ownerId,propertyId));
-  }
-  if(i.isButton()&&['world_boss_attack','world_boss_refresh'].includes(i.customId)&&i.guildId) {
-    try {
-      await i.deferUpdate();
-      let notice='';
-      if(i.customId==='world_boss_attack') {
-        const result=worldBossAttack(i.guildId,i.user.id);
-        notice=result.defeated
-          ? `🏆 **${i.user.username}** 完成最後一擊！世界首領已被討伐，已從賭場中央寶庫發放 **${fmt(result.payoutPool)}** 給所有參戰者。`
-          : `${result.critical?'💥 暴擊！':'⚔️ 命中！'} 本次造成 **${fmt(result.damage)}** 傷害，消耗 ${WORLD_BOSS_STAMINA_COST} 體力。`;
-      }
-      const boss=worldBossForGuild(i.guildId);
-      return i.editReply(worldBossPayload(i.guildId,i.user.id,boss,notice));
-    } catch(error) {
-      console.error(`世界首領互動失敗 guild=${i.guildId} user=${i.user.id}: ${error.message}`);
-      return i.followUp({content:`⚠️ ${error.message}`,ephemeral:true});
-    }
   }
   if(i.isButton()&&i.customId.startsWith('property_')&&i.guildId) {
     const [action,ownerId,propertyId]=i.customId.split(':');
@@ -10237,7 +10243,14 @@ async function handleInteraction(i) {
     return animatedGame?i.editReply(finalPayload):i.reply(finalPayload);
   } catch(e) { const msg=`⚠️ ${e.message}`; if(i.replied||i.deferred) await i.followUp({content:msg,ephemeral:true}); else await i.reply({content:msg,ephemeral:true}); }
 }
-client.on('interactionCreate',handleInteraction);
+client.on('interactionCreate',i=>handleInteraction(i).catch(async error=>{
+  console.error('未處理的 Discord 互動錯誤 type='+i.type+' id='+(i.customId||i.commandName||'unknown')+': '+(error.stack||error.message));
+  if(!i.isRepliable?.()) return;
+  try {
+    if(i.deferred||i.replied) await i.followUp({content:'⚠️ 操作暫時失敗，請重新開啟面板後再試。',ephemeral:true});
+    else await i.reply({content:'⚠️ 操作暫時失敗，請再試一次。',ephemeral:true});
+  } catch(replyError) { console.error('互動錯誤備援回覆失敗: '+replyError.message); }
+}));
 let lastBankAnnouncement='';
 const sundayVaultAnnouncementHours=new Set([12,14,16,18,20,22]);
 function taipeiClockParts() {

@@ -1442,6 +1442,8 @@ test('世界首領提供共享血量、體力挑戰、貢獻排行與寶庫比�
   for(const helper of ['worldBossForGuild','worldBossAttack','worldBossEmbed','worldBossComponents']) {
     assert.match(source,new RegExp(`function ${helper}\\(`),`缺少世界首領功能：${helper}`);
   }
+  assert.match(source,/async function handleWorldBossInteraction/);
+  assert.match(source,/return handleWorldBossInteraction\(i\)/);
   assert.match(source,/setName\('世界首領'\)/);
   assert.match(source,/world_boss_attack/);
   assert.match(source,/changeCasinoVaultUnlocked\(g,-payoutPool,'world_boss_reward'/);
