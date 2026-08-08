@@ -8,6 +8,7 @@ FULL_COMMIT="${4:?full commit required}"
 UPDATE_FILE="${5:--}"
 CONTAINER="discord-casino"
 IMAGE="discord-casino-bot-discord-casino"
+ACTIVITY_TUNNEL_CONTAINER="casino-activity-api-tunnel"
 
 PROJECT="$(realpath -m "$PROJECT")"
 STAGE="$(realpath -m "$STAGE")"
@@ -62,6 +63,36 @@ requires_image_build_path() {
   esac
 }
 
+# A Cloudflare Quick Tunnel gets a new public hostname whenever its container is
+# recreated. Keep the Discord links in .env aligned with the currently running
+# tunnel before the bot is restarted. Only the public URL is changed; secrets
+# stay untouched.
+sync_activity_public_url() {
+  local tunnel_url current_url
+  tunnel_url="$(sudo docker logs --tail 500 "$ACTIVITY_TUNNEL_CONTAINER" 2>&1 \
+    | sed -nE 's#.*(https://[a-z0-9-]+\.trycloudflare\.com).*#\1#p' \
+    | tail -n 1)"
+  if [[ -z "$tunnel_url" ]]; then
+    echo "ACTIVITY_PUBLIC_URL_SYNC_SKIPPED no active Quick Tunnel URL found" >&2
+    return 0
+  fi
+  [[ "$tunnel_url" =~ ^https://[a-z0-9-]+\.trycloudflare\.com$ ]] || {
+    echo "invalid Quick Tunnel URL" >&2
+    return 1
+  }
+  current_url="$(sed -nE 's/^ACTIVITY_PUBLIC_URL=(.*)$/\1/p' .env | tail -n 1)"
+  if [[ "$current_url" == "$tunnel_url" ]]; then
+    echo "ACTIVITY_PUBLIC_URL_SYNC_OK unchanged"
+    return 0
+  fi
+  if grep -q '^ACTIVITY_PUBLIC_URL=' .env; then
+    sed -i -E "s#^ACTIVITY_PUBLIC_URL=.*#ACTIVITY_PUBLIC_URL=$tunnel_url#" .env
+  else
+    printf '\nACTIVITY_PUBLIC_URL=%s\n' "$tunnel_url" >> .env
+  fi
+  echo "ACTIVITY_PUBLIC_URL_SYNC_OK updated=$tunnel_url"
+}
+
 IMAGE_BUILD_REQUIRED=false
 while IFS= read -r relative; do
   [[ -z "$relative" ]] && continue
@@ -86,6 +117,8 @@ if [[ "$IMAGE_BUILD_REQUIRED" == true ]]; then
 else
   echo "IMAGE_BUILD_SKIPPED runtime-mounted files only"
 fi
+
+sync_activity_public_url
 
 RUNTIME_MOUNTS=(
   -v "$PROJECT/.dockerignore:/app/.dockerignore:ro"

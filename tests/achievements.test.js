@@ -1201,6 +1201,9 @@ test('Oracle 一鍵部署腳本具備增量、備份、測試與安全清理',()
   assert.match(remote,/docker run --rm .* npm test/s);
   assert.match(remote,/COMMAND_BUILD_ONLY=1/);
   assert.match(remote,/docker compose up -d --no-deps/);
+  assert.match(remote,/sync_activity_public_url/);
+  assert.match(remote,/ACTIVITY_PUBLIC_URL_SYNC_OK/);
+  assert.match(remote,/trycloudflare\\.com/);
   assert.match(remote,/grep -Fq '已登入：'/);
   assert.match(remote,/running_image.*expected_image/s);
   assert.match(remote,/publish_update\.js/);
