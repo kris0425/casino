@@ -3062,12 +3062,32 @@ function normalizeTransportCompanyName(value) {
 function transportSelectionName(id,fallback='尚未選擇') {
   return assetCatalog[id]?.name||transportRoutes[id]?.name||fallback;
 }
+function transportNetworkMeter(value,total=4) {
+  const filled=Math.max(0,Math.min(total,Math.round(value)));
+  return `${'▰'.repeat(filled)}${'▱'.repeat(total-filled)}`;
+}
+function transportNetworkSnapshot(g,u) {
+  const airline=airlineCompany(g,u),flights=airlineFlights(g,u);
+  const groundTypes=['rail','coach','freight'];
+  const groundCompanies=groundTypes.map(type=>businessTransportCompany(g,u,type)).filter(Boolean);
+  const groundOperations=groundTypes.map(type=>businessTransportOperation(g,u,type)).filter(Boolean);
+  const allOperations=[...flights,...groundOperations];
+  const active=allOperations.filter(operation=>Date.now()<operation.completes_at).length;
+  const ready=allOperations.filter(operation=>Date.now()>=operation.completes_at).length;
+  const companies=[airline,...groundCompanies].filter(Boolean);
+  const totalLevel=companies.reduce((total,company)=>total+enterpriseLevel(company),0);
+  const infrastructure=ownedAirports(g,u).length+ownedTransportStations(g,u).length;
+  const signal=ready?`🟡 **有 ${ready} 筆營收待收**`:(active?`🟢 **${active} 條任務正在執行**`:'⚪ **全網待命，可立即派遣**');
+  const directive=ready?'優先領取已完成的營收，再調度下一班。':active?'可檢視各事業的抵達時間，或預先規劃下一條路線。':companies.length?'選擇一個已註冊事業，確認配置後開始派遣。':'先取得場站並註冊第一間交通公司，建立你的營運網。';
+  return {active,ready,companies:companies.length,totalLevel,infrastructure,signal,directive,networkMeter:transportNetworkMeter(companies.length)};
+}
 function transportHubEmbed(g,u,notice='') {
   const airline=airlineCompany(g,u),flights=airlineFlights(g,u);
   const airports=ownedAirports(g,u),airliners=ownedPassengerAirliners(g,u);
   ensureStarterTrain(g,u);
   const stations=ownedTransportStations(g,u),bestTrain=bestOwnedTrain(g,u),bestTrainAsset=bestTrain&&assetCatalog[bestTrain.asset_id];
   const garage=ensureTrainGarage(g,u),trainKinds=ownedBlindBoxTrainRows(g,u).filter(row=>row.quantity>0).length;
+  const snapshot=transportNetworkSnapshot(g,u);
   const airlineStatus=airline
     ? `公司：**${airline.company_name}**\n機場：**${airports.length} 座**｜客機種類：**${airliners.length} 種**\n航班：**${flights.length}/${Math.max(1,Number(airline.flight_slots)||1)} 個機位使用中**`
     : `尚未註冊航空公司\n持有機場：**${airports.length} 座**｜客機種類：**${airliners.length} 種**`;
@@ -3075,7 +3095,13 @@ function transportHubEmbed(g,u,notice='') {
   return new EmbedBuilder()
     .setColor(0x0D47A1)
     .setTitle('🧭 交通事業營運總部')
-    .setDescription(`${notice?`${notice}\n\n`:''}機場航空、鐵路、城際客運與物流貨運集中在同一個入口；火車與客運公司已分開，可同時運行。\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路運輸**\n${groundStatus}\n\n**🚆 列車車庫・每日盲盒**\n盲盒收藏：**${trainKinds}/12 種**｜車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n商城另有 **5 款列車**可直接購買。\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .setAuthor({name:'MACAU TRANSIT COMMAND // LIVE NETWORK'})
+    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n${snapshot.directive}\n\n**網路規模**\n${snapshot.networkMeter}｜已註冊 **${snapshot.companies}/4** 間公司｜集團總等級 **Lv.${snapshot.totalLevel}**｜場站／機場 **${snapshot.infrastructure} 座**\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路運輸**\n${groundStatus}\n\n**🚆 列車車庫・每日盲盒**\n盲盒收藏：**${trainKinds}/12 種**｜車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n商城另有 **5 款列車**可直接購買。\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .addFields(
+      {name:'🛰️ 即時調度',value:`執行中 **${snapshot.active}**｜待收 **${snapshot.ready}**`,inline:true},
+      {name:'🎯 指揮優先度',value:snapshot.ready?'收取營收':'部署下一班',inline:true},
+      {name:'💼 集團評級',value:snapshot.companies>=4?'全線營運':'持續擴張',inline:true}
+    )
     .setFooter({text:'公開面板｜只有事業擁有者可操作｜最後一次操作 3 分鐘後自動刪除'});
 }
 function transportHubComponents(g,u) {
@@ -3128,14 +3154,21 @@ function transportBusinessStatus(g,u,businessType) {
   const company=businessTransportCompany(g,u,businessType),operation=businessTransportOperation(g,u,businessType);
   if(!stations.length) return `${type.emoji} **${type.name}**｜尚未持有${type.stationLabel}`;
   if(!company) return `${type.emoji} **${type.name}**｜持有${type.stationLabel}，尚未註冊公司`;
-  return `${type.emoji} **${type.name}**｜${company.company_name} Lv.${enterpriseLevel(company)}｜${operation?(Date.now()>=operation.completes_at?'可領取營收':'營運中'):'待命中'}`;
+  const status=operation?(Date.now()>=operation.completes_at?'🟡 收益待收':'🟢 車隊執行中'):'⚪ 待命可派遣';
+  return `${type.emoji} **${type.name}**｜${company.company_name} Lv.${enterpriseLevel(company)}｜${status}`;
 }
 function transportGroundOverviewEmbed(g,u,notice='') {
   ensureStarterTrain(g,u);
+  const snapshot=transportNetworkSnapshot(g,u);
   return new EmbedBuilder()
     .setColor(0x2E7D32)
     .setTitle('🚉 陸路交通事業')
-    .setDescription(`${notice?`${notice}\n\n`:''}火車、客運與貨運為三間獨立公司，各自支付註冊手續費並保存營運進度。你可以同時經營火車、客運與貨運，互不占用彼此的行程。\n\n${['rail','coach','freight'].map(type=>transportBusinessStatus(g,u,type)).join('\n\n')}\n\n🚦 進入事業面板後可在「事業載具」欄位選擇本次使用的列車或卡車；未曾選擇時會預設最高加成載具。客運沒有專屬載具時使用基礎客運車隊。\n\n註冊費：**${fmt(TRANSPORT_REGISTRATION_FEE)}／間**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .setAuthor({name:'LAND OPERATIONS // DISPATCH BOARD'})
+    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n\n火車、客運與貨運為三間獨立公司，各自支付註冊手續費並保存營運進度；可同時派遣，互不占用彼此的行程。\n\n${['rail','coach','freight'].map(type=>transportBusinessStatus(g,u,type)).join('\n\n')}\n\n🚦 進入事業面板後可在「事業載具」欄位選擇本次使用的列車或卡車；未曾選擇時會預設最高加成載具。客運沒有專屬載具時使用基礎客運車隊。\n\n註冊費：**${fmt(TRANSPORT_REGISTRATION_FEE)}／間**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .addFields(
+      {name:'🚦 陸運調度',value:`進行中 **${snapshot.active}**｜待收 **${snapshot.ready}**`,inline:true},
+      {name:'🧭 行動建議',value:snapshot.directive.slice(0,100),inline:false}
+    )
     .setFooter({text:'使用 /資產商城 分類:卡車 購買貨運車輛；選擇事業後可獨立註冊、配置路線、開始營運與領取收入'});
 }
 function transportGroundOverviewComponents(u) {
@@ -3168,9 +3201,9 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
   const operationEvent=transportEventById(operation?.event_id);
   const operationText=operation
     ? Date.now()>=operation.completes_at
-      ? `✅ **${type.operationLabel}已完成，可以領取營收**\n${transportSelectionName(operation.route_id)}｜可領營收 **${fmt(operation.gross_revenue)}**${operationEvent?`\n${operationEvent.emoji} ${operationEvent.name}`:''}`
-      : `${type.emoji} **${type.operationLabel}進行中**\n${transportSelectionName(operation.route_id)}｜<t:${Math.floor(operation.completes_at/1000)}:R> 完成\n預計營收：**${fmt(operation.gross_revenue)}**${operationEvent?`\n${operationEvent.emoji} ${operationEvent.name}`:''}`
-    : `目前沒有進行中的${type.operationLabel}。`;
+      ? `🟡 **收益已抵達｜等待結算**\n${transportSelectionName(operation.route_id)}｜可領營收 **${fmt(operation.gross_revenue)}**${operationEvent?`\n${operationEvent.emoji} ${operationEvent.name}`:''}`
+      : `🟢 **${type.operationLabel}正在執行**\n${transportSelectionName(operation.route_id)}｜<t:${Math.floor(operation.completes_at/1000)}:R> 完成\n預計營收：**${fmt(operation.gross_revenue)}**${operationEvent?`\n${operationEvent.emoji} ${operationEvent.name}`:''}`
+    : `⚪ **車隊待命**｜配置完成後即可派遣下一趟${type.operationLabel}。`;
   const fallbackFreightTruck=businessType==='freight'?bestOwnedFreightTruck(g,u):null;
   const selectedVehicle=selectedTransportBusinessVehicle(g,u,businessType,company);
   const trainMultiplier=businessType==='rail'&&selectedVehicle?.asset?1+(selectedVehicle.asset.trainRevenueBonus||0):1;
@@ -3179,7 +3212,7 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
     ? `${transportBusinessVehicleName(selectedVehicle)}${selectedVehicle.asset?.systemGranted?'｜系統配給，不占車庫':selectedVehicle.bonus?`｜營收 **+${Math.round(selectedVehicle.bonus*100)}%**`:'｜無額外加成'}`
     : '尚未配置事業載具';
   const routeEstimate=station&&route&&station.transportType===route.type
-    ? `\n\n**目前方案試算**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*companyMultiplier*nextDailyMultiplier))}**（已套用今日第 ${dailyRuns+1} 趟 ×${nextDailyMultiplier.toFixed(2)}，另有市場需求浮動）\n事業載具：${selectedVehicleText}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
+    ? `\n\n**🎯 下一趟任務預演**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*companyMultiplier*nextDailyMultiplier))}**（已套用今日第 ${dailyRuns+1} 趟 ×${nextDailyMultiplier.toFixed(2)}，另有市場需求浮動）\n事業載具：${selectedVehicleText}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
     : '';
   const garage=businessType==='rail'?ensureTrainGarage(g,u):null;
   const garageText=garage?`\n列車車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**（配給列車不計）`:'';
@@ -3187,6 +3220,7 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
   return new EmbedBuilder()
     .setColor(operation&&Date.now()>=operation.completes_at?0x35C46A:type.color)
     .setTitle(`${type.emoji} ${company.company_name}`)
+    .setAuthor({name:`${type.name.toUpperCase()} // LIVE DISPATCH`})
     .setDescription(`${notice?`${notice}\n\n`:''}**企業等級**\nLv.**${companyLevel}**｜營收加成 **+${Math.round((companyMultiplier-1)*100)}%**｜${upgradeText}\n\n**維修・保險・牌照**\n${upkeepText}\n今日已營運：**${dailyRuns} 趟**｜下一趟收益：**×${nextDailyMultiplier.toFixed(2)}**\n\n**${type.name}營運配置**\n公司行號：**${company.company_name}**\n營運場站：${transportSelectionName(company.station_id)}\n營運路線：${transportSelectionName(company.route_id)}\n\n**營運狀態**\n${operationText}${routeEstimate}${garageText}\n\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
 }
 function transportBusinessDashboardComponents(g,u,businessType) {

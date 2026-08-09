@@ -1248,6 +1248,20 @@ test('交通事業公開面板更新公告完整',()=>{
   assert.match(update.changes.join('\n'),/事業擁有者/);
 });
 
+test('交通事業指揮中心提供即時調度與任務預演',()=>{
+  assert.match(source,/function transportNetworkMeter\(value,total=4\)/);
+  assert.match(source,/function transportNetworkSnapshot\(g,u\)/);
+  assert.match(source,/MACAU TRANSIT COMMAND \/\/ LIVE NETWORK/);
+  assert.match(source,/LAND OPERATIONS \/\/ DISPATCH BOARD/);
+  assert.match(source,/即時調度/);
+  assert.match(source,/收益待收/);
+  assert.match(source,/下一趟任務預演/);
+  assert.match(source,/LIVE DISPATCH/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-09-transport-command-center.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-09-transport-command-center');
+  assert.match(update.changes.join('\n'),/即時調度/);
+});
+
 test('Oracle 一鍵部署腳本具備增量、備份、測試與安全清理',()=>{
   const local=readFileSync(new URL('../scripts/deploy_oracle.ps1',import.meta.url),'utf8');
   const remote=readFileSync(new URL('../scripts/deploy_oracle_remote.sh',import.meta.url),'utf8');
