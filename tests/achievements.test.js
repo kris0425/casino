@@ -690,6 +690,18 @@ test('限時資產拍賣全系統同時只保留一場並安全整併重複場�
   assert.doesNotMatch(scheduler,/for\(const guildId of guildIds\) ensureActiveAssetAuction/);
 });
 
+test('限時資產拍賣公告可由所有玩家直接公開出價',()=>{
+  const bidBlock=source.match(/function placeAssetAuctionBid\([\s\S]+?\n\}/)?.[0]||'';
+  assert.match(source,/current_bidder_guild_id TEXT/);
+  assert.match(source,/ALTER TABLE asset_auctions ADD COLUMN current_bidder_guild_id/);
+  assert.match(bidBlock,/WHERE id=\? AND status='active'/);
+  assert.match(bidBlock,/current_bidder_guild_id=\?/);
+  assert.match(source,/asset_auction_public_bid:/);
+  assert.match(source,/function assetAuctionAnnouncementComponents\(auction\)/);
+  assert.match(source,/function refreshActiveAssetAuctionAnnouncementControls\(\)/);
+  assert.match(source,/publishAssetAuctionAnnouncement\(result\.auction,'🔨/);
+});
+
 test('限時拍賣輪替池包含 20 款限量競標載具',()=>{
   const definitionBlock=source.match(/const auctionLimitedVehicleDefinitions=\[[\s\S]+?\n\];/)?.[0]||'';
   assert.equal((definitionBlock.match(/\{id:'/g)||[]).length,20);
