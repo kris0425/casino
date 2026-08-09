@@ -579,12 +579,13 @@ test('航空航線基礎營收下修 25% 且不影響其他交通事業',()=>{
     alpine_lake_express:142500,
     aegean_resort_hop:270000,
     polar_night_longhaul:1575000,
+    pacific_crown_longhaul:1850000,
     grand_world_odyssey:2550000
   };
   for(const [routeId,revenue] of Object.entries(expectedRevenue)) {
     assert.match(airlineBlock,new RegExp(`${routeId}:\\{[^\\n]+baseRevenue:${revenue}(?:,|\\})`),`${routeId} 基礎營收不正確`);
   }
-  assert.equal((airlineBlock.match(/baseRevenue:/g)||[]).length,9,'航空航線數量或營收設定異常');
+  assert.equal((airlineBlock.match(/baseRevenue:/g)||[]).length,10,'航空航線數量或營收設定異常');
   assert.match(source,/INSERT INTO airline_flights\([^\n]+gross_revenue[^\n]+\)[\s\S]+?\.run\([^\n]+grossRevenue/,'起飛時必須保存當次營收，避免調整已起飛航班');
 
   const groundBlock=source.match(/const transportRoutes=\{[\s\S]+?\n\};/)?.[0]||'';
@@ -611,7 +612,7 @@ test('四種交通企業可升至 10 級並只影響新營運收益',()=>{
   assert.match(upgradeBlock,/'enterprise_upgrade'/);
   assert.match(upgradeBlock,/COMMIT/);
   assert.match(source,/route\.baseRevenue\*airport\.airlineMultiplier\*airlinerRevenueMultiplier\(company\.aircraft_id\)\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
-  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*coachMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
   assert.match(source,/enterprise_upgrade:\$\{u\}:airline/);
   assert.match(source,/setCustomId\(`enterprise_upgrade:\$\{u\}:\$\{businessType\}`\)/);
   assert.match(source,/INSERT INTO airline_flights\([^\n]+gross_revenue/,'航空收益必須在起飛時保存');
@@ -1034,7 +1035,7 @@ test('列車盲盒整合交通事業並套用鐵路營收加成',()=>{
   assert.match(source,/CREATE TABLE IF NOT EXISTS train_blind_box_daily/);
   assert.match(source,/purchase_day===trainBlindBoxDay\(\)/);
   assert.match(source,/bestOwnedTrain\(g,u\)/);
-  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*coachMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
   const commandStart=source.indexOf('const commands = ['),commandEnd=source.indexOf('].map(c=>c.toJSON());',commandStart);
   assert.doesNotMatch(source.slice(commandStart,commandEnd),/setName\('列車盲盒'\)/,'列車盲盒應整合在 /交通事業，不新增獨立指令');
 });
@@ -1118,6 +1119,29 @@ test('陸路交通事業可選擇事業載具並保存到營運紀錄',()=>{
   assert.equal(update.id,'2026-08-04-transport-vehicle-selection');
   assert.match(update.summary,/事業載具/);
   assert.match(update.changes.join('\n'),/列車.*卡車.*客運/s);
+});
+
+test('長途交通網與客運盲盒提供二十輛巴士、圖片及客運營收加成',()=>{
+  for(const routeId of ['pacific_crown_longhaul','rail_continental_sleeper','coach_grand_tour_longhaul','freight_transcontinental_corridor']) {
+    assert.match(source,new RegExp(`${routeId}:`),`缺少長途路線 ${routeId}`);
+  }
+  assert.match(source,/const coachShopBusDefinitions=\[/);
+  assert.match(source,/const coachBlindBoxDefinitions=\[/);
+  assert.match(source,/const coachShopBusIds=coachShopBusDefinitions\.map/);
+  assert.match(source,/const coachBlindBoxIds=Object\.keys\(coachBlindBoxRates\)/);
+  assert.match(source,/COACH_BLIND_BOX_SINGLE_PRICE=150000/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS coach_blind_box_daily/);
+  assert.match(source,/function openCoachBlindBox\(g,u\)/);
+  assert.match(source,/coachRevenueBonus/);
+  assert.match(source,/transport_hub_coach_box/);
+  assert.match(source,/category:'客運巴士'/);
+  for(const image of ['shop_midnight_navy','shop_amber_desert','box_sunrise_city','box_starlight_sleeper']) {
+    assert.ok(existsSync(new URL(`../assets/buses/${image}.png`,import.meta.url)),`缺少客運巴士圖片 ${image}`);
+  }
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-10-longhaul-coach-fleet.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-10-longhaul-coach-fleet');
+  assert.match(update.summary,/長途/);
+  assert.match(update.changes.join('\n'),/商城.*10 輛.*盲盒.*10 輛/s);
 });
 
 test('搶劫備援與貨運站圖片修復公告完整',()=>{
@@ -1468,9 +1492,9 @@ test('鐵路、客運與貨運各新增三條可運行路線',()=>{
     assert.equal(route.operatingCost,operatingCost,`${routeId} 營運成本不正確`);
     assert.equal(route.stamina,stamina,`${routeId} 體力不正確`);
   }
-  assert.equal(Object.values(routes).filter(route=>route.type==='rail').length,6,'鐵路路線數量不正確');
-  assert.equal(Object.values(routes).filter(route=>route.type==='coach').length,6,'客運路線數量不正確');
-  assert.equal(Object.values(routes).filter(route=>route.type==='freight').length,6,'貨運路線數量不正確');
+  assert.equal(Object.values(routes).filter(route=>route.type==='rail').length,7,'鐵路路線數量不正確');
+  assert.equal(Object.values(routes).filter(route=>route.type==='coach').length,7,'客運路線數量不正確');
+  assert.equal(Object.values(routes).filter(route=>route.type==='freight').length,7,'貨運路線數量不正確');
   assert.match(source,/Object\.entries\(transportRoutes\)\.filter\(\(\[,route\]\)=>route\.type===businessType\)/,'路線選單應自動包含新增路線');
 });
 
