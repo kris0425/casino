@@ -677,6 +677,19 @@ test('限時資產拍賣使用安全託管、退款、延時與自動結標',()=
   assert.doesNotMatch(source,/setName\('資產拍賣'\)/,'拍賣應整合既有資產入口，不新增斜線指令');
 });
 
+test('限時資產拍賣全系統同時只保留一場並安全整併重複場次',()=>{
+  const migration=source.match(/function migrateToSingleActiveAssetAuction\(now=Date\.now\(\)\) \{[\s\S]+?\n\}/)?.[0]||'';
+  const scheduler=source.match(/async function processAssetAuctions\(\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(migration,/DROP INDEX IF EXISTS idx_asset_auctions_active_guild/);
+  assert.match(migration,/idx_asset_auctions_single_active/);
+  assert.match(migration,/'auction_singleton_refund'/);
+  assert.match(migration,/superseded_at/);
+  assert.match(source,/function activeAssetAuction\(\) \{/);
+  assert.match(source,/全系統同時只有一場系統拍賣/);
+  assert.match(scheduler,/removeSupersededAssetAuctionAnnouncements/);
+  assert.doesNotMatch(scheduler,/for\(const guildId of guildIds\) ensureActiveAssetAuction/);
+});
+
 test('限時拍賣輪替池包含 20 款限量競標載具',()=>{
   const definitionBlock=source.match(/const auctionLimitedVehicleDefinitions=\[[\s\S]+?\n\];/)?.[0]||'';
   assert.equal((definitionBlock.match(/\{id:'/g)||[]).length,20);

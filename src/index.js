@@ -77,7 +77,7 @@ const ECONOMY_SINK_LABELS={
   cosmetic_purchase:'個人造型商城',
   transfer_fee:'玩家轉帳手續費'
 };
-const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund','auction_legacy_refund']);
+const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund','auction_legacy_refund','auction_singleton_refund']);
 const BASE_STAMINA = 800;
 const assetPath=name=>resolve(process.cwd(),'assets',name);
 const CHARACTER_STYLE_ROOT=resolve(process.cwd(),'data','appearance-styles');
@@ -1091,6 +1091,34 @@ if(!db.prepare('PRAGMA table_info(asset_auctions)').all().some(column=>column.na
 if(!db.prepare('PRAGMA table_info(asset_auctions)').all().some(column=>column.name==='announcement_message_id')) {
   db.exec('ALTER TABLE asset_auctions ADD COLUMN announcement_message_id TEXT');
 }
+if(!db.prepare('PRAGMA table_info(asset_auctions)').all().some(column=>column.name==='superseded_at')) {
+  db.exec('ALTER TABLE asset_auctions ADD COLUMN superseded_at INTEGER');
+}
+if(!db.prepare('PRAGMA table_info(asset_auctions)').all().some(column=>column.name==='superseded_message_deleted_at')) {
+  db.exec('ALTER TABLE asset_auctions ADD COLUMN superseded_message_deleted_at INTEGER');
+}
+function migrateToSingleActiveAssetAuction(now=Date.now()) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const active=db.prepare("SELECT * FROM asset_auctions WHERE status='active' ORDER BY CASE WHEN current_bid>0 THEN 0 ELSE 1 END, starts_at, id").all();
+    const [, ...duplicates]=active;
+    for(const auction of duplicates) {
+      if(auction.current_bidder_id&&auction.current_bid>0) {
+        changeBalanceUnlocked(auction.guild_id,auction.current_bidder_id,auction.current_bid,'auction_singleton_refund',null,'限時競標整併為全系統單一場次，退回拍賣託管');
+      }
+      db.prepare("UPDATE asset_auctions SET status='expired',settled_at=?,closed_announced_at=?,superseded_at=? WHERE id=? AND status='active'")
+        .run(now,now,now,auction.id);
+    }
+    db.exec('DROP INDEX IF EXISTS idx_asset_auctions_active_guild');
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_auctions_single_active ON asset_auctions(status) WHERE status='active'");
+    db.exec('COMMIT');
+    return duplicates.length;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+migrateToSingleActiveAssetAuction();
 if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='dm_notified_at')) {
   db.exec('ALTER TABLE airline_flights ADD COLUMN dm_notified_at INTEGER');
 }
@@ -3883,12 +3911,12 @@ function assetMediaPayload(embed,assetId,asset) {
 function assetAuctionStartPrice(asset) {
   return Math.max(ASSET_AUCTION_MIN_START_PRICE,Math.ceil((asset.price*2)/ASSET_AUCTION_MIN_INCREMENT)*ASSET_AUCTION_MIN_INCREMENT);
 }
-function activeAssetAuction(g) {
-  return db.prepare("SELECT * FROM asset_auctions WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 1").get(g)||null;
+function activeAssetAuction() {
+  return db.prepare("SELECT * FROM asset_auctions WHERE status='active' ORDER BY id DESC LIMIT 1").get()||null;
 }
-function assetAuctionById(g,auctionId) {
+function assetAuctionById(auctionId) {
   if(!Number.isSafeInteger(auctionId)||auctionId<1) return null;
-  return db.prepare('SELECT * FROM asset_auctions WHERE id=? AND guild_id=?').get(auctionId,g)||null;
+  return db.prepare('SELECT * FROM asset_auctions WHERE id=?').get(auctionId)||null;
 }
 function minimumAssetAuctionBid(auction) {
   if(!auction.current_bid) return auction.start_price;
@@ -3946,26 +3974,26 @@ function retireLegacyAssetAuctions(now=Date.now()) {
   }
 }
 function createAssetAuction(g,now=Date.now()) {
-  const current=activeAssetAuction(g);
+  const current=activeAssetAuction();
   if(current) return current;
-  const previous=db.prepare('SELECT asset_id FROM asset_auctions WHERE guild_id=? ORDER BY id DESC LIMIT 1').get(g);
+  const previous=db.prepare('SELECT asset_id FROM asset_auctions ORDER BY id DESC LIMIT 1').get();
   const previousIndex=previous?assetAuctionPool.indexOf(previous.asset_id):-1;
   const assetId=assetAuctionPool[(previousIndex+1+assetAuctionPool.length)%assetAuctionPool.length],asset=assetCatalog[assetId];
   if(!asset||!asset.image) throw new Error(`拍賣輪替資產缺少資料或圖片：${assetId}`);
   try {
     const result=db.prepare('INSERT INTO asset_auctions(guild_id,asset_id,start_price,starts_at,ends_at) VALUES(?,?,?,?,?)')
       .run(g,assetId,assetAuctionStartPrice(asset),now,now+ASSET_AUCTION_DURATION_MS);
-    return assetAuctionById(g,Number(result.lastInsertRowid));
+    return assetAuctionById(Number(result.lastInsertRowid));
   } catch(error) {
-    const concurrent=activeAssetAuction(g);
+    const concurrent=activeAssetAuction();
     if(concurrent) return concurrent;
     throw error;
   }
 }
 function ensureActiveAssetAuction(g,now=Date.now()) {
-  const current=activeAssetAuction(g);
+  const current=activeAssetAuction();
   if(current&&current.ends_at<=now) settleAssetAuction(current.id,now);
-  return activeAssetAuction(g)||createAssetAuction(g,now);
+  return activeAssetAuction()||createAssetAuction(g,now);
 }
 function placeAssetAuctionBid(g,u,auctionId,amount,now=Date.now()) {
   if(!Number.isSafeInteger(amount)||amount<1) throw new Error('出價必須是 JavaScript 安全範圍內的正整數');
@@ -3991,7 +4019,7 @@ function placeAssetAuctionBid(g,u,auctionId,amount,now=Date.now()) {
       .run(amount,u,endsAt,auction.id);
     db.prepare('INSERT INTO asset_auction_bids(auction_id,guild_id,bidder_id,amount) VALUES(?,?,?,?)').run(auction.id,g,u,amount);
     db.exec('COMMIT');
-    return {auction:assetAuctionById(g,auction.id),amount,escrowNeeded,extended,next:balance(g,u),previousBidderId,previousBid,assetId:auction.asset_id};
+    return {auction:assetAuctionById(auction.id),amount,escrowNeeded,extended,next:balance(g,u),previousBidderId,previousBid,assetId:auction.asset_id};
   } catch(error) {
     db.exec('ROLLBACK');
     throw error;
@@ -4005,7 +4033,7 @@ function assetAuctionEmbed(g,u,auction,notice='') {
   const limitedVehicleText=asset.auctionOnly?'\n🏁 **限量競標載具**｜本款僅透過系統拍賣輪替取得，得標後永久收藏。':'';
   return new EmbedBuilder().setColor(0xFF6D00).setTitle(`🔥 限時資產拍賣｜${asset.name}`)
     .setDescription(`${notice?`${notice}\n\n`:''}${asset.description}${limitedVehicleText}\n\n稀有度：**${asset.rarity||'一般'}**\n參考價值：**${fmt(asset.price)}**\n起標價：**${fmt(auction.start_price)}**\n目前最高價：${current}\n目前領先：${leader}\n累計出價：**${auction.bid_count} 次**\n最低下一標：**${fmt(minimum)}**\n結束時間：<t:${Math.floor(auction.ends_at/1000)}:F>（<t:${Math.floor(auction.ends_at/1000)}:R>）${walletText}\n\n出價會立即託管；被超標時完整退款。得標款由系統回收，不會進入賭場寶庫。最後 5 分鐘出價會延長 5 分鐘。`)
-    .setFooter({text:'每服同時只有一場系統拍賣｜請只輸入能負擔的安全整數金額'});
+    .setFooter({text:'全系統同時只有一場系統拍賣｜請只輸入能負擔的安全整數金額'});
 }
 function assetAuctionComponents(token,u,auction) {
   return [new ActionRowBuilder().addComponents(
@@ -4065,6 +4093,21 @@ async function adoptExistingAssetAuctionAnnouncement(auction) {
   for(const message of duplicates) await message.delete().catch(error=>console.warn('拍賣重複公告清理失敗 auction='+auction.id+' message='+message.id+': '+error.message));
   db.prepare('UPDATE asset_auctions SET announcement_channel_id=?,announcement_message_id=? WHERE id=? AND announcement_message_id IS NULL').run(channel.id,keep.id,auction.id);
 }
+async function removeSupersededAssetAuctionAnnouncements() {
+  const auctions=db.prepare("SELECT * FROM asset_auctions WHERE superseded_at IS NOT NULL AND superseded_message_deleted_at IS NULL AND announcement_channel_id IS NOT NULL AND announcement_message_id IS NOT NULL").all();
+  for(const auction of auctions) {
+    try {
+      const channel=await client.channels.fetch(auction.announcement_channel_id);
+      if(channel?.messages?.fetch) {
+        const message=await channel.messages.fetch(auction.announcement_message_id).catch(()=>null);
+        if(message) await message.delete();
+      }
+      db.prepare('UPDATE asset_auctions SET superseded_message_deleted_at=? WHERE id=? AND superseded_message_deleted_at IS NULL').run(Date.now(),auction.id);
+    } catch(error) {
+      console.warn('多餘拍賣公告清理失敗 auction='+auction.id+': '+error.message);
+    }
+  }
+}
 let assetAuctionProcessing=false;
 async function processAssetAuctions() {
   if(assetAuctionProcessing) return;
@@ -4074,7 +4117,9 @@ async function processAssetAuctions() {
     const retired=retireLegacyAssetAuctions(now);
     if(retired) console.log(`已下架 ${retired} 場舊版限時拍賣，並完成託管退款`);
     for(const auction of db.prepare("SELECT id FROM asset_auctions WHERE status='active' AND ends_at<=? ORDER BY ends_at").all(now)) settleAssetAuction(auction.id,now);
-    for(const guildId of guildIds) ensureActiveAssetAuction(guildId,now);
+    await removeSupersededAssetAuctionAnnouncements();
+    const auctionOwnerId=db.prepare('SELECT guild_id FROM asset_auctions ORDER BY id DESC LIMIT 1').get()?.guild_id||[...guildIds].sort()[0];
+    if(auctionOwnerId) ensureActiveAssetAuction(auctionOwnerId,now);
     const legacyAnnouncements=db.prepare("SELECT * FROM asset_auctions WHERE status='active' AND announced_at IS NOT NULL AND announcement_message_id IS NULL").all();
     for(const auction of legacyAnnouncements) {
       try { await adoptExistingAssetAuctionAnnouncement(auction); }
@@ -4085,7 +4130,7 @@ async function processAssetAuctions() {
       const claim=db.prepare('UPDATE asset_auctions SET announced_at=? WHERE id=? AND status=\'active\' AND announced_at IS NULL').run(Date.now(),auction.id);
       if(Number(claim.changes)!==1) continue;
       try {
-        const published=await publishAssetAuctionAnnouncement(assetAuctionById(auction.guild_id,auction.id),'🔥 **全新系統拍賣已開始！**');
+        const published=await publishAssetAuctionAnnouncement(assetAuctionById(auction.id),'🔥 **全新系統拍賣已開始！**');
         const announcedAt=Date.now();
         db.prepare("UPDATE asset_auctions SET announced_at=?,last_reminder_at=?,announcement_channel_id=?,announcement_message_id=? WHERE id=? AND status='active'").run(announcedAt,announcedAt,published.channelId,published.messageId,auction.id);
       } catch(error) {
@@ -7650,7 +7695,7 @@ async function handleInteraction(i) {
     return i.update({...assetMediaPayload(embed,assetId,asset),components:[carBlindBoxCatalogRow(packId,assetId)],attachments:[]});
   }
   if(i.isButton()&&i.customId.startsWith('asset_auction_bid:')&&i.guildId) {
-    const [,ownerId,auctionIdText,token]=i.customId.split(':'),session=assetShopSessions.get(token),auction=assetAuctionById(i.guildId,Number(auctionIdText));
+    const [,ownerId,auctionIdText,token]=i.customId.split(':'),session=assetShopSessions.get(token),auction=assetAuctionById(Number(auctionIdText));
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的資產拍賣面板出價。',ephemeral:true});
     if(!session||session.guildId!==i.guildId||session.userId!==ownerId) return i.reply({content:'⚠️ 這個拍賣面板已失效，請重新使用 `/購買資產`。',ephemeral:true});
     if(!auction||auction.status!=='active'||auction.ends_at<=Date.now()) return i.reply({content:'⚠️ 這場拍賣已結束，請按重新整理。',ephemeral:true});
