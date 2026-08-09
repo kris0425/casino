@@ -536,6 +536,38 @@ test('兩架 777-300ER 特殊塗裝客機已加入資產市場及航空營運',(
   assert.match(source,/boeing_777_300er_myna_starlight:\{[^\n]+白色頰羽[^\n]+文鳥主題/);
 });
 
+test('十架彩繪旗艦客機已上架並可投入航空公司營運',()=>{
+  const definitions={
+    livery_neon_lotus_a350:{price:10800000,image:'neon-lotus-a350.png'},
+    livery_koi_ocean_787:{price:12800000,image:'koi-ocean-787.png'},
+    livery_crimson_racing_777:{price:14800000,image:'crimson-racing-777.png'},
+    livery_jade_dragon_a330:{price:16800000,image:'jade-dragon-a330.png'},
+    livery_aurora_polar_787:{price:18800000,image:'aurora-polar-787.png'},
+    livery_sakura_express_777:{price:20800000,image:'sakura-express-777.png'},
+    livery_tropical_parrot_a350:{price:22800000,image:'tropical-parrot-a350.png'},
+    livery_obsidian_casino_747:{price:24800000,image:'obsidian-casino-747.png'},
+    livery_galaxy_whale_a380:{price:26800000,image:'galaxy-whale-a380.png'},
+    livery_rainbow_leopard_737:{price:28800000,image:'rainbow-leopard-737.png'}
+  };
+  const airliners=source.match(/const passengerAirlinerIds=new Set\(\[[\s\S]+?\n\]\);/)?.[0]||'';
+  for(const [assetId,expected] of Object.entries(definitions)) {
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(assetBlock,/category:'飛行器'/);
+    assert.match(assetBlock,new RegExp(`price:${expected.price}`));
+    assert.match(assetBlock,/rarity:'限定'/);
+    assert.match(assetBlock,/image:'aircraft\/passenger\/livery_collection\//);
+    assert.match(airliners,new RegExp(`'${assetId}'`));
+    const image=readFileSync(new URL(`../assets/aircraft/passenger/livery_collection/${expected.image}`,import.meta.url));
+    assert.equal(image.subarray(1,4).toString(),'PNG');
+    const width=image.readUInt32BE(16),height=image.readUInt32BE(20);
+    assert.ok(width>=1500&&height>=800&&width>height,`${assetId} 圖片規格錯誤：${width}x${height}`);
+  }
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-09-livery-airliners.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-09-livery-airliners');
+  assert.match(update.changes.join('\n'),/10 架彩繪客機/);
+  assert.match(update.changes.join('\n'),/10,800,000～28,800,000/);
+});
+
 test('航空航線基礎營收下修 25% 且不影響其他交通事業',()=>{
   const airlineBlock=source.match(/const airlineRoutes=\{[\s\S]+?\n\};/)?.[0]||'';
   const expectedRevenue={

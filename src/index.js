@@ -1969,7 +1969,17 @@ const assetCatalog={
   embraer_e195_e2_snow:{name:'☁️ Embraer E195-E2 白雲快線',category:'飛行器',price:1950000,description:'純白新世代支線客機，以快速周轉航班提供可靠的工作收益。',image:'aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png',images:['aircraft/passenger/three_airliners/embraer_e195_e2_snow_side.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_top.png','aircraft/passenger/three_airliners/embraer_e195_e2_snow_front.png'],randomImage:true,rarity:'史詩',buff:'work',buffMultiplier:1.5},
   puppy_luxury_airliner:{name:'🐶 萌犬豪華客機',category:'飛行器',price:7880000,description:'粉金珍珠塗裝、萌犬主題套房與雲端甜點吧組成的夢幻廣體客機；限定級舒適客艙可大幅提升每日體力，並以頂級機隊價值提高航空公司航線營收。',image:'aircraft/passenger/puppy_luxury_airliner.png',rarity:'限定',buff:'stamina',buffMultiplier:2.8},
   boeing_777_300er_lucky_wings:{name:'🐦‍⬛ Boeing 777-300ER 星光八哥號',category:'飛行器',price:8880000,description:'深藍星空、金色幸運紋章與八哥彩繪交織而成的特殊塗裝旗艦；華麗機艙能提升賭場派彩運勢，也可投入航空公司的長程航線。',image:'aircraft/passenger/boeing_777_300er_lucky_wings_special.png',rarity:'限定',buff:'casino',buffMultiplier:3,forSale:true},
-  boeing_777_300er_myna_starlight:{name:'🐦 Boeing 777-300ER 星羽文鳥號',category:'飛行器',price:9280000,description:'以深色羽翼、白色頰羽與星光金線打造的文鳥主題特殊塗裝；頂級遠程客艙可拓展全球商務收益，也可投入航空公司的長程航線。',image:'aircraft/passenger/boeing_777_300er_myna_starlight_special.png',rarity:'限定',buff:'work',buffMultiplier:3.1,forSale:true}
+  boeing_777_300er_myna_starlight:{name:'🐦 Boeing 777-300ER 星羽文鳥號',category:'飛行器',price:9280000,description:'以深色羽翼、白色頰羽與星光金線打造的文鳥主題特殊塗裝；頂級遠程客艙可拓展全球商務收益，也可投入航空公司的長程航線。',image:'aircraft/passenger/boeing_777_300er_myna_starlight_special.png',rarity:'限定',buff:'work',buffMultiplier:3.1,forSale:true},
+  livery_neon_lotus_a350:{name:'🪷 A350 霓虹蓮都號',category:'飛行器',price:10800000,description:'紫曜機身上綻放青藍蓮花光紋的未來旗艦；可投入航空公司全部長程航線，是高階收藏與營運機隊。',image:'aircraft/passenger/livery_collection/neon-lotus-a350.png',rarity:'限定',buff:'casino',buffMultiplier:3.2},
+  livery_koi_ocean_787:{name:'🐟 787 錦鯉海洋號',category:'飛行器',price:12800000,description:'珍珠白機身描繪鈷藍海浪與金橙錦鯉，象徵平穩豐收的遠程客機；可投入航空公司長程航線。',image:'aircraft/passenger/livery_collection/koi-ocean-787.png',rarity:'限定',buff:'work',buffMultiplier:3.2},
+  livery_crimson_racing_777:{name:'🏁 777 緋紅競速號',category:'飛行器',price:14800000,description:'鏡面緋紅、碳纖維與金色速度線交織的寬體客機；可投入航空公司長程航線。',image:'aircraft/passenger/livery_collection/crimson-racing-777.png',rarity:'限定',buff:'getaway',buffMultiplier:3.2},
+  livery_jade_dragon_a330:{name:'🐉 A330 翡翠蒼龍號',category:'飛行器',price:16800000,description:'玉綠龍鱗與金雲紋覆蓋的尊榮廣體客機；可投入航空公司長程航線。',image:'aircraft/passenger/livery_collection/jade-dragon-a330.png',rarity:'限定',buff:'work',buffMultiplier:3.3},
+  livery_aurora_polar_787:{name:'🌌 787 極光冰原號',category:'飛行器',price:18800000,description:'銀白機身流動著極光與雪晶紋路，專為長程極地商務設計；可投入航空公司長程航線。',image:'aircraft/passenger/livery_collection/aurora-polar-787.png',rarity:'限定',buff:'stamina',buffMultiplier:3.3},
+  livery_sakura_express_777:{name:'🌸 777 櫻花疾行號',category:'飛行器',price:20800000,description:'櫻瓣、緋紅速度帶與冰白機身組成的特殊塗裝旗艦；可投入航空公司長程航線。',image:'aircraft/passenger/livery_collection/sakura-express-777.png',rarity:'限定',buff:'work',buffMultiplier:3.4},
+  livery_tropical_parrot_a350:{name:'🦜 A350 熱帶鸚鵡號',category:'飛行器',price:22800000,description:'青綠機身結合緋紅鸚鵡羽色與雨林花葉的陽光彩繪；可投入航空公司長程航線。',image:'aircraft/passenger/livery_collection/tropical-parrot-a350.png',rarity:'限定',buff:'stamina',buffMultiplier:3.4},
+  livery_obsidian_casino_747:{name:'♠️ 747 黑金賭城號',category:'飛行器',price:24800000,description:'黑曜機身以金色牌組花色與輪盤飾紋打造，彰顯賭城旗艦收藏；可投入航空公司長程航線。',image:'aircraft/passenger/livery_collection/obsidian-casino-747.png',rarity:'限定',buff:'casino',buffMultiplier:3.5},
+  livery_galaxy_whale_a380:{name:'🐋 A380 星河鯨歌號',category:'飛行器',price:26800000,description:'雙層機身描繪發光鯨群、星座與深藍銀河，是全系列最大的夢幻旗艦；可投入航空公司長程航線。',image:'aircraft/passenger/livery_collection/galaxy-whale-a380.png',rarity:'限定',buff:'stamina',buffMultiplier:3.5},
+  livery_rainbow_leopard_737:{name:'🌈 737 虹彩豹紋號',category:'飛行器',price:28800000,description:'石墨黑機身覆以虹彩豹紋與霓虹飾線，為高端收藏家打造的潮流噴射客機；可投入航空公司長程航線。',image:'aircraft/passenger/livery_collection/rainbow-leopard-737.png',rarity:'限定',buff:'casino',buffMultiplier:3.6}
 };
 const shotgunSeries=[
   {key:'classic_pump',name:'經典泵動霰彈槍',price:65000,robber:3,police:3,image:'01-classic-pump.png'},
@@ -2209,7 +2219,9 @@ const passengerAirlinerIds=new Set([
   'airbus_a321neo','boeing_737_max_8','airbus_a320neo','embraer_e190_e2','bombardier_crj900',
   'boeing_787_9_midnight','airbus_a350_1000_midnight','embraer_e195_e2_midnight',
   'boeing_787_9_snow','airbus_a350_1000_snow','embraer_e195_e2_snow','puppy_luxury_airliner',
-  'boeing_777_300er_lucky_wings','boeing_777_300er_myna_starlight'
+  'boeing_777_300er_lucky_wings','boeing_777_300er_myna_starlight',
+  'livery_neon_lotus_a350','livery_koi_ocean_787','livery_crimson_racing_777','livery_jade_dragon_a330','livery_aurora_polar_787',
+  'livery_sakura_express_777','livery_tropical_parrot_a350','livery_obsidian_casino_747','livery_galaxy_whale_a380','livery_rainbow_leopard_737'
 ]);
 const airlineRoutes={
   regional:{name:'🏝️ 港澳台區域快線',description:'高頻短程航班，適合剛成立的航空公司。',durationMs:10*60*1000,baseRevenue:63750,operatingCost:25000,stamina:10,minTier:1},
