@@ -803,6 +803,20 @@ test('限時資產拍賣可指定跨伺服器公告頻道',()=>{
   assert.doesNotMatch(scheduler,/casinoAnnouncementChannel\(auction\.guild_id\)/);
 });
 
+test('團隊搶劫提高合作逃脫率並小幅下調警方壓制',()=>{
+  assert.match(source,/const TEAM_HEIST_MEMBER_CHANCE_BONUS = Number\(process\.env\.TEAM_HEIST_MEMBER_CHANCE_BONUS \|\| 6\)/);
+  assert.match(source,/const TEAM_HEIST_SUCCESS_RATE_CAP = Number\(process\.env\.TEAM_HEIST_SUCCESS_RATE_CAP \|\| 48\)/);
+  assert.match(source,/if\(bank\?\.sundayOnly\|\|bank\?\.museumTarget\|\|\(bank\?\.reward\|\|0\)>=100000\) return 15/);
+  assert.match(source,/if\(\(bank\?\.reward\|\|0\)>=50000\) return 11/);
+  assert.match(source,/return 7;/);
+  assert.match(source,/const TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP = Number\(process\.env\.TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP \|\| 22\)/);
+  assert.match(source,/const TEAM_HEIST_POLICE_CONFRONT_PRESSURE = Number\(process\.env\.TEAM_HEIST_POLICE_CONFRONT_PRESSURE \|\| 3\)/);
+  assert.match(source,/const TEAM_HEIST_POLICE_REINFORCE_PRESSURE = Number\(process\.env\.TEAM_HEIST_POLICE_REINFORCE_PRESSURE \|\| 4\)/);
+  assert.match(source,/members\.length-1\)\*TEAM_HEIST_MEMBER_CHANCE_BONUS/);
+  assert.match(source,/TEAM_HEIST_SUCCESS_RATE_CAP\+weeklyHeistBonus/);
+  assert.match(source,/CASINO_VAULT_MAX_SUCCESS_RATE:normalSuccessCap/);
+});
+
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
   const block=source.match(/async function publishLatestHeistResult\(interaction,payload\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少搶劫最終結果發布函式');
