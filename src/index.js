@@ -4037,7 +4037,7 @@ function assetAuctionEmbed(g,u,auction,notice='') {
   const walletText=u?`\n\n你的金庫：**${fmt(balance(g,u))}**`:'';
   const limitedVehicleText=asset.auctionOnly?'\n🏁 **限量競標載具**｜本款僅透過系統拍賣輪替取得，得標後永久收藏。':'';
   return new EmbedBuilder().setColor(0xFF6D00).setTitle(`🔥 限時資產拍賣｜${asset.name}`)
-    .setDescription(`${notice?`${notice}\n\n`:''}${asset.description}${limitedVehicleText}\n\n稀有度：**${asset.rarity||'一般'}**\n參考價值：**${fmt(asset.price)}**\n起標價：**${fmt(auction.start_price)}**\n目前最高價：${current}\n目前領先：${leader}\n累計出價：**${auction.bid_count} 次**\n最低下一標：**${fmt(minimum)}**\n結束時間：<t:${Math.floor(auction.ends_at/1000)}:F>（<t:${Math.floor(auction.ends_at/1000)}:R>）${walletText}\n\n出價會立即託管；被超標時完整退款。得標款由系統回收，不會進入賭場寶庫。最後 5 分鐘出價會延長 5 分鐘。`)
+    .setDescription(`${notice?`${notice}\n\n`:''}${asset.description}${limitedVehicleText}\n\n稀有度：**${asset.rarity||'一般'}**\n起標價：**${fmt(auction.start_price)}**\n目前最高價：${current}\n目前領先：${leader}\n累計出價：**${auction.bid_count} 次**\n最低下一標：**${fmt(minimum)}**\n結束時間：<t:${Math.floor(auction.ends_at/1000)}:F>（<t:${Math.floor(auction.ends_at/1000)}:R>）${walletText}\n\n出價會立即託管；被超標時完整退款。得標款由系統回收，不會進入賭場寶庫。最後 5 分鐘出價會延長 5 分鐘。`)
     .setFooter({text:'全系統同時只有一場系統拍賣｜請只輸入能負擔的安全整數金額'});
 }
 function assetAuctionComponents(token,u,auction) {
