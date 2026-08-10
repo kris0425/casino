@@ -612,7 +612,7 @@ test('四種交通企業可升至 10 級並只影響新營運收益',()=>{
   assert.match(upgradeBlock,/'enterprise_upgrade'/);
   assert.match(upgradeBlock,/COMMIT/);
   assert.match(source,/route\.baseRevenue\*airport\.airlineMultiplier\*airlinerRevenueMultiplier\(company\.aircraft_id\)\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
-  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*coachMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*coachMultiplier\*shipMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
   assert.match(source,/enterprise_upgrade:\$\{u\}:airline/);
   assert.match(source,/setCustomId\(`enterprise_upgrade:\$\{u\}:\$\{businessType\}`\)/);
   assert.match(source,/INSERT INTO airline_flights\([^\n]+gross_revenue/,'航空收益必須在起飛時保存');
@@ -1035,7 +1035,7 @@ test('列車盲盒整合交通事業並套用鐵路營收加成',()=>{
   assert.match(source,/CREATE TABLE IF NOT EXISTS train_blind_box_daily/);
   assert.match(source,/purchase_day===trainBlindBoxDay\(\)/);
   assert.match(source,/bestOwnedTrain\(g,u\)/);
-  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*coachMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
+  assert.match(source,/route\.baseRevenue\*station\.transportMultiplier\*trainMultiplier\*truckMultiplier\*coachMultiplier\*shipMultiplier\*enterpriseRevenueMultiplier\(company\)\*dailyMultiplier\*demandMultiplier/);
   const commandStart=source.indexOf('const commands = ['),commandEnd=source.indexOf('].map(c=>c.toJSON());',commandStart);
   assert.doesNotMatch(source.slice(commandStart,commandEnd),/setName\('列車盲盒'\)/,'列車盲盒應整合在 /交通事業，不新增獨立指令');
 });
@@ -1119,6 +1119,32 @@ test('陸路交通事業可選擇事業載具並保存到營運紀錄',()=>{
   assert.equal(update.id,'2026-08-04-transport-vehicle-selection');
   assert.match(update.summary,/事業載具/);
   assert.match(update.changes.join('\n'),/列車.*卡車.*客運/s);
+});
+
+test('海上船運整合交通事業，既有船舶可配置並保留舊資料庫相容性',()=>{
+  for(const routeId of ['shipping_harbor_island_cruise','shipping_strait_ferry','shipping_ocean_luxury_voyage','shipping_deep_sea_expedition']) {
+    assert.match(source,new RegExp(`${routeId}:`),`缺少船運航線 ${routeId}`);
+  }
+  const portBlock=source.match(/ocean_crown_maritime_port:\{[^\n]+/)?.[0]||'';
+  assert.match(portBlock,/transportType:'shipping'/);
+  assert.match(portBlock,/transportMultiplier:1\.18/);
+  assert.match(source,/shipping:\{name:'海上船運',emoji:'⚓'/);
+  assert.match(source,/const shippingVesselIds=\['yacht','cruise','going_merry','luxury_submarine','ghost_pirate_ship'\]/);
+  assert.match(source,/TRANSPORT_SHIPPING_DEFAULT_VEHICLE_ID='shipping_basic_fleet'/);
+  assert.match(source,/function migrateTransportBusinessTypesForShipping\(/);
+  assert.match(source,/business_type IN \('rail','coach','freight','shipping'\)/);
+  assert.match(source,/business_type IN \('airline','rail','coach','freight','shipping'\)/);
+  for(const assetId of ['yacht','cruise','going_merry','luxury_submarine','ghost_pirate_ship']) {
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(assetBlock,/shipRevenueBonus:0\.\d+/);
+  }
+  assert.match(source,/businessType==='shipping'/);
+  assert.match(source,/shipMultiplier=shipAsset\?1\+shipAsset\.shipRevenueBonus:1/);
+  assert.match(source,/operation\.business_type==='shipping'\?'⚓ 執行船舶'/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-10-maritime-shipping.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-10-maritime-shipping');
+  assert.match(update.summary,/船運/);
+  assert.match(update.changes.join('\n'),/海皇冠國際港/);
 });
 
 test('長途交通網與客運盲盒提供二十輛巴士、圖片及客運營收加成',()=>{
@@ -1273,10 +1299,10 @@ test('交通事業公開面板更新公告完整',()=>{
 });
 
 test('交通事業指揮中心提供即時調度與任務預演',()=>{
-  assert.match(source,/function transportNetworkMeter\(value,total=4\)/);
+  assert.match(source,/function transportNetworkMeter\(value,total=5\)/);
   assert.match(source,/function transportNetworkSnapshot\(g,u\)/);
   assert.match(source,/MACAU TRANSIT COMMAND \/\/ LIVE NETWORK/);
-  assert.match(source,/LAND OPERATIONS \/\/ DISPATCH BOARD/);
+  assert.match(source,/LAND & MARITIME OPERATIONS \/\/ DISPATCH BOARD/);
   assert.match(source,/即時調度/);
   assert.match(source,/收益待收/);
   assert.match(source,/下一趟任務預演/);

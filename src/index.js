@@ -880,7 +880,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS transport_business_companies (
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    business_type TEXT NOT NULL CHECK (business_type IN ('rail','coach','freight')),
+    business_type TEXT NOT NULL CHECK (business_type IN ('rail','coach','freight','shipping')),
     company_name TEXT NOT NULL,
     station_id TEXT,
     route_id TEXT,
@@ -895,7 +895,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS transport_business_operations (
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    business_type TEXT NOT NULL CHECK (business_type IN ('rail','coach','freight')),
+    business_type TEXT NOT NULL CHECK (business_type IN ('rail','coach','freight','shipping')),
     station_id TEXT NOT NULL,
     route_id TEXT NOT NULL,
     vehicle_id TEXT,
@@ -915,7 +915,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS transport_daily_operations (
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    business_type TEXT NOT NULL CHECK (business_type IN ('airline','rail','coach','freight')),
+    business_type TEXT NOT NULL CHECK (business_type IN ('airline','rail','coach','freight','shipping')),
     operation_day TEXT NOT NULL,
     operation_count INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -924,7 +924,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS transport_incidents (
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    business_type TEXT NOT NULL CHECK (business_type IN ('airline','rail','coach','freight')),
+    business_type TEXT NOT NULL CHECK (business_type IN ('airline','rail','coach','freight','shipping')),
     route_id TEXT NOT NULL,
     event_id TEXT NOT NULL,
     resolution_fee INTEGER NOT NULL,
@@ -1095,6 +1095,71 @@ if(!db.prepare('PRAGMA table_info(transport_business_operations)').all().some(co
 if(!db.prepare('PRAGMA table_info(airline_flights)').all().some(column=>column.name==='event_id')) {
   db.exec('ALTER TABLE airline_flights ADD COLUMN event_id TEXT');
 }
+function migrateTransportBusinessTypesForShipping() {
+  const schemaFor=name=>db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(name)?.sql||'';
+  const tables=['transport_business_companies','transport_business_operations','transport_daily_operations','transport_incidents'];
+  if(tables.every(name=>schemaFor(name).includes("'shipping'"))) return;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(`
+      DROP INDEX IF EXISTS idx_transport_business_operations_completion;
+      ALTER TABLE transport_business_companies RENAME TO transport_business_companies_legacy;
+      ALTER TABLE transport_business_operations RENAME TO transport_business_operations_legacy;
+      ALTER TABLE transport_daily_operations RENAME TO transport_daily_operations_legacy;
+      ALTER TABLE transport_incidents RENAME TO transport_incidents_legacy;
+
+      CREATE TABLE transport_business_companies (
+        guild_id TEXT NOT NULL,user_id TEXT NOT NULL,
+        business_type TEXT NOT NULL CHECK (business_type IN ('rail','coach','freight','shipping')),
+        company_name TEXT NOT NULL,station_id TEXT,route_id TEXT,vehicle_id TEXT,
+        company_level INTEGER NOT NULL DEFAULT 1,upkeep_day TEXT,license_expires_at INTEGER,
+        registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (guild_id,user_id,business_type)
+      );
+      CREATE TABLE transport_business_operations (
+        guild_id TEXT NOT NULL,user_id TEXT NOT NULL,
+        business_type TEXT NOT NULL CHECK (business_type IN ('rail','coach','freight','shipping')),
+        station_id TEXT NOT NULL,route_id TEXT NOT NULL,vehicle_id TEXT,train_id TEXT,truck_id TEXT,
+        gross_revenue INTEGER NOT NULL,operating_cost INTEGER NOT NULL,event_id TEXT,
+        started_at INTEGER NOT NULL,completes_at INTEGER NOT NULL,dm_notified_at INTEGER,channel_notified_at INTEGER,
+        PRIMARY KEY (guild_id,user_id,business_type)
+      );
+      CREATE TABLE transport_daily_operations (
+        guild_id TEXT NOT NULL,user_id TEXT NOT NULL,
+        business_type TEXT NOT NULL CHECK (business_type IN ('airline','rail','coach','freight','shipping')),
+        operation_day TEXT NOT NULL,operation_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (guild_id,user_id,business_type,operation_day)
+      );
+      CREATE TABLE transport_incidents (
+        guild_id TEXT NOT NULL,user_id TEXT NOT NULL,
+        business_type TEXT NOT NULL CHECK (business_type IN ('airline','rail','coach','freight','shipping')),
+        route_id TEXT NOT NULL,event_id TEXT NOT NULL,resolution_fee INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,
+        PRIMARY KEY (guild_id,user_id,business_type)
+      );
+      INSERT INTO transport_business_companies(guild_id,user_id,business_type,company_name,station_id,route_id,vehicle_id,company_level,upkeep_day,license_expires_at,registered_at,updated_at)
+        SELECT guild_id,user_id,business_type,company_name,station_id,route_id,vehicle_id,company_level,upkeep_day,license_expires_at,registered_at,updated_at FROM transport_business_companies_legacy;
+      INSERT INTO transport_business_operations(guild_id,user_id,business_type,station_id,route_id,vehicle_id,train_id,truck_id,gross_revenue,operating_cost,event_id,started_at,completes_at,dm_notified_at,channel_notified_at)
+        SELECT guild_id,user_id,business_type,station_id,route_id,vehicle_id,train_id,truck_id,gross_revenue,operating_cost,event_id,started_at,completes_at,dm_notified_at,channel_notified_at FROM transport_business_operations_legacy;
+      INSERT INTO transport_daily_operations(guild_id,user_id,business_type,operation_day,operation_count,updated_at)
+        SELECT guild_id,user_id,business_type,operation_day,operation_count,updated_at FROM transport_daily_operations_legacy;
+      INSERT INTO transport_incidents(guild_id,user_id,business_type,route_id,event_id,resolution_fee,created_at,expires_at)
+        SELECT guild_id,user_id,business_type,route_id,event_id,resolution_fee,created_at,expires_at FROM transport_incidents_legacy;
+      DROP TABLE transport_business_companies_legacy;
+      DROP TABLE transport_business_operations_legacy;
+      DROP TABLE transport_daily_operations_legacy;
+      DROP TABLE transport_incidents_legacy;
+      CREATE INDEX IF NOT EXISTS idx_transport_business_operations_completion
+        ON transport_business_operations(completes_at,dm_notified_at,channel_notified_at);
+    `);
+    db.exec('COMMIT');
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+migrateTransportBusinessTypesForShipping();
 if(!db.prepare('PRAGMA table_info(asset_auctions)').all().some(column=>column.name==='last_reminder_at')) {
   db.exec('ALTER TABLE asset_auctions ADD COLUMN last_reminder_at INTEGER');
 }
@@ -1748,6 +1813,7 @@ const assetCatalog={
   grand_bay_high_speed_rail_terminal:{name:'🚄 金灣中央火車站',category:'房地產',price:6888888,description:'串聯都會通勤、城際商務與夜間特快的高鐵樞紐。購買後可支付手續費註冊交通公司行號，鐵路營收加成 10%。',image:'properties/stations/grand_bay_high_speed_rail_terminal.png',rarity:'傳說',unique:true,transportType:'rail',transportMultiplier:1.1},
   lotus_metropolitan_coach_terminal:{name:'🚌 蓮都國際客運站',category:'房地產',price:3888888,description:'擁有多層候車大廳與城際月台的豪華客運轉運中心。購買後可註冊交通公司行號，經營通勤、城際與觀光客運。',image:'properties/stations/lotus_metropolitan_coach_terminal.png',rarity:'史詩',unique:true,transportType:'coach',transportMultiplier:0.95},
   harbor_crown_freight_terminal:{name:'🚛 皇冠港物流貨運站',category:'房地產',price:9888888,description:'整合鐵路貨場、卡車月台、智慧倉儲與貨櫃調度的物流基地。購買後可註冊交通公司行號，貨運營收加成 25%。',image:'properties/stations/harbor_crown_freight_terminal.png',rarity:'神話',unique:true,transportType:'freight',transportMultiplier:1.25},
+  ocean_crown_maritime_port:{name:'⚓ 海皇冠國際港',category:'房地產',price:14888888,description:'深水泊位、郵輪碼頭與智慧貨櫃港整合的海上樞紐。購買後可獨立註冊船運公司，使用自有船舶經營海島巡航、海峽渡輪與遠洋航程；船運營收加成 18%。',image:'ships/luxury_cruise.jpg',rarity:'神話',unique:true,transportType:'shipping',transportMultiplier:1.18},
   truck_copper_canyon_hauler:{name:'🟠 銅峽谷重載卡車',category:'卡車',price:120000,description:'為沙漠長途貨運打造的耐用重卡；開始物流任務時，貨運營收 +3%。',image:'trucks/copper_canyon_hauler.png',rarity:'一般',buff:'freight',truckRevenueBonus:0.03},
   truck_azure_tide_refrigerated:{name:'🔵 藍潮冷鏈卡車',category:'卡車',price:180000,description:'穩定維持低溫的海港冷鏈車組；開始物流任務時，貨運營收 +4%。',image:'trucks/azure_tide_refrigerated.png',rarity:'一般',buff:'freight',truckRevenueBonus:0.04},
   truck_emerald_city_delivery:{name:'🟢 翡翠城市配送車',category:'卡車',price:260000,description:'靈活穿梭都會末端配送的電動貨車；開始物流任務時，貨運營收 +5%。',image:'trucks/emerald_city_delivery.png',rarity:'一般',buff:'freight',truckRevenueBonus:0.05},
@@ -1787,11 +1853,11 @@ const assetCatalog={
   train_emerald_titan_freight:{name:'🟢 翡翠泰坦重載列車',category:'列車',price:850000,description:'強大電力機車與長編組貨櫃車隊，能穩定提升鐵路事業收益；每輛占用 1 格列車車庫。',image:'trains/emerald_titan_freight.png',rarity:'史詩',buff:'transport',trainRevenueBonus:0.14},
   train_royal_blue_diamond_sleeper:{name:'💎 皇家藍鑽寢台特快',category:'列車',price:1800000,description:'配置高級套房與夜間服務的皇家寢台列車，鎖定高價長途市場；每輛占用 1 格列車車庫。',image:'trains/royal_blue_diamond_sleeper.png',rarity:'史詩',buff:'transport',trainRevenueBonus:0.22},
   train_crimson_phoenix_high_speed:{name:'🔥 赤金鳳凰高速列車',category:'列車',price:3600000,description:'赤金流線車體與旗艦高速性能兼備的商城頂級列車；每輛占用 1 格列車車庫。',image:'trains/crimson_phoenix_high_speed.png',rarity:'傳說',buff:'transport',trainRevenueBonus:0.32},
-  yacht:{name:'🛥️ 私人遊艇',category:'郵輪',price:350000,description:'小型私人海上娛樂空間。'},
-  cruise:{name:'🛳️ 豪華郵輪｜Ocean Majesty',category:'郵輪',price:1200000,description:'燈火璀璨的海上宮殿，設有泳池、宴會廳、劇院與直升機坪，整晚派對能為賭場之夜帶來好運。',image:'ships/luxury_cruise.jpg',rarity:'傳說',buff:'casino'},
-  going_merry:{name:'☠️ 梅莉號 Going Merry',category:'郵輪',price:3500000,description:'承載冒險、友情與無數回憶的傳奇海賊船；羊首船艏會在最危急的時刻帶領船員突破封鎖。',image:'ships/going_merry.jpg',rarity:'限定',buff:'getaway',buffMultiplier:3},
-  luxury_submarine:{name:'🌊 豪華潛水艇｜SeaBreeze',category:'郵輪',price:4800000,description:'配備全景觀景艙、私人套房、深海餐廳與尖端聲納系統的水下行宮，提供遠離喧囂的頂級休息環境。',image:'ships/luxury_submarine.jpg',rarity:'神話',buff:'stamina',buffMultiplier:2.5},
-  ghost_pirate_ship:{name:'🏴‍☠️ 海盜幽靈船',category:'郵輪',price:2500000,description:'自迷霧中現身的詛咒海盜船，幽綠鬼火照亮破舊船帆；購買後會隨機獲得一項永久資產增益。',image:'ships/ghost_pirate_ship.jpg',rarity:'傳說'},
+  yacht:{name:'🛥️ 私人遊艇',category:'郵輪',price:350000,description:'小型私人海上娛樂空間；配置至船運事業時營收 +5%。',shipRevenueBonus:0.05},
+  cruise:{name:'🛳️ 豪華郵輪｜Ocean Majesty',category:'郵輪',price:1200000,description:'燈火璀璨的海上宮殿，設有泳池、宴會廳、劇院與直升機坪，整晚派對能為賭場之夜帶來好運；配置至船運事業時營收 +10%。',image:'ships/luxury_cruise.jpg',rarity:'傳說',buff:'casino',shipRevenueBonus:0.10},
+  going_merry:{name:'☠️ 梅莉號 Going Merry',category:'郵輪',price:3500000,description:'承載冒險、友情與無數回憶的傳奇海賊船；羊首船艏會在最危急的時刻帶領船員突破封鎖。配置至船運事業時營收 +16%。',image:'ships/going_merry.jpg',rarity:'限定',buff:'getaway',buffMultiplier:3,shipRevenueBonus:0.16},
+  luxury_submarine:{name:'🌊 豪華潛水艇｜SeaBreeze',category:'郵輪',price:4800000,description:'配備全景觀景艙、私人套房、深海餐廳與尖端聲納系統的水下行宮，提供遠離喧囂的頂級休息環境。配置至船運事業時營收 +22%。',image:'ships/luxury_submarine.jpg',rarity:'神話',buff:'stamina',buffMultiplier:2.5,shipRevenueBonus:0.22},
+  ghost_pirate_ship:{name:'🏴‍☠️ 海盜幽靈船',category:'郵輪',price:2500000,description:'自迷霧中現身的詛咒海盜船，幽綠鬼火照亮破舊船帆；購買後會隨機獲得一項永久資產增益。配置至船運事業時營收 +28%。',image:'ships/ghost_pirate_ship.jpg',rarity:'傳說',shipRevenueBonus:0.28},
   pom_stroller:{name:'🐕 猛博美豪華推車',category:'收藏品',price:48000,description:'替猛博美準備的全天候豪華推車，柔軟座艙與遮雨棚能讓主人獲得更充分的休息。',image:'vehicles/pom_stroller.jpg',rarity:'稀有',buff:'stamina'},
   weapon_pistol:{name:'🔫 制式手槍',category:'武器',price:15000,description:'可靠的入門防衛武器，搶劫火力：劫匪 +1／警方 +1。每次行動消耗制式手槍彈藥箱 ×1。',rarity:'一般',buff:'combat',unique:true,combatItem:true},
   weapon_glock17:{name:'🔫 Glock 17',category:'武器',price:28000,description:'17+1 發、可靠且容易操控的 9×19mm 半自動手槍，搶劫火力：劫匪 +2／警方 +2。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/handguns/glock17.png',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
@@ -2278,17 +2344,20 @@ const airlineRoutes={
 const transportStationIds=[
   'grand_bay_high_speed_rail_terminal',
   'lotus_metropolitan_coach_terminal',
-  'harbor_crown_freight_terminal'
+  'harbor_crown_freight_terminal',
+  'ocean_crown_maritime_port'
 ];
 const transportStationIdByType={
   rail:'grand_bay_high_speed_rail_terminal',
   coach:'lotus_metropolitan_coach_terminal',
-  freight:'harbor_crown_freight_terminal'
+  freight:'harbor_crown_freight_terminal',
+  shipping:'ocean_crown_maritime_port'
 };
 const transportBusinessTypes={
   rail:{name:'鐵路運輸',emoji:'🚄',stationLabel:'火車站',operationLabel:'列車班次',color:0xE53935},
   coach:{name:'城際客運',emoji:'🚌',stationLabel:'客運站',operationLabel:'客運班次',color:0x1565C0},
-  freight:{name:'物流貨運',emoji:'🚛',stationLabel:'貨運站',operationLabel:'物流任務',color:0xF57C00}
+  freight:{name:'物流貨運',emoji:'🚛',stationLabel:'貨運站',operationLabel:'物流任務',color:0xF57C00},
+  shipping:{name:'海上船運',emoji:'⚓',stationLabel:'海運港口',operationLabel:'船運航程',color:0x0077B6}
 };
 const transportRoutes={
   rail_metro_commuter:{name:'🚆 都會通勤快線',type:'rail',description:'高密度城市通勤列車，週轉快速且收益穩定。',durationMs:10*60*1000,baseRevenue:72000,operatingCost:22000,stamina:8},
@@ -2311,7 +2380,11 @@ const transportRoutes={
   freight_cold_chain_network:{name:'❄️ 冷鏈生鮮配送網',type:'freight',description:'維持低溫品質、串聯農場與城市倉儲的冷鏈物流。',durationMs:25*60*1000,baseRevenue:210000,operatingCost:68000,stamina:14},
   freight_rail_intermodal:{name:'🚆 鐵公聯運幹線',type:'freight',description:'以鐵路長途幹線搭配卡車接駁的高容量貨運任務。',durationMs:75*60*1000,baseRevenue:780000,operatingCost:280000,stamina:32},
   freight_ocean_bridge_contract:{name:'🌊 海陸跨境合約',type:'freight',description:'承接港口、鐵路與公路聯運的高價值跨境供應鏈。',durationMs:3*60*60*1000,baseRevenue:1900000,operatingCost:760000,stamina:50},
-  freight_transcontinental_corridor:{name:'🛰️ 跨洲長途運輸走廊',type:'freight',description:'串聯港口、自由貿易區與內陸貨運中心的最高階超長程合約。',durationMs:4*60*60*1000,baseRevenue:2750000,operatingCost:1120000,stamina:62}
+  freight_transcontinental_corridor:{name:'🛰️ 跨洲長途運輸走廊',type:'freight',description:'串聯港口、自由貿易區與內陸貨運中心的最高階超長程合約。',durationMs:4*60*60*1000,baseRevenue:2750000,operatingCost:1120000,stamina:62},
+  shipping_harbor_island_cruise:{name:'🛥️ 港灣海島巡航',type:'shipping',description:'往返港灣與度假島嶼的精品短程巡航，客流穩定。',durationMs:18*60*1000,baseRevenue:135000,operatingCost:44000,stamina:12},
+  shipping_strait_ferry:{name:'⛴️ 海峽商務渡輪',type:'shipping',description:'串聯兩岸商業港口與免稅區的高頻渡輪航線。',durationMs:45*60*1000,baseRevenue:430000,operatingCost:155000,stamina:26},
+  shipping_ocean_luxury_voyage:{name:'🛳️ 蔚藍奢華遠洋航程',type:'shipping',description:'提供頂級客艙、海上娛樂與島國停靠服務的長程郵輪航程。',durationMs:100*60*1000,baseRevenue:980000,operatingCost:380000,stamina:42},
+  shipping_deep_sea_expedition:{name:'🌌 深海星航遠征',type:'shipping',description:'深入外海與極光水域的旗艦航程，適合高階船運公司。',durationMs:3*60*60*1000,baseRevenue:2180000,operatingCost:920000,stamina:58}
 };
 const TRAIN_BLIND_BOX_SINGLE_PRICE=50000;
 const TRAIN_STARTER_ASSET_ID='train_starter_service_commuter';
@@ -2347,6 +2420,8 @@ const freightTruckIds=[
 ];
 const TRANSPORT_COACH_DEFAULT_VEHICLE_ID='coach_basic_fleet';
 const TRANSPORT_FREIGHT_DEFAULT_VEHICLE_ID='freight_basic_fleet';
+const TRANSPORT_SHIPPING_DEFAULT_VEHICLE_ID='shipping_basic_fleet';
+const shippingVesselIds=['yacht','cruise','going_merry','luxury_submarine','ghost_pirate_ship'];
 const trainRarityRank={一般:1,稀有:2,史詩:3,傳說:4};
 function drawTrainBlindBoxAssetId(random=Math.random) {
   const roll=random()*100;
@@ -2522,6 +2597,12 @@ function transportBusinessVehicleOptions(g,u,businessType) {
       .map(row=>({id:row.asset_id,asset:assetCatalog[row.asset_id],bonus:assetCatalog[row.asset_id]?.truckRevenueBonus||0}));
     return [{id:TRANSPORT_FREIGHT_DEFAULT_VEHICLE_ID,asset:null,bonus:0,name:'🚛 基礎貨運車隊',description:'系統提供的基本貨運車隊，沒有額外加成。'},...owned];
   }
+  if(businessType==='shipping') {
+    const owned=assetsOf(g,u)
+      .filter(row=>shippingVesselIds.includes(row.asset_id)&&row.quantity>0)
+      .map(row=>({id:row.asset_id,asset:assetCatalog[row.asset_id],bonus:assetCatalog[row.asset_id]?.shipRevenueBonus||0}));
+    return [{id:TRANSPORT_SHIPPING_DEFAULT_VEHICLE_ID,asset:null,bonus:0,name:'⚓ 基礎船運船隊',description:'系統提供的基本船運船隊，沒有額外加成。'},...owned];
+  }
   const owned=assetsOf(g,u)
     .filter(row=>coachAssetIds.includes(row.asset_id)&&row.quantity>0)
     .map(row=>({id:row.asset_id,asset:assetCatalog[row.asset_id],bonus:assetCatalog[row.asset_id]?.coachRevenueBonus||0}));
@@ -2537,7 +2618,7 @@ function selectedTransportBusinessVehicle(g,u,businessType,company) {
     } else if(businessType==='freight') {
       const best=bestOwnedFreightTruck(g,u);
       selected=options.find(option=>option.id===best?.asset_id);
-    } else if(businessType==='coach') {
+    } else if(businessType==='coach'||businessType==='shipping') {
       selected=options.filter(option=>option.asset).sort((a,b)=>(b.bonus||0)-(a.bonus||0))[0];
     }
     selected ||= options[0];
@@ -3184,13 +3265,13 @@ function normalizeTransportCompanyName(value) {
 function transportSelectionName(id,fallback='尚未選擇') {
   return assetCatalog[id]?.name||transportRoutes[id]?.name||fallback;
 }
-function transportNetworkMeter(value,total=4) {
+function transportNetworkMeter(value,total=5) {
   const filled=Math.max(0,Math.min(total,Math.round(value)));
   return `${'▰'.repeat(filled)}${'▱'.repeat(total-filled)}`;
 }
 function transportNetworkSnapshot(g,u) {
   const airline=airlineCompany(g,u),flights=airlineFlights(g,u);
-  const groundTypes=['rail','coach','freight'];
+  const groundTypes=['rail','coach','freight','shipping'];
   const groundCompanies=groundTypes.map(type=>businessTransportCompany(g,u,type)).filter(Boolean);
   const groundOperations=groundTypes.map(type=>businessTransportOperation(g,u,type)).filter(Boolean);
   const allOperations=[...flights,...groundOperations];
@@ -3214,23 +3295,23 @@ function transportHubEmbed(g,u,notice='') {
   const airlineStatus=airline
     ? `公司：**${airline.company_name}**\n機場：**${airports.length} 座**｜客機種類：**${airliners.length} 種**\n航班：**${flights.length}/${Math.max(1,Number(airline.flight_slots)||1)} 個機位使用中**`
     : `尚未註冊航空公司\n持有機場：**${airports.length} 座**｜客機種類：**${airliners.length} 種**`;
-  const groundStatus=['rail','coach','freight'].map(type=>transportBusinessStatus(g,u,type)).join('\n');
+  const groundStatus=['rail','coach','freight','shipping'].map(type=>transportBusinessStatus(g,u,type)).join('\n');
   return new EmbedBuilder()
     .setColor(0x0D47A1)
     .setTitle('🧭 交通事業營運總部')
     .setAuthor({name:'MACAU TRANSIT COMMAND // LIVE NETWORK'})
-    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n${snapshot.directive}\n\n**網路規模**\n${snapshot.networkMeter}｜已註冊 **${snapshot.companies}/4** 間公司｜集團總等級 **Lv.${snapshot.totalLevel}**｜場站／機場 **${snapshot.infrastructure} 座**\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路運輸**\n${groundStatus}\n\n**🚆 列車車庫・每日盲盒**\n盲盒收藏：**${trainKinds}/12 種**｜車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n商城另有 **5 款列車**可直接購買。\n\n**🚌 客運車隊・每日盲盒**\n已收藏：**${coachKinds}/20 款**｜商城直購 **10 款**、每日客運盲盒 **10 款**；配置巴士可提高城際客運營收。\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n${snapshot.directive}\n\n**網路規模**\n${snapshot.networkMeter}｜已註冊 **${snapshot.companies}/5** 間公司｜集團總等級 **Lv.${snapshot.totalLevel}**｜場站／機場 **${snapshot.infrastructure} 座**\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路・船運**\n${groundStatus}\n\n**🚆 列車車庫・每日盲盒**\n盲盒收藏：**${trainKinds}/12 種**｜車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n商城另有 **5 款列車**可直接購買。\n\n**🚌 客運車隊・每日盲盒**\n已收藏：**${coachKinds}/20 款**｜商城直購 **10 款**、每日客運盲盒 **10 款**；配置巴士可提高城際客運營收。\n\n**⚓ 海上船運**\n持有郵輪可直接配置到船運公司，最高提供 **+28%** 船運營收。\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
     .addFields(
       {name:'🛰️ 即時調度',value:`執行中 **${snapshot.active}**｜待收 **${snapshot.ready}**`,inline:true},
       {name:'🎯 指揮優先度',value:snapshot.ready?'收取營收':'部署下一班',inline:true},
-      {name:'💼 集團評級',value:snapshot.companies>=4?'全線營運':'持續擴張',inline:true}
+      {name:'💼 集團評級',value:snapshot.companies>=5?'全線營運':'持續擴張',inline:true}
     )
     .setFooter({text:'公開面板｜只有事業擁有者可操作｜最後一次操作 3 分鐘後自動刪除'});
 }
 function transportHubComponents(g,u) {
   return [new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`transport_hub_airline:${u}`).setLabel('航空運輸').setEmoji('✈️').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`transport_hub_ground:${u}`).setLabel('火車・客運・貨運').setEmoji('🚉').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`transport_hub_ground:${u}`).setLabel('陸路・船運').setEmoji('⚓').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`transport_hub_train_box:${u}`).setLabel('列車車庫・盲盒').setEmoji('🚆').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`transport_hub_coach_box:${u}`).setLabel('客運盲盒').setEmoji('🚌').setStyle(ButtonStyle.Secondary)
   )];
@@ -3286,14 +3367,14 @@ function transportGroundOverviewEmbed(g,u,notice='') {
   const snapshot=transportNetworkSnapshot(g,u);
   return new EmbedBuilder()
     .setColor(0x2E7D32)
-    .setTitle('🚉 陸路交通事業')
-    .setAuthor({name:'LAND OPERATIONS // DISPATCH BOARD'})
-    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n\n火車、客運與貨運為三間獨立公司，各自支付註冊手續費並保存營運進度；可同時派遣，互不占用彼此的行程。\n\n${['rail','coach','freight'].map(type=>transportBusinessStatus(g,u,type)).join('\n\n')}\n\n🚦 進入事業面板後可在「事業載具」欄位選擇本次使用的列車或卡車；未曾選擇時會預設最高加成載具。客運沒有專屬載具時使用基礎客運車隊。\n\n註冊費：**${fmt(TRANSPORT_REGISTRATION_FEE)}／間**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .setTitle('🚉 陸路・海上交通事業')
+    .setAuthor({name:'LAND & MARITIME OPERATIONS // DISPATCH BOARD'})
+    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n\n火車、客運、貨運與船運為四間獨立公司，各自支付註冊手續費並保存營運進度；可同時派遣，互不占用彼此的行程。\n\n${['rail','coach','freight','shipping'].map(type=>transportBusinessStatus(g,u,type)).join('\n\n')}\n\n🚦 進入事業面板後可在「事業載具」欄位選擇本次使用的列車、巴士、卡車或船舶；未曾選擇時會預設最高加成載具。客運、貨運與船運沒有專屬載具時，會使用系統基礎車隊／船隊。\n\n註冊費：**${fmt(TRANSPORT_REGISTRATION_FEE)}／間**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
     .addFields(
       {name:'🚦 陸運調度',value:`進行中 **${snapshot.active}**｜待收 **${snapshot.ready}**`,inline:true},
       {name:'🧭 行動建議',value:snapshot.directive.slice(0,100),inline:false}
     )
-    .setFooter({text:'使用 /資產商城 分類:卡車 購買貨運車輛；選擇事業後可獨立註冊、配置路線、開始營運與領取收入'});
+    .setFooter({text:'使用 /資產商城 分類:卡車 或 郵輪 購買事業載具；選擇事業後可獨立註冊、配置路線、開始營運與領取收入'});
 }
 function transportGroundOverviewComponents(u) {
   return [
@@ -3333,11 +3414,12 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
   const trainMultiplier=businessType==='rail'&&selectedVehicle?.asset?1+(selectedVehicle.asset.trainRevenueBonus||0):1;
   const truckMultiplier=businessType==='freight'&&selectedVehicle?.asset?1+(selectedVehicle.asset.truckRevenueBonus||0):1;
   const coachMultiplier=businessType==='coach'&&selectedVehicle?.asset?1+(selectedVehicle.asset.coachRevenueBonus||0):1;
+  const shipMultiplier=businessType==='shipping'&&selectedVehicle?.asset?1+(selectedVehicle.asset.shipRevenueBonus||0):1;
   const selectedVehicleText=selectedVehicle
     ? `${transportBusinessVehicleName(selectedVehicle)}${selectedVehicle.asset?.systemGranted?'｜系統配給，不占車庫':selectedVehicle.bonus?`｜營收 **+${Math.round(selectedVehicle.bonus*100)}%**`:'｜無額外加成'}`
     : '尚未配置事業載具';
   const routeEstimate=station&&route&&station.transportType===route.type
-    ? `\n\n**🎯 下一趟任務預演**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*coachMultiplier*companyMultiplier*nextDailyMultiplier))}**（已套用今日第 ${dailyRuns+1} 趟 ×${nextDailyMultiplier.toFixed(2)}，另有市場需求浮動）\n事業載具：${selectedVehicleText}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
+    ? `\n\n**🎯 下一趟任務預演**\n基本營收：約 **${fmt(Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*coachMultiplier*shipMultiplier*companyMultiplier*nextDailyMultiplier))}**（已套用今日第 ${dailyRuns+1} 趟 ×${nextDailyMultiplier.toFixed(2)}，另有市場需求浮動）\n事業載具：${selectedVehicleText}\n營運成本：**${fmt(route.operatingCost)}**｜體力：**${route.stamina}**｜時間：**${airlineDurationLabel(route.durationMs)}**`
     : '';
   const garage=businessType==='rail'?ensureTrainGarage(g,u):null;
   const garageText=garage?`\n列車車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**（配給列車不計）`:'';
@@ -3352,7 +3434,7 @@ function transportBusinessDashboardComponents(g,u,businessType) {
   requireTransportBusinessType(businessType);
   if(businessType==='rail') ensureStarterTrain(g,u);
   const type=transportBusinessTypes[businessType],stations=ownedTransportBusinessStations(g,u,businessType);
-  const backButton=()=>new ButtonBuilder().setCustomId(`transport_hub_ground:${u}`).setLabel('陸路事業總覽').setEmoji('🚉').setStyle(ButtonStyle.Secondary);
+  const backButton=()=>new ButtonBuilder().setCustomId(`transport_hub_ground:${u}`).setLabel('陸路・船運總覽').setEmoji('⚓').setStyle(ButtonStyle.Secondary);
   if(!stations.length) return [new ActionRowBuilder().addComponents(backButton())];
   const company=businessTransportCompany(g,u,businessType);
   if(!company) return [new ActionRowBuilder().addComponents(
@@ -3432,6 +3514,7 @@ function startTransportBusinessOperation(g,u,businessType,{skipRandomEvent=false
   const train=businessType==='rail'&&selectedVehicle?.asset?{asset_id:selectedVehicle.id}:null,trainAsset=train&&assetCatalog[train.asset_id];
   const truck=businessType==='freight'&&selectedVehicle?.asset?{asset_id:selectedVehicle.id}:null,truckAsset=truck&&assetCatalog[truck.asset_id];
   const coach=businessType==='coach'&&selectedVehicle?.asset?{asset_id:selectedVehicle.id}:null,coachAsset=coach&&assetCatalog[coach.asset_id];
+  const ship=businessType==='shipping'&&selectedVehicle?.asset?{asset_id:selectedVehicle.id}:null,shipAsset=ship&&assetCatalog[ship.asset_id];
   if(!selectedVehicle&&businessType!=='freight') throw new Error('請先選擇事業載具');
   if(businessType==='freight'&&!selectedVehicle&&!fallbackFreightTruck) throw new Error('請先選擇事業載具');
   if(businessType==='rail'&&!trainAsset) throw new Error('火車站必須至少持有一輛列車才能發車');
@@ -3450,8 +3533,9 @@ function startTransportBusinessOperation(g,u,businessType,{skipRandomEvent=false
   const trainMultiplier=trainAsset?1+trainAsset.trainRevenueBonus:1;
   const truckMultiplier=truckAsset?1+truckAsset.truckRevenueBonus:1;
   const coachMultiplier=coachAsset?1+coachAsset.coachRevenueBonus:1;
+  const shipMultiplier=shipAsset?1+shipAsset.shipRevenueBonus:1;
   const demandMultiplier=0.90+Math.random()*0.21;
-  const baseGrossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*coachMultiplier*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
+  const baseGrossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*coachMultiplier*shipMultiplier*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
   const grossRevenue=Math.floor(baseGrossRevenue*(event?.revenueMultiplier||1));
   const startedAt=Date.now(),completesAt=startedAt+Math.floor(route.durationMs*(event?.durationMultiplier||1));
   let upkeep;
@@ -3468,7 +3552,7 @@ function startTransportBusinessOperation(g,u,businessType,{skipRandomEvent=false
     db.exec('ROLLBACK');
     throw error;
   }
-  return {company,station,route,type:transportBusinessTypes[businessType],event,operatingCost,vehicle:selectedVehicle,train:trainAsset,truck:truckAsset,coach:coachAsset,trainMultiplier,truckMultiplier,coachMultiplier,grossRevenue,staminaUsed,startedAt,completesAt,dailyRunNumber:dailyRuns+1,dailyMultiplier,upkeep};
+  return {company,station,route,type:transportBusinessTypes[businessType],event,operatingCost,vehicle:selectedVehicle,train:trainAsset,truck:truckAsset,coach:coachAsset,ship:shipAsset,trainMultiplier,truckMultiplier,coachMultiplier,shipMultiplier,grossRevenue,staminaUsed,startedAt,completesAt,dailyRunNumber:dailyRuns+1,dailyMultiplier,upkeep};
 }
 function claimTransportBusinessRevenue(g,u,businessType) {
   const company=businessTransportCompany(g,u,businessType),operation=businessTransportOperation(g,u,businessType);
@@ -3509,8 +3593,8 @@ async function notifyCompletedTransportOperations() {
         : operation.business_type==='rail'
           ? assetCatalog[operation.train_id]||assetCatalog[operation.vehicle_id]
           : assetCatalog[operation.vehicle_id];
-      const executionLabel=operation.business_type==='freight'?'🚛 執行卡車':operation.business_type==='rail'?'🚆 執行列車':'🚌 執行客運車輛';
-      const executionName=executionAsset?.name||(operation.business_type==='freight'?'🚛 基礎貨運車隊':operation.business_type==='coach'?'🚌 基礎客運車隊':'基礎列車（未配置專屬車輛）');
+      const executionLabel=operation.business_type==='freight'?'🚛 執行卡車':operation.business_type==='rail'?'🚆 執行列車':operation.business_type==='shipping'?'⚓ 執行船舶':'🚌 執行客運車輛';
+      const executionName=executionAsset?.name||(operation.business_type==='freight'?'🚛 基礎貨運車隊':operation.business_type==='coach'?'🚌 基礎客運車隊':operation.business_type==='shipping'?'⚓ 基礎船運船隊':'基礎列車（未配置專屬車輛）');
       const profit=operation.gross_revenue-operation.operating_cost;
       const completedTimestamp=Math.floor(operation.completes_at/1000);
       if(operation.dm_notified_at===null) {
@@ -7176,7 +7260,7 @@ const gameHelpDetails={
   heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
   money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/日常 領取\` 取得每日獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。可用 \`/日常 體力\` 查看狀態，並從 \`/補給\` 購買及使用恢復用品。`},
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具、**21 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運與貨運營運統一由 \`/交通事業\` 進入。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n使用 \`/房地產\` 經營服務式公寓、商辦與飯店：每日首次招商支付維護與保險、每週續期牌照，並可升級至 Lv.10 提高租金；市場事件與建築狀況會影響每期收益。交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具、**21 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運、貨運與船運營運統一由 \`/交通事業\` 進入。持有「海皇冠國際港」可獨立註冊船運公司，並配置郵輪、遊艇、潛水艇或海盜船投入四條船運航線。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n使用 \`/房地產\` 經營服務式公寓、商辦與飯店：每日首次招商支付維護與保險、每週續期牌照，並可升級至 Lv.10 提高租金；市場事件與建築狀況會影響每期收益。交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
   playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、成就、造型與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 成就`、`/玩家 造型` 與 `/玩家 稱號`，集中管理角色資訊與外觀。'},
   dailyHub:{label:'日常中心',emoji:'📅',hint:'每日獎勵、增益與體力',title:'📅 日常中心',body:'使用 `/日常 領取` 領每日獎勵；`/日常 增益` 查看輪替效果；`/日常 體力` 與 `/日常 回體力` 管理每日體力。'},
