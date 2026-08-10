@@ -1129,7 +1129,7 @@ test('海上船運整合交通事業，既有船舶可配置並保留舊資料�
   assert.match(portBlock,/transportType:'shipping'/);
   assert.match(portBlock,/transportMultiplier:1\.18/);
   assert.match(source,/shipping:\{name:'海上船運',emoji:'⚓'/);
-  assert.match(source,/const shippingVesselIds=\['yacht','cruise','going_merry','luxury_submarine','ghost_pirate_ship'\]/);
+  assert.match(source,/const shippingVesselIds=\['yacht','cruise','going_merry','luxury_submarine','ghost_pirate_ship',\.\.\.shippingShopAssetIds,\.\.\.shippingBlindBoxIds\]/);
   assert.match(source,/TRANSPORT_SHIPPING_DEFAULT_VEHICLE_ID='shipping_basic_fleet'/);
   assert.match(source,/function migrateTransportBusinessTypesForShipping\(/);
   assert.match(source,/business_type IN \('rail','coach','freight','shipping'\)/);
@@ -1181,6 +1181,28 @@ test('三座船運碼頭都有獨立的商城橫向圖片',()=>{
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-10-maritime-dock-art.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-08-10-maritime-dock-art');
   assert.match(update.changes.join('\n'),/獨立圖片/);
+});
+
+test('船運新增五艘直購船與十艘每日盲盒限定船',()=>{
+  const shopIds=['ship_azure_catamaran','ship_coral_ferry','ship_jade_expedition','ship_golden_riverbarge','ship_obsidian_icebreaker'];
+  const blindIds=['ship_box_seaglass_skiff','ship_box_sunset_hydrofoil','ship_box_moonlit_junk','ship_box_amber_diver','ship_box_neon_tide_runner','ship_box_royal_paddle','ship_box_coral_glass_yacht','ship_box_aurora_trawler','ship_box_crimson_phoenix_cruise','ship_box_starlight_leviathan'];
+  for(const assetId of [...shopIds,...blindIds]) {
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(assetBlock,/category:'郵輪'/,`${assetId} 未加入船舶商城分類`);
+    assert.match(assetBlock,/shipRevenueBonus:0\.\d+/,`${assetId} 缺少船運收益加成`);
+    const image=assetBlock.match(/image:'([^']+)'/)?.[1];
+    assert.ok(image&&existsSync(new URL(`../assets/${image}`,import.meta.url)),`${assetId} 缺少圖片`);
+  }
+  assert.match(source,/const SHIPPING_BLIND_BOX_SINGLE_PRICE=350000/);
+  assert.match(source,/const shippingBlindBoxIds=Object\.keys\(shippingBlindBoxRates\)/);
+  assert.match(source,/function openShippingBlindBox\(g,u\)/);
+  assert.match(source,/今天已購買過船運盲盒/);
+  assert.match(source,/船位不足（目前船舶/);
+  assert.match(source,/transport_hub_shipping_box/);
+  assert.match(source,/已收集：\*\*\$\{ownedKinds\}\/10 種\*\*/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-10-shipping-fleet-blind-box.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-10-shipping-fleet-blind-box');
+  assert.match(update.changes.join('\n'),/10 艘/);
 });
 
 test('長途交通網與客運盲盒提供二十輛巴士、圖片及客運營收加成',()=>{

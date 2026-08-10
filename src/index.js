@@ -79,6 +79,7 @@ const ECONOMY_SINK_LABELS={
   enterprise_upgrade:'交通企業升級',
   auction_payment:'限時資產拍賣得標款',
   train_blind_box:'列車盲盒',
+  shipping_blind_box:'船運盲盒',
   cosmetic_purchase:'個人造型商城',
   transfer_fee:'玩家轉帳手續費'
 };
@@ -947,6 +948,13 @@ db.exec(`
     PRIMARY KEY (guild_id,user_id)
   );
   CREATE TABLE IF NOT EXISTS coach_blind_box_daily (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    purchase_day TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id)
+  );
+  CREATE TABLE IF NOT EXISTS shipping_blind_box_daily (
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     purchase_day TEXT NOT NULL,
@@ -1861,6 +1869,21 @@ const assetCatalog={
   going_merry:{name:'☠️ 梅莉號 Going Merry',category:'郵輪',price:3500000,description:'承載冒險、友情與無數回憶的傳奇海賊船；羊首船艏會在最危急的時刻帶領船員突破封鎖。配置至船運事業時營收 +16%。',image:'ships/going_merry.jpg',rarity:'限定',buff:'getaway',buffMultiplier:3,shipRevenueBonus:0.16},
   luxury_submarine:{name:'🌊 豪華潛水艇｜SeaBreeze',category:'郵輪',price:4800000,description:'配備全景觀景艙、私人套房、深海餐廳與尖端聲納系統的水下行宮，提供遠離喧囂的頂級休息環境。配置至船運事業時營收 +22%。',image:'ships/luxury_submarine.jpg',rarity:'神話',buff:'stamina',buffMultiplier:2.5,shipRevenueBonus:0.22},
   ghost_pirate_ship:{name:'🏴‍☠️ 海盜幽靈船',category:'郵輪',price:2500000,description:'自迷霧中現身的詛咒海盜船，幽綠鬼火照亮破舊船帆；購買後會隨機獲得一項永久資產增益。配置至船運事業時營收 +28%。',image:'ships/ghost_pirate_ship.jpg',rarity:'傳說',shipRevenueBonus:0.28},
+  ship_azure_catamaran:{name:'💠 藍晶雙體遊艇',category:'郵輪',price:900000,description:'以雙船體提供穩定高速的精品遊艇，適合海島巡航與短程貴賓接駁；船運營收 +8%。',image:'ships/shipping-fleet/shop_azure_catamaran.png',rarity:'稀有',buff:'transport',shipRevenueBonus:0.08},
+  ship_coral_ferry:{name:'🪸 珊瑚海峽快渡',category:'郵輪',price:1700000,description:'為商務旅客打造的高速雙體渡輪，能有效提高海峽航線周轉；船運營收 +12%。',image:'ships/shipping-fleet/shop_coral_ferry.png',rarity:'史詩',buff:'transport',shipRevenueBonus:0.12},
+  ship_jade_expedition:{name:'🧭 翡翠群島遠征船',category:'郵輪',price:3400000,description:'配有玻璃觀景艙與海圖中心的探索船，專精中長程島鏈航程；船運營收 +18%。',image:'ships/shipping-fleet/shop_jade_expedition.png',rarity:'史詩',buff:'transport',shipRevenueBonus:0.18},
+  ship_golden_riverbarge:{name:'🏮 金河夜宴遊輪',category:'郵輪',price:6800000,description:'結合高級餐飲與夜景娛樂的河海兩用遊輪，高價客群穩定；船運營收 +25%。',image:'ships/shipping-fleet/shop_golden_riverbarge.png',rarity:'神話',buff:'transport',shipRevenueBonus:0.25},
+  ship_obsidian_icebreaker:{name:'❄️ 黑曜極境破冰艦',category:'郵輪',price:14000000,description:'可穿越冰域的旗艦探險破冰船，承接極地高價航程；船運營收 +34%。',image:'ships/shipping-fleet/shop_obsidian_icebreaker.png',rarity:'傳說',buff:'transport',shipRevenueBonus:0.34},
+  ship_box_seaglass_skiff:{name:'🫧 海玻璃觀光艇',category:'郵輪',price:650000,description:'明亮輕巧的玻璃頂觀光艇，是船運盲盒限定收藏。',image:'ships/shipping-fleet/box_seaglass_skiff.png',rarity:'一般',buff:'transport',shipRevenueBonus:0.06,forSale:false,shipBlindBox:true},
+  ship_box_sunset_hydrofoil:{name:'🌅 暮霞飛翼快艇',category:'郵輪',price:900000,description:'掠過海面的高速水翼渡輪，是船運盲盒限定收藏。',image:'ships/shipping-fleet/box_sunset_hydrofoil.png',rarity:'一般',buff:'transport',shipRevenueBonus:0.08,forSale:false,shipBlindBox:true},
+  ship_box_moonlit_junk:{name:'🌙 月影琉璃帆船',category:'郵輪',price:1300000,description:'以現代工藝重塑的夜航帆船，是船運盲盒限定收藏。',image:'ships/shipping-fleet/box_moonlit_junk.png',rarity:'稀有',buff:'transport',shipRevenueBonus:0.11,forSale:false,shipBlindBox:true},
+  ship_box_amber_diver:{name:'🔱 琥珀深潛觀測艇',category:'郵輪',price:1800000,description:'可深入珊瑚斷崖的豪華觀測潛艇，是船運盲盒限定收藏。',image:'ships/shipping-fleet/box_amber_diver.png',rarity:'稀有',buff:'transport',shipRevenueBonus:0.14,forSale:false,shipBlindBox:true},
+  ship_box_neon_tide_runner:{name:'💜 霓潮電光快艇',category:'郵輪',price:2500000,description:'都會夜港的高速電動旗艦，是船運盲盒限定收藏。',image:'ships/shipping-fleet/box_neon_tide_runner.png',rarity:'稀有',buff:'transport',shipRevenueBonus:0.17,forSale:false,shipBlindBox:true},
+  ship_box_royal_paddle:{name:'👑 皇家星河輪',category:'郵輪',price:3800000,description:'金紫華麗船艙與河港宴會服務兼備，是船運盲盒限定收藏。',image:'ships/shipping-fleet/box_royal_paddle.png',rarity:'史詩',buff:'transport',shipRevenueBonus:0.21,forSale:false,shipBlindBox:true},
+  ship_box_coral_glass_yacht:{name:'🌸 珊瑚天幕遊艇',category:'郵輪',price:5400000,description:'全景玻璃觀景廳映照海岸晨光，是船運盲盒限定收藏。',image:'ships/shipping-fleet/box_coral_glass_yacht.png',rarity:'史詩',buff:'transport',shipRevenueBonus:0.25,forSale:false,shipBlindBox:true},
+  ship_box_aurora_trawler:{name:'🌌 極光獵浪遠航船',category:'郵輪',price:7600000,description:'為北境惡海打造的高端探索船，是船運盲盒限定收藏。',image:'ships/shipping-fleet/box_aurora_trawler.png',rarity:'史詩',buff:'transport',shipRevenueBonus:0.30,forSale:false,shipBlindBox:true},
+  ship_box_crimson_phoenix_cruise:{name:'🔥 赤金鳳凰巡弋艦',category:'郵輪',price:11000000,description:'火山島鏈上的傳說級高級郵輪，是船運盲盒限定收藏。',image:'ships/shipping-fleet/box_crimson_phoenix_cruise.png',rarity:'傳說',buff:'transport',shipRevenueBonus:0.37,forSale:false,shipBlindBox:true},
+  ship_box_starlight_leviathan:{name:'✨ 星瀚巨鯨超級遊艇',category:'郵輪',price:18000000,description:'星河塗裝與遠洋頂層套房兼備的終極船運收藏。',image:'ships/shipping-fleet/box_starlight_leviathan.png',rarity:'傳說',buff:'transport',shipRevenueBonus:0.48,forSale:false,shipBlindBox:true},
   pom_stroller:{name:'🐕 猛博美豪華推車',category:'收藏品',price:48000,description:'替猛博美準備的全天候豪華推車，柔軟座艙與遮雨棚能讓主人獲得更充分的休息。',image:'vehicles/pom_stroller.jpg',rarity:'稀有',buff:'stamina'},
   weapon_pistol:{name:'🔫 制式手槍',category:'武器',price:15000,description:'可靠的入門防衛武器，搶劫火力：劫匪 +1／警方 +1。每次行動消耗制式手槍彈藥箱 ×1。',rarity:'一般',buff:'combat',unique:true,combatItem:true},
   weapon_glock17:{name:'🔫 Glock 17',category:'武器',price:28000,description:'17+1 發、可靠且容易操控的 9×19mm 半自動手槍，搶劫火力：劫匪 +2／警方 +2。每次行動消耗 9×19mm 彈藥箱 ×1。',image:'weapons/handguns/glock17.png',rarity:'稀有',buff:'combat',unique:true,combatItem:true},
@@ -2281,10 +2304,25 @@ const weeklyMysteryIds=weeklyMysteryNames.map((name,index)=>{
 });
 const assetCategories=['房地產','碼頭','郵輪','汽車','機車','飛行器','列車','客運巴士','卡車','收藏品','武器','彈藥'];
 const COACH_BLIND_BOX_SINGLE_PRICE=150000;
+const SHIPPING_BLIND_BOX_SINGLE_PRICE=350000;
 const coachShopBusIds=coachShopBusDefinitions.map(bus=>bus.id);
 const coachBlindBoxRates=Object.fromEntries(coachBlindBoxDefinitions.map(bus=>[bus.id,bus.rate]));
 const coachBlindBoxIds=Object.keys(coachBlindBoxRates);
 const coachAssetIds=[...coachShopBusIds,...coachBlindBoxIds];
+const shippingShopAssetIds=['ship_azure_catamaran','ship_coral_ferry','ship_jade_expedition','ship_golden_riverbarge','ship_obsidian_icebreaker'];
+const shippingBlindBoxRates={
+  ship_box_seaglass_skiff:18,
+  ship_box_sunset_hydrofoil:16,
+  ship_box_moonlit_junk:14,
+  ship_box_amber_diver:12,
+  ship_box_neon_tide_runner:10,
+  ship_box_royal_paddle:9,
+  ship_box_coral_glass_yacht:8,
+  ship_box_aurora_trawler:6,
+  ship_box_crimson_phoenix_cruise:4,
+  ship_box_starlight_leviathan:3
+};
+const shippingBlindBoxIds=Object.keys(shippingBlindBoxRates);
 const AIRLINE_REGISTRATION_FEE=500000;
 const AIRLINE_COMPLETION_CHANNEL_ID='1531857208781045831';
 const AIRLINE_MAX_FLIGHT_SLOTS=5;
@@ -2426,7 +2464,7 @@ const freightTruckIds=[
 const TRANSPORT_COACH_DEFAULT_VEHICLE_ID='coach_basic_fleet';
 const TRANSPORT_FREIGHT_DEFAULT_VEHICLE_ID='freight_basic_fleet';
 const TRANSPORT_SHIPPING_DEFAULT_VEHICLE_ID='shipping_basic_fleet';
-const shippingVesselIds=['yacht','cruise','going_merry','luxury_submarine','ghost_pirate_ship'];
+const shippingVesselIds=['yacht','cruise','going_merry','luxury_submarine','ghost_pirate_ship',...shippingShopAssetIds,...shippingBlindBoxIds];
 const SHIPPING_BERTH_EXPANSION_ID='shipping_berth_expansion';
 function ownedShippingDockRows(g,u) {
   return assetsOf(g,u).filter(row=>assetCatalog[row.asset_id]?.transportType==='shipping'&&row.quantity>0);
@@ -2460,6 +2498,79 @@ function drawCoachBlindBoxAssetId(random=Math.random) {
     if(roll<cumulative) return assetId;
   }
   return coachBlindBoxIds.at(-1);
+}
+function drawShippingBlindBoxAssetId(random=Math.random) {
+  const roll=random()*100;
+  let cumulative=0;
+  for(const assetId of shippingBlindBoxIds) {
+    cumulative+=shippingBlindBoxRates[assetId];
+    if(roll<cumulative) return assetId;
+  }
+  return shippingBlindBoxIds.at(-1);
+}
+function shippingBlindBoxPurchasedToday(g,u) {
+  return db.prepare('SELECT purchase_day FROM shipping_blind_box_daily WHERE guild_id=? AND user_id=?').get(g,u)?.purchase_day===trainBlindBoxDay();
+}
+function openShippingBlindBox(g,u) {
+  ensureWallet(g,u);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const day=trainBlindBoxDay(),daily=db.prepare('SELECT purchase_day FROM shipping_blind_box_daily WHERE guild_id=? AND user_id=?').get(g,u),berth=shippingBerthStatus(g,u);
+    if(daily?.purchase_day===day) throw new Error('你今天已購買過船運盲盒，請於台北時間明天再來');
+    if(!berth.docks.length) throw new Error('請先到 /資產商城 分類:碼頭 購買碼頭，才能開啟船運盲盒');
+    if(berth.available<1) throw new Error(`船位不足（目前船舶 ${berth.vessels}/${berth.capacity}），請先購買船位擴建權`);
+    if(balance(g,u)<SHIPPING_BLIND_BOX_SINGLE_PRICE) throw new Error(`金幣不足，需要 ${fmt(SHIPPING_BLIND_BOX_SINGLE_PRICE)}`);
+    const next=changeBalanceUnlocked(g,u,-SHIPPING_BLIND_BOX_SINGLE_PRICE,'shipping_blind_box',u,'購買每日船運盲盒 x1');
+    const assetId=drawShippingBlindBoxAssetId();
+    addAssetQuantity(g,u,assetId,1);
+    ensureAssetBuff(g,u,assetId,'transport');
+    db.prepare(`INSERT INTO shipping_blind_box_daily(guild_id,user_id,purchase_day) VALUES(?,?,?)
+      ON CONFLICT(guild_id,user_id) DO UPDATE SET purchase_day=excluded.purchase_day,updated_at=CURRENT_TIMESTAMP`).run(g,u,day);
+    db.exec('COMMIT');
+    return {assetId,next};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function shippingBlindBoxCatalogRow(ownerId,selected=null) {
+  return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+    .setCustomId(`shipping_blind_box_catalog:${ownerId}`)
+    .setPlaceholder('查看 10 艘船舶、圖片與機率')
+    .addOptions(shippingBlindBoxIds.map(assetId=>{
+      const asset=assetCatalog[assetId];
+      return {label:asset.name.replace(/^[^A-Za-z0-9\u3400-\u9FFF]+/u,'').slice(0,100),description:`${asset.rarity}｜${shippingBlindBoxRates[assetId]}%｜船運營收 +${Math.round(asset.shipRevenueBonus*100)}%`.slice(0,100),value:assetId,default:assetId===selected};
+    })));
+}
+function shippingBlindBoxComponents(g,ownerId,selected=null) {
+  const berth=shippingBerthStatus(g,ownerId),purchased=shippingBlindBoxPurchasedToday(g,ownerId),blocked=!berth.docks.length||berth.available<1;
+  return [
+    new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`shipping_blind_box_open:${ownerId}`).setLabel(purchased?'今日已購買':blocked?'需要空船位':`每日一盒｜${fmt(SHIPPING_BLIND_BOX_SINGLE_PRICE)}`).setEmoji('🎫').setStyle(ButtonStyle.Primary).setDisabled(purchased||blocked)),
+    shippingBlindBoxCatalogRow(ownerId,selected),
+    new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`transport_hub_home:${ownerId}`).setLabel('交通事業首頁').setEmoji('🧭').setStyle(ButtonStyle.Secondary))
+  ];
+}
+function shippingBlindBoxOverviewPayload(g,u,notice='') {
+  const berth=shippingBerthStatus(g,u),owned=assetsOf(g,u).filter(row=>shippingBlindBoxIds.includes(row.asset_id)&&row.quantity>0),ownedKinds=owned.length;
+  const best=assetsOf(g,u).filter(row=>shippingVesselIds.includes(row.asset_id)&&row.quantity>0).sort((a,b)=>(assetCatalog[b.asset_id]?.shipRevenueBonus||0)-(assetCatalog[a.asset_id]?.shipRevenueBonus||0))[0];
+  const showcase=assetCatalog.ship_box_starlight_leviathan,purchased=shippingBlindBoxPurchasedToday(g,u),bestText=best?`${assetCatalog[best.asset_id].name}｜船運營收 **+${Math.round(assetCatalog[best.asset_id].shipRevenueBonus*100)}%**`:'尚未持有船舶';
+  const embed=new EmbedBuilder().setColor(0x0B4F6C).setTitle('⚓ 船運盲盒｜10 艘限定船舶')
+    .setDescription(`${notice?`${notice}\n\n`:''}每盒：**${fmt(SHIPPING_BLIND_BOX_SINGLE_PRICE)}**｜每日限購：**1 盒**\n今日狀態：**${purchased?'已購買':'尚未購買'}**（台北時間每日重置）\n\n每次開箱都需要 **1 個空船位**；碼頭：**${berth.docks.length} 座**｜停泊：**${berth.vessels}/${berth.capacity} 艘**｜空位：**${berth.available}**。\n抽到的船舶可在 **海上船運 → 選擇事業載具** 中配置，同類型船舶不重複疊加。\n\n**獎池收藏**\n已收集：**${ownedKinds}/10 種**\n最佳船舶：${bestText}\n金庫：**${fmt(balance(g,u))}**`)
+    .setFooter({text:'使用下拉選單可查看每艘船的圖片、機率與船運營收加成'});
+  return {...assetMediaPayload(embed,'ship_box_starlight_leviathan',showcase),components:shippingBlindBoxComponents(g,u)};
+}
+function shippingBlindBoxCatalogPayload(g,u,assetId) {
+  const asset=assetCatalog[assetId];
+  if(!asset||!shippingBlindBoxIds.includes(assetId)) throw new Error('找不到這艘船舶');
+  const embed=new EmbedBuilder().setColor(trainRarityColor(asset.rarity)).setTitle(asset.name)
+    .setDescription(`稀有度：**${asset.rarity}**\n抽取機率：**${shippingBlindBoxRates[assetId]}%／每盒**\n船運班次營收：**+${Math.round(asset.shipRevenueBonus*100)}%**\n參考價值：**${fmt(asset.price)}**\n目前持有：**${assetQuantity(g,u,assetId)} 艘**\n\n${asset.description}`);
+  return {...assetMediaPayload(embed,assetId,asset),components:shippingBlindBoxComponents(g,u,assetId)};
+}
+function shippingBlindBoxResultPayload(g,u,result) {
+  const asset=assetCatalog[result.assetId];
+  const embed=new EmbedBuilder().setColor(trainRarityColor(asset.rarity)).setTitle(asset.rarity==='傳說'?'🌟 傳說船舶入港！':'⚓ 船運盲盒開箱成功！')
+    .setDescription(`獲得：${asset.name}\n稀有度：**${asset.rarity}**\n船運營收：**+${Math.round(asset.shipRevenueBonus*100)}%**\n\n可立即在 **海上船運 → 選擇事業載具** 中配置。\n目前金庫：**${fmt(result.next)}**`);
+  return {...assetMediaPayload(embed,result.assetId,asset),components:shippingBlindBoxComponents(g,u,result.assetId)};
 }
 function coachBlindBoxPurchasedToday(g,u) {
   return db.prepare('SELECT purchase_day FROM coach_blind_box_daily WHERE guild_id=? AND user_id=?').get(g,u)?.purchase_day===trainBlindBoxDay();
@@ -3310,6 +3421,7 @@ function transportHubEmbed(g,u,notice='') {
   ensureStarterTrain(g,u);
   const stations=ownedTransportStations(g,u),bestTrain=bestOwnedTrain(g,u),bestTrainAsset=bestTrain&&assetCatalog[bestTrain.asset_id];
   const coachKinds=assetsOf(g,u).filter(row=>coachAssetIds.includes(row.asset_id)&&row.quantity>0).length;
+  const shipBlindKinds=assetsOf(g,u).filter(row=>shippingBlindBoxIds.includes(row.asset_id)&&row.quantity>0).length;
   const garage=ensureTrainGarage(g,u),trainKinds=ownedBlindBoxTrainRows(g,u).filter(row=>row.quantity>0).length;
   const shipStatus=shippingBerthStatus(g,u);
   const snapshot=transportNetworkSnapshot(g,u);
@@ -3321,7 +3433,7 @@ function transportHubEmbed(g,u,notice='') {
     .setColor(0x0D47A1)
     .setTitle('🧭 交通事業營運總部')
     .setAuthor({name:'MACAU TRANSIT COMMAND // LIVE NETWORK'})
-    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n${snapshot.directive}\n\n**網路規模**\n${snapshot.networkMeter}｜已註冊 **${snapshot.companies}/5** 間公司｜集團總等級 **Lv.${snapshot.totalLevel}**｜場站／機場 **${snapshot.infrastructure} 座**\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路・船運**\n${groundStatus}\n\n**🚆 列車車庫・每日盲盒**\n盲盒收藏：**${trainKinds}/12 種**｜車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n商城另有 **5 款列車**可直接購買。\n\n**🚌 客運車隊・每日盲盒**\n已收藏：**${coachKinds}/20 款**｜商城直購 **10 款**、每日客運盲盒 **10 款**；配置巴士可提高城際客運營收。\n\n**⚓ 海上船運・碼頭船位**\n碼頭：**${shipStatus.docks.length} 座**｜停泊船舶：**${shipStatus.vessels}/${shipStatus.capacity} 艘**${shipStatus.overCapacity?`｜⚠️ 舊有船舶超出新船位 ${shipStatus.overCapacity} 艘，仍可使用但無法再購入`:' '}\n持有郵輪可直接配置到船運公司，最高提供 **+28%** 船運營收；可至 \`/資產商城 分類:碼頭\` 購買碼頭與船位擴建。\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n${snapshot.directive}\n\n**網路規模**\n${snapshot.networkMeter}｜已註冊 **${snapshot.companies}/5** 間公司｜集團總等級 **Lv.${snapshot.totalLevel}**｜場站／機場 **${snapshot.infrastructure} 座**\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路・船運**\n${groundStatus}\n\n**🚆 列車車庫・每日盲盒**\n盲盒收藏：**${trainKinds}/12 種**｜車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n商城另有 **5 款列車**可直接購買。\n\n**🚌 客運車隊・每日盲盒**\n已收藏：**${coachKinds}/20 款**｜商城直購 **10 款**、每日客運盲盒 **10 款**；配置巴士可提高城際客運營收。\n\n**⚓ 海上船運・碼頭船位**\n碼頭：**${shipStatus.docks.length} 座**｜停泊船舶：**${shipStatus.vessels}/${shipStatus.capacity} 艘**${shipStatus.overCapacity?`｜⚠️ 舊有船舶超出新船位 ${shipStatus.overCapacity} 艘，仍可使用但無法再購入`:' '}\n商城直購 **10 艘**、每日船運盲盒 **10 艘**（已收集 **${shipBlindKinds}/10 種**）；最高提供 **+48%** 船運營收。可至 \`/資產商城 分類:碼頭\` 購買碼頭與船位擴建。\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
     .addFields(
       {name:'🛰️ 即時調度',value:`執行中 **${snapshot.active}**｜待收 **${snapshot.ready}**`,inline:true},
       {name:'🎯 指揮優先度',value:snapshot.ready?'收取營收':'部署下一班',inline:true},
@@ -3334,7 +3446,8 @@ function transportHubComponents(g,u) {
     new ButtonBuilder().setCustomId(`transport_hub_airline:${u}`).setLabel('航空運輸').setEmoji('✈️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`transport_hub_ground:${u}`).setLabel('陸路・船運').setEmoji('⚓').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`transport_hub_train_box:${u}`).setLabel('列車車庫・盲盒').setEmoji('🚆').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`transport_hub_coach_box:${u}`).setLabel('客運盲盒').setEmoji('🚌').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`transport_hub_coach_box:${u}`).setLabel('客運盲盒').setEmoji('🚌').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`transport_hub_shipping_box:${u}`).setLabel('船運盲盒').setEmoji('⚓').setStyle(ButtonStyle.Secondary)
   )];
 }
 function requireTransportBusinessType(businessType) {
@@ -3491,6 +3604,7 @@ function transportBusinessDashboardComponents(g,u,businessType) {
     : new ButtonBuilder().setCustomId(`transport_start:${u}:${businessType}`).setLabel(businessType==='rail'&&!hasTrain?'需要列車才能發車':'確認配置並開始營運').setEmoji('🚦').setStyle(ButtonStyle.Primary).setDisabled(!validConfiguration)];
   if(businessType==='rail') actionButtons.push(new ButtonBuilder().setCustomId(`transport_hub_train_box:${u}`).setLabel('列車車庫・盲盒').setEmoji('🚆').setStyle(ButtonStyle.Success));
   if(businessType==='coach') actionButtons.push(new ButtonBuilder().setCustomId(`transport_hub_coach_box:${u}`).setLabel('客運盲盒').setEmoji('🎫').setStyle(ButtonStyle.Success));
+  if(businessType==='shipping') actionButtons.push(new ButtonBuilder().setCustomId(`transport_hub_shipping_box:${u}`).setLabel('船運盲盒').setEmoji('🎫').setStyle(ButtonStyle.Success));
   actionButtons.push(new ButtonBuilder().setCustomId(`enterprise_upgrade:${u}:${businessType}`).setLabel(nextUpgrade?`企業 Lv.${nextUpgrade.level}｜${fmt(nextUpgrade.cost)}`:'企業已滿級').setEmoji('🏢').setStyle(ButtonStyle.Success).setDisabled(!nextUpgrade));
   actionButtons.push(backButton());
   rows.push(new ActionRowBuilder().addComponents(actionButtons));
@@ -8927,7 +9041,7 @@ async function handleInteraction(i) {
     db.prepare('UPDATE player_pets SET nickname=? WHERE guild_id=? AND user_id=? AND pet_id=?').run(nickname,i.guildId,ownerId,petId);
     return i.update({...petProfilePayload(i.guildId,ownerId),components:petProfileComponents(i.guildId,ownerId),attachments:[]});
   }
-  if(i.isButton()&&['transport_hub_home:','transport_hub_airline:','transport_hub_ground:','transport_hub_train_box:','transport_hub_coach_box:'].some(prefix=>i.customId.startsWith(prefix))&&i.guildId) {
+  if(i.isButton()&&['transport_hub_home:','transport_hub_airline:','transport_hub_ground:','transport_hub_train_box:','transport_hub_coach_box:','transport_hub_shipping_box:'].some(prefix=>i.customId.startsWith(prefix))&&i.guildId) {
     const [kind,ownerId]=i.customId.split(':');
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有事業擁有者可以操作這個交通事業面板。',ephemeral:true});
     if(kind==='transport_hub_airline') {
@@ -8941,6 +9055,9 @@ async function handleInteraction(i) {
     }
     if(kind==='transport_hub_coach_box') {
       return i.update({...coachBlindBoxOverviewPayload(i.guildId,ownerId),attachments:[]});
+    }
+    if(kind==='transport_hub_shipping_box') {
+      return i.update({...shippingBlindBoxOverviewPayload(i.guildId,ownerId),attachments:[]});
     }
     return i.update({embeds:[transportHubEmbed(i.guildId,ownerId)],components:transportHubComponents(i.guildId,ownerId),attachments:[]});
   }
@@ -8995,6 +9112,20 @@ async function handleInteraction(i) {
       const result=openCoachBlindBox(i.guildId,ownerId);
       return i.update({...coachBlindBoxResultPayload(i.guildId,ownerId,result),attachments:[]});
     } catch(error) { return i.reply({content:`⚠️ 客運盲盒購買失敗：${error.message}`,ephemeral:true}); }
+  }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('shipping_blind_box_catalog:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有開啟船運盲盒的玩家可以操作。',ephemeral:true});
+    try { return i.update({...shippingBlindBoxCatalogPayload(i.guildId,ownerId,i.values[0]),attachments:[]}); }
+    catch(error) { return i.reply({content:`⚠️ ${error.message}`,ephemeral:true}); }
+  }
+  if(i.isButton()&&i.customId.startsWith('shipping_blind_box_open:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有開啟船運盲盒的玩家可以購買。',ephemeral:true});
+    try {
+      const result=openShippingBlindBox(i.guildId,ownerId);
+      return i.update({...shippingBlindBoxResultPayload(i.guildId,ownerId,result),attachments:[]});
+    } catch(error) { return i.reply({content:`⚠️ 船運盲盒購買失敗：${error.message}`,ephemeral:true}); }
   }
   if(i.isButton()&&i.customId.startsWith('enterprise_upgrade:')&&i.guildId) {
     const [,ownerId,businessType]=i.customId.split(':');
