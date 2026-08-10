@@ -1170,6 +1170,19 @@ test('船運碼頭與船位可購買並限制新船舶停泊容量',()=>{
   assert.match(update.changes.join('\n'),/船位/);
 });
 
+test('三座船運碼頭都有獨立的商城橫向圖片',()=>{
+  for(const assetId of ['coral_bay_marina','ocean_crown_maritime_port','blacktide_deepwater_terminal']) {
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    const image=`properties/docks/${assetId}.png`;
+    assert.match(assetBlock,new RegExp(`image:'${image}'`),`${assetId} 未使用專屬圖片`);
+    const file=readFileSync(new URL(`../assets/${image}`,import.meta.url));
+    assert.equal(file.subarray(1,4).toString(),'PNG',`${assetId} 圖片不是 PNG`);
+  }
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-10-maritime-dock-art.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-10-maritime-dock-art');
+  assert.match(update.changes.join('\n'),/獨立圖片/);
+});
+
 test('長途交通網與客運盲盒提供二十輛巴士、圖片及客運營收加成',()=>{
   for(const routeId of ['pacific_crown_longhaul','rail_continental_sleeper','coach_grand_tour_longhaul','freight_transcontinental_corridor']) {
     assert.match(source,new RegExp(`${routeId}:`),`缺少長途路線 ${routeId}`);
