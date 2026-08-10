@@ -1147,6 +1147,29 @@ test('海上船運整合交通事業，既有船舶可配置並保留舊資料�
   assert.match(update.changes.join('\n'),/海皇冠國際港/);
 });
 
+test('船運碼頭與船位可購買並限制新船舶停泊容量',()=>{
+  for(const assetId of ['coral_bay_marina','ocean_crown_maritime_port','blacktide_deepwater_terminal']) {
+    const assetBlock=source.match(new RegExp(`${assetId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(assetBlock,/category:'碼頭'/,`${assetId} 未分類為碼頭`);
+    assert.match(assetBlock,/transportType:'shipping'/,`${assetId} 未整合船運`);
+    assert.match(assetBlock,/shippingBerths:\d+/,`${assetId} 缺少基礎船位`);
+  }
+  const berthBlock=source.match(/shipping_berth_expansion:\{[^\n]+/)?.[0]||'';
+  assert.match(berthBlock,/category:'碼頭'/);
+  assert.match(berthBlock,/shippingBerthExpansion:1/);
+  assert.match(berthBlock,/maxOwned:16/);
+  assert.match(source,/dock:\{label:'船運碼頭・船位',emoji:'⚓',catalog:\['碼頭'\]\}/);
+  assert.match(source,/const SHIPPING_BERTH_EXPANSION_ID='shipping_berth_expansion'/);
+  assert.match(source,/function shippingBerthCapacity\(g,u\)/);
+  assert.match(source,/function shippingBerthStatus\(g,u\)/);
+  assert.match(source,/船位不足（目前船舶/);
+  assert.match(source,/請先到 \/資產商城 分類:碼頭 購買碼頭/);
+  assert.match(source,/碼頭船位：/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-10-maritime-docks-berths.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-10-maritime-docks-berths');
+  assert.match(update.changes.join('\n'),/船位/);
+});
+
 test('長途交通網與客運盲盒提供二十輛巴士、圖片及客運營收加成',()=>{
   for(const routeId of ['pacific_crown_longhaul','rail_continental_sleeper','coach_grand_tour_longhaul','freight_transcontinental_corridor']) {
     assert.match(source,new RegExp(`${routeId}:`),`缺少長途路線 ${routeId}`);
