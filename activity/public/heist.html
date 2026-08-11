@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#090710">
+  <title>賭場搶劫｜澳門最大賭場</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/heist.css?v=20260811.1">
+</head>
+<body>
+  <div class="aurora aurora-a"></div><div class="aurora aurora-b"></div>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="back-link" id="backToGame" href="/game" aria-label="返回遊戲大廳">‹</a>
+      <div class="brand"><span class="brand-mark">♠</span><div><strong>澳門最大賭場</strong><small>HEIST OPERATION · BETA</small></div></div>
+      <button class="intel-button" id="intelButton" type="button" aria-expanded="false">情報 <b>01</b></button>
+    </header>
+
+    <section class="mission-head">
+      <div><span class="eyebrow">今晚目標</span><h1>黑曜至尊廳</h1><p>選擇行動方案，避開保全，帶著戰利品離開賭場。</p></div>
+      <div class="heat-card"><span>保全警戒</span><strong id="heatLabel">低</strong><div class="heat-track"><i id="heatBar"></i></div></div>
+    </section>
+
+    <nav class="mission-steps" aria-label="搶劫流程">
+      <button class="step active" data-stage="0" type="button"><i>01</i><span>部署</span></button>
+      <button class="step" data-stage="1" type="button"><i>02</i><span>潛入</span></button>
+      <button class="step" data-stage="2" type="button"><i>03</i><span>金庫</span></button>
+      <button class="step" data-stage="3" type="button"><i>04</i><span>撤離</span></button>
+    </nav>
+
+    <section class="mission-stage" id="missionStage">
+      <img id="stageImage" src="/heist/command-lobby.png" alt="搶劫行動指揮大廳">
+      <div class="image-shade"></div>
+      <div class="stage-content">
+        <span class="stage-kicker" id="stageKicker">MISSION CONTROL</span>
+        <h2 id="stageTitle">部署行動隊伍</h2>
+        <p id="stageDescription">從三條進場路線中選一條；第一版僅為網頁互動展示，不會直接結算金幣。</p>
+        <div class="objective-card"><span>目前目標</span><strong id="stageObjective">挑選進場方案</strong><b id="stageReward">預估戰利品 280,000</b></div>
+      </div>
+      <div class="stage-index" id="stageIndex">01 / 04</div>
+    </section>
+
+    <section class="choice-panel" id="choicePanel" aria-label="行動選擇"></section>
+
+    <section class="crew-section">
+      <div class="section-head"><div><span class="eyebrow">CREW STATUS</span><h2>行動小隊</h2></div><span id="crewReadout">4 人就緒</span></div>
+      <div class="crew-list">
+        <article><span class="crew-icon purple">◈</span><div><strong>夜影駭客</strong><small>監控干擾 · 強項</small></div><b>100</b></article>
+        <article><span class="crew-icon gold">◆</span><div><strong>黃金開鎖手</strong><small>金庫破解 · 強項</small></div><b>100</b></article>
+        <article><span class="crew-icon cyan">✦</span><div><strong>幻影車手</strong><small>撤離加速 · 強項</small></div><b>100</b></article>
+        <article><span class="crew-icon rose">✹</span><div><strong>偽裝專家</strong><small>警戒降低 · 強項</small></div><b>100</b></article>
+      </div>
+    </section>
+
+    <footer class="action-dock">
+      <div><span id="actionHint">選擇進場方案</span><strong id="selectionSummary">尚未選擇</strong></div>
+      <button id="primaryAction" type="button">確認部署 <span>→</span></button>
+    </footer>
+  </main>
+  <aside class="intel-sheet" id="intelSheet" aria-hidden="true">
+    <div class="sheet-head"><div><span class="eyebrow">LIVE INTEL</span><h2>保全情報</h2></div><button id="closeIntel" type="button" aria-label="關閉情報">×</button></div>
+    <article><span>⏱</span><div><strong>警衛巡邏</strong><p>西側走廊有 14 秒空檔。</p></div></article>
+    <article><span>◉</span><div><strong>監視器網路</strong><p>駭客可暫時干擾一個區域。</p></div></article>
+    <article><span>⚡</span><div><strong>撤離載具</strong><p>裝甲車已於後巷待命。</p></div></article>
+  </aside>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/heist.js?v=20260811.1" defer></script>
+</body>
+</html>

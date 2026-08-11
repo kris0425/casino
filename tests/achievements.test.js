@@ -217,6 +217,22 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   assert.match(source,/url\.pathname\.startsWith\('\/assets\/'\)/);
 });
 
+test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲大廳',()=>{
+  const html=readFileSync(new URL('../activity/public/heist.html',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/heist.css',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/heist.js',import.meta.url),'utf8');
+  for(const id of ['backToGame','missionStage','stageImage','choicePanel','primaryAction','intelSheet']) assert.match(html,new RegExp(`id="${id}"`));
+  for(const file of ['command-lobby.png','infiltration.png','vault-breach.png','getaway.png']) {
+    const image=readFileSync(new URL(`../activity/public/heist/${file}`,import.meta.url));
+    assert.equal(image.subarray(1,4).toString(),'PNG');
+  }
+  assert.match(source,/\/heist':'heist\.html'/);
+  assert.match(js,/const stages=\[/);
+  assert.match(js,/function nextStage\(\)/);
+  assert.match(js,/if\(selected===null\)/);
+  assert.match(css,/@media\(min-width:601px\)/);
+});
+
 test('網站載具 PVP 使用持久化房間與伺服器權威結算',()=>{
   const html=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');

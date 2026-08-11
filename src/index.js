@@ -11197,7 +11197,7 @@ const activityStaticTypes={
 };
 function serveActivityStatic(request,response,url) {
   if(!['GET','HEAD'].includes(request.method||'')) return false;
-  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/appearance':'style.html','/appearance-admin':'appearance-admin.html','/game':'game.html'};
+  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/appearance':'style.html','/appearance-admin':'appearance-admin.html','/game':'game.html','/heist':'heist.html'};
   const assetRequest=url.pathname.startsWith('/assets/'),styleRequest=url.pathname.startsWith('/appearance-styles/'),root=assetRequest?ACTIVITY_ASSET_ROOT:styleRequest?resolve(CHARACTER_STYLE_ROOT,'..'):ACTIVITY_STATIC_ROOT;
   const relative=assetRequest?decodeURIComponent(url.pathname.slice('/assets/'.length)):routeFiles[url.pathname]||decodeURIComponent(url.pathname).replace(/^\/+/,'');
   if(!relative||relative.startsWith('api/')||relative.startsWith('activity/')) return false;
