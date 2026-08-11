@@ -7,6 +7,7 @@
   <title>賭場搶劫｜澳門最大賭場</title>
   <link rel="icon" href="/favicon.svg">
   <link rel="stylesheet" href="/heist.css?v=20260811.1">
+  <link rel="stylesheet" href="/heist-gameplay.css?v=20260812.1">
 </head>
 <body>
   <div class="aurora aurora-a"></div><div class="aurora aurora-b"></div>
@@ -39,6 +40,14 @@
         <div class="objective-card"><span>目前目標</span><strong id="stageObjective">挑選進場方案</strong><b id="stageReward">預估戰利品 280,000</b></div>
       </div>
       <div class="stage-index" id="stageIndex">01 / 04</div>
+    </section>
+
+    <section class="game-panel" id="gamePanel" hidden aria-live="polite">
+      <div class="section-head"><div><span class="eyebrow" id="miniKicker">LIVE ACTION</span><h2 id="miniTitle">行動挑戰</h2></div><span id="miniProgress">0 / 0</span></div>
+      <p id="miniInstruction"></p>
+      <div class="mini-board" id="miniBoard"></div>
+      <div class="mini-controls" id="miniControls"></div>
+      <p class="mini-status" id="miniStatus"></p>
     </section>
 
     <section class="choice-panel" id="choicePanel" aria-label="行動選擇"></section>
