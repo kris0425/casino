@@ -18,11 +18,15 @@ try{
     await page.route('https://visual.local/**',async route=>{const url=new URL(route.request().url());try{const file=localFile(url.pathname);return route.fulfill({status:200,contentType:mime[extname(file)]||'application/octet-stream',body:readFileSync(file)});}catch{return route.fulfill({status:404,body:'not found'});}});
     await page.goto('https://visual.local/heist',{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>document.querySelector('#renderMode')?.textContent==='3D 模式',{timeout:15_000});
-    await page.click('#startGame');await page.waitForTimeout(1200);
+    await page.click('#startGame');await page.waitForTimeout(120);
+    const position=()=>page.evaluate(()=>{const canvas=document.querySelector('#heistCanvas');return{x:Number(canvas?.dataset.playerX),y:Number(canvas?.dataset.playerY)};});
+    const before=await position();await page.keyboard.down('ArrowUp');await page.waitForTimeout(60);await page.keyboard.up('ArrowUp');const afterUp=await position();
+    await page.keyboard.down('ArrowRight');await page.waitForTimeout(60);await page.keyboard.up('ArrowRight');const afterRight=await position();await page.waitForTimeout(1000);
     const report=await page.evaluate(()=>({mode:document.querySelector('#renderMode')?.textContent,webgl:Boolean(document.querySelector('#heistCanvas')?.getContext('webgl2')),overlayHidden:document.querySelector('#gameOverlay')?.hidden,body:document.body.scrollWidth,viewport:document.documentElement.clientWidth}));
+    report.controls={before,afterUp,afterRight,screenUp:afterUp.y>before.y,screenRight:afterRight.x<afterUp.x};
     await page.screenshot({path:resolve(outputRoot,`${sample.name}.png`),fullPage:true});
     console.log(`${sample.name}: ${JSON.stringify({...report,errors})}`);
-    if(report.mode!=='3D 模式'||!report.webgl||!report.overlayHidden||report.body>report.viewport||errors.length)throw new Error(`${sample.name} visual check failed`);
+    if(report.mode!=='3D 模式'||!report.webgl||!report.overlayHidden||report.body>report.viewport||!report.controls.screenUp||!report.controls.screenRight||errors.length)throw new Error(`${sample.name} visual check failed`);
     await page.close();
   }
   console.log(`3D heist visual checks saved to ${outputRoot}`);

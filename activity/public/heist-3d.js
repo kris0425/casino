@@ -10,6 +10,7 @@ const routePoints=[[95,520],[95,115],[95,320],[725,320],[725,145],[790,520]];
 const state={running:false,ended:false,keys:new Set(),player:{x:95,y:520,r:15},guards:[],cameras:[],terminal:{x:130,y:115,done:false},vault:{x:725,y:145,open:false},exit:{x:790,y:520},loot:[],heat:12,lootValue:0,time:180,interact:null,interactProgress:0,cameraDisabledUntil:0,last:0};
 let scene,camera,renderer,clock,playerMesh,terminalMesh,vaultMesh,exitMesh,routeLine,animation=0,toastTimer;
 const guardMeshes=[],cameraMeshes=[],lootMeshes=[];
+const movementForward=new THREE.Vector3(),movementRight=new THREE.Vector3(),movementDirection=new THREE.Vector3();
 
 const world=(x,y,height=0)=>new THREE.Vector3(x/TILE-9,height,y/TILE-6);
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -64,6 +65,7 @@ function reset(){
 }
 function syncMeshes(){
   playerMesh.position.copy(world(state.player.x,state.player.y,0));terminalMesh.position.copy(world(state.terminal.x,state.terminal.y,.4));vaultMesh.position.copy(world(state.vault.x,state.vault.y,.55));exitMesh.position.copy(world(state.exit.x,state.exit.y,.08));
+  renderer.domElement.dataset.playerX=String(state.player.x);renderer.domElement.dataset.playerY=String(state.player.y);
   terminalMesh.material.color.setHex(state.terminal.done?0x43bd94:0x873dcc);vaultMesh.material.color.setHex(state.vault.open?0xe0b952:0x6b5b40);exitMesh.material.emissive.setHex(state.lootValue>=500?0x136e9b:0x152231);
   state.guards.forEach((guard,index)=>{const actor=guardMeshes[index],angle=guard.axis==='x'?(guard.dx>0?-Math.PI/2:Math.PI/2):(guard.dy>0?Math.PI:0);actor.position.copy(world(guard.x,guard.y,0));actor.rotation.y=angle;});
   state.cameras.forEach((item,index)=>{const actor=cameraMeshes[index];actor.position.copy(world(item.x,item.y,.55));actor.rotation.y=-item.angle-Math.PI/2;actor.visible=Date.now()>state.cameraDisabledUntil;});
@@ -74,7 +76,20 @@ function updateHud(){
   const objective=!state.terminal.done?'駭入保全終端':!state.vault.open?'開啟金庫':state.lootValue<500?'收集至少 500 分戰利品':'前往出口撤離';$('#objectiveLabel').textContent=objective;$('#objectiveTitle').textContent=objective;$('#objectiveText').textContent=!state.terminal.done?'沿金色地面路徑前往紫色保全終端。':!state.vault.open?'穿過中央走廊，前往右上方金庫。':state.lootValue<500?'靠近發光金幣拾取戰利品；守衛已加速。':'藍色出口已開放，立刻撤離即可保住分數。';$('#runRank').textContent=state.ended?rank():state.running?'行動中':'待命';
 }
 function rank(){if(state.lootValue>=1300&&state.heat<45)return'S';if(state.lootValue>=900)return'A';if(state.lootValue>=500)return'B';return'C';}
-function move(dt){let x=0,y=0;if(state.keys.has('ArrowUp')||state.keys.has('w'))y-=1;if(state.keys.has('ArrowDown')||state.keys.has('s'))y+=1;if(state.keys.has('ArrowLeft')||state.keys.has('a'))x-=1;if(state.keys.has('ArrowRight')||state.keys.has('d'))x+=1;if(!x&&!y)return;const sprint=state.keys.has('Shift'),speed=(sprint?215:145)*dt,length=Math.hypot(x,y);x=x/length*speed;y=y/length*speed;const nextX=state.player.x+x,nextY=state.player.y+y;if(!blocked(nextX,state.player.y))state.player.x=nextX;if(!blocked(state.player.x,nextY))state.player.y=nextY;playerMesh.rotation.y=Math.atan2(x,y);if(sprint)state.heat=clamp(state.heat+dt*1.7,0,100);}
+function move(dt){
+  let horizontal=0,vertical=0;
+  if(state.keys.has('ArrowUp')||state.keys.has('w'))vertical+=1;
+  if(state.keys.has('ArrowDown')||state.keys.has('s'))vertical-=1;
+  if(state.keys.has('ArrowLeft')||state.keys.has('a'))horizontal-=1;
+  if(state.keys.has('ArrowRight')||state.keys.has('d'))horizontal+=1;
+  if(!horizontal&&!vertical)return;
+  camera.getWorldDirection(movementForward);movementForward.y=0;movementForward.normalize();
+  movementRight.crossVectors(movementForward,camera.up).normalize();
+  movementDirection.copy(movementForward).multiplyScalar(vertical).addScaledVector(movementRight,horizontal).normalize();
+  const sprint=state.keys.has('Shift'),speed=(sprint?215:145)*dt,x=movementDirection.x*speed,y=movementDirection.z*speed;
+  const nextX=state.player.x+x,nextY=state.player.y+y;if(!blocked(nextX,state.player.y))state.player.x=nextX;if(!blocked(state.player.x,nextY))state.player.y=nextY;
+  playerMesh.rotation.y=Math.atan2(x,y);if(sprint)state.heat=clamp(state.heat+dt*1.7,0,100);
+}
 function updateGuards(dt){state.guards.forEach(guard=>{if(guard.axis==='x'){guard.x+=guard.dx*guard.speed*dt;if(guard.x<guard.min||guard.x>guard.max){guard.dx*=-1;guard.x=clamp(guard.x,guard.min,guard.max);}}else{guard.y+=guard.dy*guard.speed*dt;if(guard.y<guard.min||guard.y>guard.max){guard.dy*=-1;guard.y=clamp(guard.y,guard.min,guard.max);}}});}
 function detect(){let danger=0;state.guards.forEach(guard=>{const d=distance(state.player,guard),direction=guard.axis==='x'?(guard.dx>0?0:Math.PI):(guard.dy>0?Math.PI/2:-Math.PI/2),playerAngle=Math.atan2(state.player.y-guard.y,state.player.x-guard.x),difference=Math.abs(Math.atan2(Math.sin(playerAngle-direction),Math.cos(playerAngle-direction)));if(d<42)danger+=1.9;if(d<125&&difference<.38)danger+=.28;});if(Date.now()>state.cameraDisabledUntil)state.cameras.forEach(item=>{const d=distance(state.player,item),playerAngle=Math.atan2(state.player.y-item.y,state.player.x-item.x),difference=Math.abs(Math.atan2(Math.sin(playerAngle-item.angle),Math.cos(playerAngle-item.angle)));if(d<145&&difference<.39)danger+=.18;});if(danger){state.heat=clamp(state.heat+danger,0,100);if(state.heat>=100)end(false,'你被保全包圍了');}}
 function checkLoot(){if(!state.vault.open)return;state.loot.forEach(item=>{if(!item.taken&&near(item,28)){item.taken=true;state.lootValue+=item.value;state.heat=clamp(state.heat+5,0,100);toast(`取得 ${item.value} 分戰利品`);}});}
