@@ -1306,7 +1306,9 @@ function removeAsset(g,u,assetId,{mods=false}={}) {
 }
 function changeBalanceUnlocked(g, u, delta, kind, actor = null, reason = '') {
   const current = ensureWallet(g, u);
+  if(!Number.isSafeInteger(current)||!Number.isSafeInteger(delta)) throw new Error('金額計算異常，交易已取消');
   const next = current + delta;
+  if(!Number.isSafeInteger(next)) throw new Error('金額超出安全範圍，交易已取消');
   if (next < 0) throw new Error('金幣不足');
   db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next, g, u);
   db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
@@ -2977,15 +2979,18 @@ function transportUpkeepQuote(g,u,businessType,company) {
     scaleText=`Lv.${level}／${slots} 個機位`;
   } else {
     requireTransportBusinessType(businessType);
-    const maintenanceBase={rail:15_000,coach:10_000,freight:20_000}[businessType];
-    const licenseBase={rail:100_000,coach:80_000,freight:120_000}[businessType];
-    const licenseStep={rail:20_000,coach:15_000,freight:25_000}[businessType];
+    const maintenanceBase={rail:15_000,coach:10_000,freight:20_000,shipping:25_000}[businessType];
+    const licenseBase={rail:100_000,coach:80_000,freight:120_000,shipping:150_000}[businessType];
+    const licenseStep={rail:20_000,coach:15_000,freight:25_000,shipping:30_000}[businessType];
     const garageCapacity=businessType==='rail'?ensureTrainGarage(g,u).capacity:1;
-    maintenance=Math.round(maintenanceBase*(1+(level-1)*0.35)+(businessType==='rail'?(garageCapacity-1)*2_500:0));
-    insurance=Math.round(maintenanceBase*0.60+maintenanceBase*(level-1)*0.20+(businessType==='rail'?(garageCapacity-1)*1_500:0));
-    license=licenseBase+level*licenseStep+(businessType==='rail'?(garageCapacity-1)*10_000:0);
-    scaleText=businessType==='rail'?`Lv.${level}／車庫 ${garageCapacity} 格`:`Lv.${level}`;
+    const berthCapacity=businessType==='shipping'?shippingBerthStatus(g,u).capacity:1;
+    const expansionCount=businessType==='rail'?garageCapacity-1:businessType==='shipping'?Math.max(0,berthCapacity-2):0;
+    maintenance=Math.round(maintenanceBase*(1+(level-1)*0.35)+expansionCount*2_500);
+    insurance=Math.round(maintenanceBase*0.60+maintenanceBase*(level-1)*0.20+expansionCount*1_500);
+    license=licenseBase+level*licenseStep+expansionCount*10_000;
+    scaleText=businessType==='rail'?`Lv.${level}／車庫 ${garageCapacity} 格`:businessType==='shipping'?`Lv.${level}／船位 ${berthCapacity} 格`:`Lv.${level}`;
   }
+  if(![maintenance,insurance,license].every(Number.isSafeInteger)) throw new Error('交通事業維持費設定異常，營運已取消');
   const billingActive=Boolean(company?.upkeep_day&&company?.license_expires_at);
   const dailyDue=billingActive&&company.upkeep_day!==day;
   const licenseDue=billingActive&&Number(company.license_expires_at)<=now;

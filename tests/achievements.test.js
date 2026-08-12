@@ -647,6 +647,14 @@ test('交通維修保險牌照、每日遞減及高額賭局抽成完整',()=>{
   assert.match(source,/ALTER TABLE airline_companies ADD COLUMN license_expires_at INTEGER/);
   assert.match(source,/ALTER TABLE transport_business_companies ADD COLUMN upkeep_day TEXT/);
   assert.match(source,/ALTER TABLE transport_business_companies ADD COLUMN license_expires_at INTEGER/);
+  assert.match(source,/maintenanceBase=\{rail:15_000,coach:10_000,freight:20_000,shipping:25_000\}/);
+  assert.match(source,/licenseBase=\{rail:100_000,coach:80_000,freight:120_000,shipping:150_000\}/);
+  assert.match(source,/businessType==='shipping'\?shippingBerthStatus\(g,u\)\.capacity:1/);
+  assert.match(source,/交通事業維持費設定異常，營運已取消/);
+  const walletChange=source.match(/function changeBalanceUnlocked\([\s\S]+?\n\}/)?.[0]||'';
+  assert.match(walletChange,/Number\.isSafeInteger\(current\)/);
+  assert.match(walletChange,/Number\.isSafeInteger\(delta\)/);
+  assert.match(walletChange,/Number\.isSafeInteger\(next\)/);
 
   const diminishingBlock=source.match(/function transportDailyRevenueMultiplier\(completedToday\) \{[\s\S]+?\n\}/)?.[0]||'';
   const diminishing=new Function('TRANSPORT_DAILY_FULL_REVENUE_RUNS','TRANSPORT_DAILY_REVENUE_STEP','TRANSPORT_DAILY_MIN_REVENUE_MULTIPLIER',`${diminishingBlock};return transportDailyRevenueMultiplier;`)(3,0.05,0.50);
