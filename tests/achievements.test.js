@@ -240,6 +240,8 @@ test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲�
   assert.match(js,/targetCameraYaw=Math\.atan2\(movementDirection\.x,movementDirection\.z\)/);
   assert.match(js,/cameraYaw\+=angleDelta\(cameraYaw,targetCameraYaw\)\*turnEase/);
   assert.match(js,/function pointCamera\(target\)/);
+  assert.match(js,/turnEase=1-Math\.pow\(\.38,dt\)/);
+  assert.match(js,/followEase=1-Math\.pow\(\.06,dt\)/);
   assert.match(loader,/getContext\('webgl2'/);
   assert.match(loader,/import\('\/heist-3d\.js/);
   assert.match(loader,/heist\.js/);

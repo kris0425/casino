@@ -4,14 +4,14 @@ function loadFallback(reason){
   mode.classList.add('fallback');
   console.warn('3D 模式無法啟動，已切換 2D：',reason);
   const script=document.createElement('script');
-  script.src='/heist.js?v=20260812.5';
+  script.src='/heist.js?v=20260812.6';
   document.body.append(script);
 }
 try {
   const canvas=document.querySelector('#heistCanvas');
   const probe=canvas.getContext('webgl2',{failIfMajorPerformanceCaveat:true});
   if(!probe) throw new Error('裝置不支援 WebGL 2');
-  const module=await import('/heist-3d.js?v=20260812.5');
+  const module=await import('/heist-3d.js?v=20260812.6');
   await module.start3DHeist();
   mode.textContent='3D 模式';
   document.querySelector('#gameFrame').classList.add('mode-3d');
