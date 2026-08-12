@@ -227,6 +227,8 @@ test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲�
   assert.match(js,/requestAnimationFrame\(loop\)/);
   assert.match(js,/state\.vault\.open/);
   assert.match(js,/state\.lootValue>=500/);
+  assert.match(js,/const safeRoute=/);
+  assert.match(js,/建議路徑/);
   assert.match(css,/\.game-frame/);
   assert.match(css,/\.touch-controls/);
 });
