@@ -19,15 +19,15 @@ try{
     await page.goto('https://visual.local/heist',{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>document.querySelector('#renderMode')?.textContent==='3D 模式',{timeout:15_000});
     await page.click('#startGame');await page.waitForTimeout(120);
-    const position=()=>page.evaluate(()=>{const canvas=document.querySelector('#heistCanvas');return{x:Number(canvas?.dataset.playerX),y:Number(canvas?.dataset.playerY),cameraX:Number(canvas?.dataset.cameraX),cameraZ:Number(canvas?.dataset.cameraZ),cameraYaw:Number(canvas?.dataset.cameraYaw)};});
-    const before=await position();await page.keyboard.down('ArrowUp');await page.waitForTimeout(120);await page.keyboard.up('ArrowUp');const afterUp=await position();
-    await page.keyboard.down('ArrowRight');await page.waitForTimeout(180);await page.keyboard.up('ArrowRight');const afterRight=await position();await page.waitForTimeout(1000);
+    const position=()=>page.evaluate(()=>{const canvas=document.querySelector('#heistCanvas');return{x:Number(canvas?.dataset.playerX),y:Number(canvas?.dataset.playerY),model:canvas?.dataset.playerModel,animation:canvas?.dataset.playerAnimation,cameraX:Number(canvas?.dataset.cameraX),cameraZ:Number(canvas?.dataset.cameraZ),cameraYaw:Number(canvas?.dataset.cameraYaw)};});
+    const before=await position();await page.keyboard.down('ArrowUp');await page.waitForTimeout(120);const afterUp=await position();await page.keyboard.up('ArrowUp');
+    await page.keyboard.down('ArrowRight');await page.waitForTimeout(180);const afterRight=await position();await page.keyboard.up('ArrowRight');await page.waitForTimeout(1000);
     const report=await page.evaluate(()=>({mode:document.querySelector('#renderMode')?.textContent,webgl:Boolean(document.querySelector('#heistCanvas')?.getContext('webgl2')),overlayHidden:document.querySelector('#gameOverlay')?.hidden,body:document.body.scrollWidth,viewport:document.documentElement.clientWidth}));
     const cameraMoved=Math.abs(afterRight.cameraX-before.cameraX)>.01||Math.abs(afterRight.cameraZ-before.cameraZ)>.01,cameraTurnGentle=Math.abs(afterRight.cameraYaw)>.01&&Math.abs(afterRight.cameraYaw)<.45;
-    report.controls={before,afterUp,afterRight,screenUp:afterUp.y>before.y,screenRight:afterRight.x<afterUp.x,cameraMoved,cameraTurnGentle};
+    report.controls={before,afterUp,afterRight,screenUp:afterUp.y>before.y,screenRight:afterRight.x<afterUp.x,cameraMoved,cameraTurnGentle,operatorModel:afterRight.model==='obsidian-operator',walkAnimation:afterUp.animation==='walk'};
     await page.screenshot({path:resolve(outputRoot,`${sample.name}.png`),fullPage:true});
     console.log(`${sample.name}: ${JSON.stringify({...report,errors})}`);
-    if(report.mode!=='3D 模式'||!report.webgl||!report.overlayHidden||report.body>report.viewport||!report.controls.screenUp||!report.controls.screenRight||!report.controls.cameraMoved||!report.controls.cameraTurnGentle||errors.length)throw new Error(`${sample.name} visual check failed`);
+    if(report.mode!=='3D 模式'||!report.webgl||!report.overlayHidden||report.body>report.viewport||!report.controls.screenUp||!report.controls.screenRight||!report.controls.cameraMoved||!report.controls.cameraTurnGentle||!report.controls.operatorModel||!report.controls.walkAnimation||errors.length)throw new Error(`${sample.name} visual check failed`);
     await page.close();
   }
   console.log(`3D heist visual checks saved to ${outputRoot}`);

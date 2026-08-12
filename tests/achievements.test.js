@@ -242,6 +242,10 @@ test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲�
   assert.match(js,/function pointCamera\(target\)/);
   assert.match(js,/turnEase=1-Math\.pow\(\.38,dt\)/);
   assert.match(js,/followEase=1-Math\.pow\(\.06,dt\)/);
+  assert.match(js,/function createHeistOperator\(\)/);
+  assert.match(js,/new THREE\.CapsuleGeometry/);
+  assert.match(js,/function animatePlayer\(dt\)/);
+  assert.match(js,/playerAnimation=sprinting\?'run':moving\?'walk':'idle'/);
   assert.match(loader,/getContext\('webgl2'/);
   assert.match(loader,/import\('\/heist-3d\.js/);
   assert.match(loader,/heist\.js/);

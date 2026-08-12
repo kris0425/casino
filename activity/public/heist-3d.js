@@ -9,7 +9,7 @@ const walls=[
 const routePoints=[[95,520],[95,115],[95,320],[725,320],[725,145],[790,520]];
 const state={running:false,ended:false,keys:new Set(),player:{x:95,y:520,r:15},guards:[],cameras:[],terminal:{x:130,y:115,done:false},vault:{x:725,y:145,open:false},exit:{x:790,y:520},loot:[],heat:12,lootValue:0,time:180,interact:null,interactProgress:0,cameraDisabledUntil:0,last:0};
 let scene,camera,renderer,clock,playerMesh,terminalMesh,vaultMesh,exitMesh,routeLine,animation=0,toastTimer;
-let cameraYaw=0,targetCameraYaw=0,lastMovementInput='';
+let cameraYaw=0,targetCameraYaw=0,lastMovementInput='',playerAnimationTime=0;
 const guardMeshes=[],cameraMeshes=[],lootMeshes=[];
 const movementForward=new THREE.Vector3(),movementRight=new THREE.Vector3(),movementDirection=new THREE.Vector3(),cameraFacing=new THREE.Vector3(),cameraLookAt=new THREE.Vector3();
 
@@ -25,6 +25,24 @@ function mesh(geometry,mat,x=0,y=0,z=0){const item=new THREE.Mesh(geometry,mat);
 function groupActor(color){
   const group=new THREE.Group(),body=new THREE.Mesh(new THREE.CylinderGeometry(.18,.23,.58,10),material(color,{metalness:.35,roughness:.45})),head=new THREE.Mesh(new THREE.SphereGeometry(.15,12,8),material(0xf1c4a8));
   body.position.y=.34;head.position.y=.75;body.castShadow=head.castShadow=true;group.add(body,head);scene.add(group);return group;
+}
+function actorPart(parent,geometry,mat,x,y,z){const item=new THREE.Mesh(geometry,mat);item.position.set(x,y,z);item.castShadow=true;item.receiveShadow=true;parent.add(item);return item;}
+function createHeistOperator(){
+  const group=new THREE.Group(),rig=new THREE.Group(),coat=material(0x12131c,{metalness:.42,roughness:.36}),armor=material(0x24293a,{metalness:.65,roughness:.28}),cloth=material(0x191625,{roughness:.75}),skin=material(0xd4a58d,{roughness:.7}),visor=material(0x36e5ca,{metalness:.82,roughness:.16,emissive:0x075b53}),trim=material(0x8b4ee8,{metalness:.55,roughness:.3,emissive:0x291455});
+  group.name='黑曜行動員';group.scale.setScalar(1.3);group.add(rig);scene.add(group);
+  actorPart(rig,new THREE.BoxGeometry(.4,.43,.23),coat,0,.68,0);actorPart(rig,new THREE.BoxGeometry(.34,.22,.25),armor,0,.73,-.025);actorPart(rig,new THREE.BoxGeometry(.11,.08,.025),visor,0,.74,-.15);
+  const belt=actorPart(rig,new THREE.BoxGeometry(.43,.09,.25),armor,0,.46,0);actorPart(belt,new THREE.BoxGeometry(.08,.055,.03),trim,0,0,-.145);
+  actorPart(rig,new THREE.ConeGeometry(.27,.48,4),cloth,0,.31,.06).rotation.y=Math.PI/4;
+  const head=actorPart(rig,new THREE.SphereGeometry(.16,14,10),skin,0,1.02,0);head.scale.z=.92;actorPart(rig,new THREE.SphereGeometry(.166,14,8,0,Math.PI*2,0,Math.PI*.56),cloth,0,1.055,.005);actorPart(rig,new THREE.BoxGeometry(.27,.085,.035),visor,0,1.035,-.145);
+  const backpack=actorPart(rig,new THREE.BoxGeometry(.27,.34,.14),armor,0,.7,.17);actorPart(backpack,new THREE.BoxGeometry(.07,.24,.025),trim,0,0,.085);
+  function limb(side){const arm=new THREE.Group();arm.position.set(side*.25,.84,0);rig.add(arm);actorPart(arm,new THREE.CapsuleGeometry(.065,.25,4,8),coat,0,-.16,0);actorPart(arm,new THREE.BoxGeometry(.11,.08,.12),armor,0,-.34,-.01);const leg=new THREE.Group();leg.position.set(side*.105,.43,0);rig.add(leg);actorPart(leg,new THREE.CapsuleGeometry(.075,.3,4,8),cloth,0,-.22,0);actorPart(leg,new THREE.BoxGeometry(.14,.09,.25),armor,0,-.44,-.055);return{arm,leg};}
+  const left=limb(-1),right=limb(1);group.userData={rig,leftArm:left.arm,rightArm:right.arm,leftLeg:left.leg,rightLeg:right.leg,model:'obsidian-operator'};return group;
+}
+function animatePlayer(dt){
+  const moving=state.running&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d'].some(key=>state.keys.has(key)),sprinting=moving&&state.keys.has('Shift'),pace=sprinting?12:moving?8:2.2,swing=moving?(sprinting?.72:.48):.035;
+  playerAnimationTime+=dt*pace;const cycle=Math.sin(playerAnimationTime),rig=playerMesh.userData.rig;rig.position.y=moving?Math.abs(Math.cos(playerAnimationTime*2))*(sprinting?.035:.022):Math.sin(playerAnimationTime)*.012;
+  playerMesh.userData.leftArm.rotation.x=cycle*swing;playerMesh.userData.rightArm.rotation.x=-cycle*swing;playerMesh.userData.leftLeg.rotation.x=-cycle*swing*.75;playerMesh.userData.rightLeg.rotation.x=cycle*swing*.75;rig.rotation.z=moving?Math.sin(playerAnimationTime)*.018:Math.sin(playerAnimationTime*.5)*.006;
+  renderer.domElement.dataset.playerAnimation=sprinting?'run':moving?'walk':'idle';
 }
 function visionCone(color=0xf05270){
   const geometry=new THREE.ConeGeometry(1.25,2.6,28,1,true,0,Math.PI*.32),mat=new THREE.MeshBasicMaterial({color,transparent:true,opacity:.18,side:THREE.DoubleSide,depthWrite:false});
@@ -47,7 +65,7 @@ function createScene(canvas){
   walls.forEach(([x,y,w,h])=>{const center=world((x+w/2)*TILE,(y+h/2)*TILE,.75);mesh(new THREE.BoxGeometry(w,1.5,h),material(0x352743,{metalness:.35,roughness:.38}),center.x,center.y,center.z);});
   const routeGeometry=new THREE.BufferGeometry().setFromPoints(routePoints.map(([x,y])=>world(x,y,.035)));routeLine=new THREE.Line(routeGeometry,new THREE.LineBasicMaterial({color:0xf7ca57,transparent:true,opacity:.75}));scene.add(routeLine);
   createCasinoTable(-2.5,-2.5);createCasinoTable(-.5,2.8);createCasinoTable(3.1,2.5);
-  playerMesh=groupActor(0x39d9af);
+  playerMesh=createHeistOperator();
   terminalMesh=mesh(new THREE.BoxGeometry(.6,.8,.32),material(0x873dcc,{metalness:.55,roughness:.25,emissive:0x2b0a47}));
   vaultMesh=mesh(new THREE.CylinderGeometry(.55,.55,.32,28),material(0xa98a42,{metalness:.82,roughness:.24,emissive:0x2b2108}));vaultMesh.rotation.x=Math.PI/2;
   exitMesh=mesh(new THREE.TorusGeometry(.5,.1,10,28),material(0x4cbaf1,{metalness:.3,roughness:.3,emissive:0x12496a}));exitMesh.rotation.x=Math.PI/2;
@@ -55,7 +73,7 @@ function createScene(canvas){
 }
 function reset(){
   Object.assign(state,{running:false,ended:false,player:{x:95,y:520,r:15},terminal:{x:130,y:115,done:false},vault:{x:725,y:145,open:false},exit:{x:790,y:520},lootValue:0,heat:12,time:180,interact:null,interactProgress:0,cameraDisabledUntil:0,last:0});state.keys.clear();
-  cameraYaw=0;targetCameraYaw=0;lastMovementInput='';
+  cameraYaw=0;targetCameraYaw=0;lastMovementInput='';playerAnimationTime=0;
   state.loot=[{x:745,y:215,taken:false,value:220},{x:690,y:230,taken:false,value:260},{x:770,y:265,taken:false,value:340},{x:635,y:170,taken:false,value:180},{x:590,y:405,taken:false,value:140},{x:735,y:465,taken:false,value:170}];
   state.guards=[{x:295,y:180,dx:1,dy:0,min:265,max:420,axis:'x',speed:72},{x:555,y:130,dx:0,dy:1,min:95,max:345,axis:'y',speed:68},{x:330,y:465,dx:1,dy:0,min:115,max:610,axis:'x',speed:88},{x:760,y:390,dx:0,dy:1,min:340,max:510,axis:'y',speed:66}];
   state.cameras=[{x:175,y:310,angle:.2},{x:480,y:110,angle:1.1},{x:610,y:300,angle:2.7}];
@@ -67,7 +85,7 @@ function reset(){
 }
 function syncMeshes(){
   playerMesh.position.copy(world(state.player.x,state.player.y,0));terminalMesh.position.copy(world(state.terminal.x,state.terminal.y,.4));vaultMesh.position.copy(world(state.vault.x,state.vault.y,.55));exitMesh.position.copy(world(state.exit.x,state.exit.y,.08));
-  renderer.domElement.dataset.playerX=String(state.player.x);renderer.domElement.dataset.playerY=String(state.player.y);renderer.domElement.dataset.cameraX=String(camera.position.x);renderer.domElement.dataset.cameraZ=String(camera.position.z);renderer.domElement.dataset.cameraYaw=String(cameraYaw);
+  renderer.domElement.dataset.playerX=String(state.player.x);renderer.domElement.dataset.playerY=String(state.player.y);renderer.domElement.dataset.playerModel=playerMesh.userData.model;renderer.domElement.dataset.cameraX=String(camera.position.x);renderer.domElement.dataset.cameraZ=String(camera.position.z);renderer.domElement.dataset.cameraYaw=String(cameraYaw);
   terminalMesh.material.color.setHex(state.terminal.done?0x43bd94:0x873dcc);vaultMesh.material.color.setHex(state.vault.open?0xe0b952:0x6b5b40);exitMesh.material.emissive.setHex(state.lootValue>=500?0x136e9b:0x152231);
   state.guards.forEach((guard,index)=>{const actor=guardMeshes[index],angle=guard.axis==='x'?(guard.dx>0?-Math.PI/2:Math.PI/2):(guard.dy>0?Math.PI:0);actor.position.copy(world(guard.x,guard.y,0));actor.rotation.y=angle;});
   state.cameras.forEach((item,index)=>{const actor=cameraMeshes[index];actor.position.copy(world(item.x,item.y,.55));actor.rotation.y=-item.angle-Math.PI/2;actor.visible=Date.now()>state.cameraDisabledUntil;});
@@ -89,7 +107,7 @@ function move(dt){
   if(movementInput!==lastMovementInput){camera.getWorldDirection(movementForward);movementForward.y=0;movementForward.normalize();movementRight.crossVectors(movementForward,camera.up).normalize();movementDirection.copy(movementForward).multiplyScalar(vertical).addScaledVector(movementRight,horizontal).normalize();targetCameraYaw=Math.atan2(movementDirection.x,movementDirection.z);lastMovementInput=movementInput;}
   const sprint=state.keys.has('Shift'),speed=(sprint?215:145)*dt,x=movementDirection.x*speed,y=movementDirection.z*speed;
   const nextX=state.player.x+x,nextY=state.player.y+y;if(!blocked(nextX,state.player.y))state.player.x=nextX;if(!blocked(state.player.x,nextY))state.player.y=nextY;
-  playerMesh.rotation.y=targetCameraYaw;if(sprint)state.heat=clamp(state.heat+dt*1.7,0,100);
+  playerMesh.rotation.y=targetCameraYaw+Math.PI;if(sprint)state.heat=clamp(state.heat+dt*1.7,0,100);
 }
 function updateGuards(dt){state.guards.forEach(guard=>{if(guard.axis==='x'){guard.x+=guard.dx*guard.speed*dt;if(guard.x<guard.min||guard.x>guard.max){guard.dx*=-1;guard.x=clamp(guard.x,guard.min,guard.max);}}else{guard.y+=guard.dy*guard.speed*dt;if(guard.y<guard.min||guard.y>guard.max){guard.dy*=-1;guard.y=clamp(guard.y,guard.min,guard.max);}}});}
 function detect(){let danger=0;state.guards.forEach(guard=>{const d=distance(state.player,guard),direction=guard.axis==='x'?(guard.dx>0?0:Math.PI):(guard.dy>0?Math.PI/2:-Math.PI/2),playerAngle=Math.atan2(state.player.y-guard.y,state.player.x-guard.x),difference=Math.abs(Math.atan2(Math.sin(playerAngle-direction),Math.cos(playerAngle-direction)));if(d<42)danger+=1.9;if(d<125&&difference<.38)danger+=.28;});if(Date.now()>state.cameraDisabledUntil)state.cameras.forEach(item=>{const d=distance(state.player,item),playerAngle=Math.atan2(state.player.y-item.y,state.player.x-item.x),difference=Math.abs(Math.atan2(Math.sin(playerAngle-item.angle),Math.cos(playerAngle-item.angle)));if(d<145&&difference<.39)danger+=.18;});if(danger){state.heat=clamp(state.heat+danger,0,100);if(state.heat>=100)end(false,'你被保全包圍了');}}
@@ -106,7 +124,7 @@ function pointCamera(target){cameraFacing.set(Math.sin(cameraYaw),0,Math.cos(cam
 function snapCamera(){const target=cameraTarget();cameraYaw=targetCameraYaw;camera.position.copy(cameraDesired());pointCamera(target);}
 function updateCamera(dt){const target=cameraTarget(),turnEase=1-Math.pow(.38,dt),followEase=1-Math.pow(.06,dt);cameraYaw+=angleDelta(cameraYaw,targetCameraYaw)*turnEase;camera.position.lerp(cameraDesired(),followEase);pointCamera(target);}
 function end(success,message){state.running=false;state.ended=true;cancelAnimationFrame(animation);const overlay=$('#gameOverlay');overlay.hidden=false;overlay.innerHTML=`<span class="eyebrow">${success?'3D EXTRACTION COMPLETE':'RUN LOST'}</span><h1>${success?'成功撤離':'行動失敗'}</h1><p>${message}<br>本局戰利品：${state.lootValue.toLocaleString('zh-TW')} 分　警戒：${Math.round(state.heat)}%　評等：${success?rank():'—'}<br>獨立練習成績，不會改變 Discord 帳號。</p><button id="restartGame" type="button">再來一局 <span>↻</span></button>`;$('#restartGame').onclick=()=>{reset();overlay.hidden=true;start();};updateHud();}
-function loop(){if(!state.running)return;const dt=Math.min(.05,clock.getDelta());state.time-=dt;if(state.time<=0){end(false,'警方封鎖了所有出口');return;}move(dt);updateGuards(dt);detect();checkLoot();updateInteraction(dt);updateCamera(dt);syncMeshes();updateHud();renderer.render(scene,camera);animation=requestAnimationFrame(loop);}
+function loop(){if(!state.running)return;const dt=Math.min(.05,clock.getDelta());state.time-=dt;if(state.time<=0){end(false,'警方封鎖了所有出口');return;}move(dt);animatePlayer(dt);updateGuards(dt);detect();checkLoot();updateInteraction(dt);updateCamera(dt);syncMeshes();updateHud();renderer.render(scene,camera);animation=requestAnimationFrame(loop);}
 function start(){state.running=true;state.ended=false;clock.start();toast('3D 行動開始：沿金色路徑前進');animation=requestAnimationFrame(loop);}
 function bindControls(){
   document.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','Shift',' '].includes(event.key)){event.preventDefault();state.keys.add(event.key);}});document.addEventListener('keyup',event=>state.keys.delete(event.key));
