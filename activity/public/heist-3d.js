@@ -9,8 +9,9 @@ const walls=[
 const routePoints=[[95,520],[95,115],[95,320],[725,320],[725,145],[790,520]];
 const state={running:false,ended:false,keys:new Set(),player:{x:95,y:520,r:15},guards:[],cameras:[],terminal:{x:130,y:115,done:false},vault:{x:725,y:145,open:false},exit:{x:790,y:520},loot:[],heat:12,lootValue:0,time:180,interact:null,interactProgress:0,cameraDisabledUntil:0,last:0};
 let scene,camera,renderer,clock,playerMesh,terminalMesh,vaultMesh,exitMesh,routeLine,animation=0,toastTimer;
+let cameraYaw=0,targetCameraYaw=0,lastMovementInput='';
 const guardMeshes=[],cameraMeshes=[],lootMeshes=[];
-const movementForward=new THREE.Vector3(),movementRight=new THREE.Vector3(),movementDirection=new THREE.Vector3();
+const movementForward=new THREE.Vector3(),movementRight=new THREE.Vector3(),movementDirection=new THREE.Vector3(),cameraFacing=new THREE.Vector3(),cameraLookAt=new THREE.Vector3();
 
 const world=(x,y,height=0)=>new THREE.Vector3(x/TILE-9,height,y/TILE-6);
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -54,6 +55,7 @@ function createScene(canvas){
 }
 function reset(){
   Object.assign(state,{running:false,ended:false,player:{x:95,y:520,r:15},terminal:{x:130,y:115,done:false},vault:{x:725,y:145,open:false},exit:{x:790,y:520},lootValue:0,heat:12,time:180,interact:null,interactProgress:0,cameraDisabledUntil:0,last:0});state.keys.clear();
+  cameraYaw=0;targetCameraYaw=0;lastMovementInput='';
   state.loot=[{x:745,y:215,taken:false,value:220},{x:690,y:230,taken:false,value:260},{x:770,y:265,taken:false,value:340},{x:635,y:170,taken:false,value:180},{x:590,y:405,taken:false,value:140},{x:735,y:465,taken:false,value:170}];
   state.guards=[{x:295,y:180,dx:1,dy:0,min:265,max:420,axis:'x',speed:72},{x:555,y:130,dx:0,dy:1,min:95,max:345,axis:'y',speed:68},{x:330,y:465,dx:1,dy:0,min:115,max:610,axis:'x',speed:88},{x:760,y:390,dx:0,dy:1,min:340,max:510,axis:'y',speed:66}];
   state.cameras=[{x:175,y:310,angle:.2},{x:480,y:110,angle:1.1},{x:610,y:300,angle:2.7}];
@@ -65,7 +67,7 @@ function reset(){
 }
 function syncMeshes(){
   playerMesh.position.copy(world(state.player.x,state.player.y,0));terminalMesh.position.copy(world(state.terminal.x,state.terminal.y,.4));vaultMesh.position.copy(world(state.vault.x,state.vault.y,.55));exitMesh.position.copy(world(state.exit.x,state.exit.y,.08));
-  renderer.domElement.dataset.playerX=String(state.player.x);renderer.domElement.dataset.playerY=String(state.player.y);
+  renderer.domElement.dataset.playerX=String(state.player.x);renderer.domElement.dataset.playerY=String(state.player.y);renderer.domElement.dataset.cameraX=String(camera.position.x);renderer.domElement.dataset.cameraZ=String(camera.position.z);renderer.domElement.dataset.cameraYaw=String(cameraYaw);
   terminalMesh.material.color.setHex(state.terminal.done?0x43bd94:0x873dcc);vaultMesh.material.color.setHex(state.vault.open?0xe0b952:0x6b5b40);exitMesh.material.emissive.setHex(state.lootValue>=500?0x136e9b:0x152231);
   state.guards.forEach((guard,index)=>{const actor=guardMeshes[index],angle=guard.axis==='x'?(guard.dx>0?-Math.PI/2:Math.PI/2):(guard.dy>0?Math.PI:0);actor.position.copy(world(guard.x,guard.y,0));actor.rotation.y=angle;});
   state.cameras.forEach((item,index)=>{const actor=cameraMeshes[index];actor.position.copy(world(item.x,item.y,.55));actor.rotation.y=-item.angle-Math.PI/2;actor.visible=Date.now()>state.cameraDisabledUntil;});
@@ -82,13 +84,12 @@ function move(dt){
   if(state.keys.has('ArrowDown')||state.keys.has('s'))vertical-=1;
   if(state.keys.has('ArrowLeft')||state.keys.has('a'))horizontal-=1;
   if(state.keys.has('ArrowRight')||state.keys.has('d'))horizontal+=1;
-  if(!horizontal&&!vertical)return;
-  camera.getWorldDirection(movementForward);movementForward.y=0;movementForward.normalize();
-  movementRight.crossVectors(movementForward,camera.up).normalize();
-  movementDirection.copy(movementForward).multiplyScalar(vertical).addScaledVector(movementRight,horizontal).normalize();
+  if(!horizontal&&!vertical){lastMovementInput='';return;}
+  const movementInput=`${horizontal}:${vertical}`;
+  if(movementInput!==lastMovementInput){camera.getWorldDirection(movementForward);movementForward.y=0;movementForward.normalize();movementRight.crossVectors(movementForward,camera.up).normalize();movementDirection.copy(movementForward).multiplyScalar(vertical).addScaledVector(movementRight,horizontal).normalize();targetCameraYaw=Math.atan2(movementDirection.x,movementDirection.z);lastMovementInput=movementInput;}
   const sprint=state.keys.has('Shift'),speed=(sprint?215:145)*dt,x=movementDirection.x*speed,y=movementDirection.z*speed;
   const nextX=state.player.x+x,nextY=state.player.y+y;if(!blocked(nextX,state.player.y))state.player.x=nextX;if(!blocked(state.player.x,nextY))state.player.y=nextY;
-  playerMesh.rotation.y=Math.atan2(x,y);if(sprint)state.heat=clamp(state.heat+dt*1.7,0,100);
+  playerMesh.rotation.y=targetCameraYaw;if(sprint)state.heat=clamp(state.heat+dt*1.7,0,100);
 }
 function updateGuards(dt){state.guards.forEach(guard=>{if(guard.axis==='x'){guard.x+=guard.dx*guard.speed*dt;if(guard.x<guard.min||guard.x>guard.max){guard.dx*=-1;guard.x=clamp(guard.x,guard.min,guard.max);}}else{guard.y+=guard.dy*guard.speed*dt;if(guard.y<guard.min||guard.y>guard.max){guard.dy*=-1;guard.y=clamp(guard.y,guard.min,guard.max);}}});}
 function detect(){let danger=0;state.guards.forEach(guard=>{const d=distance(state.player,guard),direction=guard.axis==='x'?(guard.dx>0?0:Math.PI):(guard.dy>0?Math.PI/2:-Math.PI/2),playerAngle=Math.atan2(state.player.y-guard.y,state.player.x-guard.x),difference=Math.abs(Math.atan2(Math.sin(playerAngle-direction),Math.cos(playerAngle-direction)));if(d<42)danger+=1.9;if(d<125&&difference<.38)danger+=.28;});if(Date.now()>state.cameraDisabledUntil)state.cameras.forEach(item=>{const d=distance(state.player,item),playerAngle=Math.atan2(state.player.y-item.y,state.player.x-item.x),difference=Math.abs(Math.atan2(Math.sin(playerAngle-item.angle),Math.cos(playerAngle-item.angle)));if(d<145&&difference<.39)danger+=.18;});if(danger){state.heat=clamp(state.heat+danger,0,100);if(state.heat>=100)end(false,'你被保全包圍了');}}
@@ -99,9 +100,11 @@ function cancelInteract(){state.interactProgress=0;$('#interactProgress').style.
 function finishInteract(){const target=state.interact;if(!target)return;if(target.type==='terminal'){state.terminal.done=true;state.cameraDisabledUntil=Date.now()+18000;state.heat=clamp(state.heat-12,0,100);toast('攝影機已停擺 18 秒');}if(target.type==='vault'){state.vault.open=true;state.heat=clamp(state.heat+20,0,100);state.guards.forEach(guard=>guard.speed+=20);toast('金庫已開啟，快拿戰利品！');}if(target.type==='exit')end(true,'成功撤離');cancelInteract();}
 function updateInteraction(dt){showInteract();if(!state.interact||!state.keys.has(' ')||!state.running){if(!state.keys.has(' '))cancelInteract();return;}state.interactProgress+=dt/(state.interact.type==='exit'?1:1.5);$('#interactProgress').style.width=`${clamp(state.interactProgress*100,0,100)}%`;if(state.interactProgress>=1)finishInteract();}
 function cameraTarget(){return world(state.player.x,state.player.y,0);}
-function cameraDesired(){return cameraTarget().clone().add(new THREE.Vector3(0,5.8,-3.8));}
-function snapCamera(){const target=cameraTarget();camera.position.copy(cameraDesired());camera.lookAt(target.x,target.y+.2,target.z+.35);}
-function updateCamera(dt){const target=cameraTarget();camera.position.lerp(cameraDesired(),1-Math.pow(.001,dt));camera.lookAt(target.x,target.y+.2,target.z+.35);}
+function angleDelta(from,to){return Math.atan2(Math.sin(to-from),Math.cos(to-from));}
+function cameraDesired(){const target=cameraTarget();cameraFacing.set(Math.sin(cameraYaw),0,Math.cos(cameraYaw));return target.clone().addScaledVector(cameraFacing,-3.8).add(new THREE.Vector3(0,5.8,0)).clamp(new THREE.Vector3(-7.75,1,-4.75),new THREE.Vector3(7.75,8,4.75));}
+function pointCamera(target){cameraFacing.set(Math.sin(cameraYaw),0,Math.cos(cameraYaw));cameraLookAt.copy(target).addScaledVector(cameraFacing,.7);camera.lookAt(cameraLookAt.x,cameraLookAt.y+.28,cameraLookAt.z);}
+function snapCamera(){const target=cameraTarget();cameraYaw=targetCameraYaw;camera.position.copy(cameraDesired());pointCamera(target);}
+function updateCamera(dt){const target=cameraTarget(),turnEase=1-Math.pow(.045,dt),followEase=1-Math.pow(.001,dt);cameraYaw+=angleDelta(cameraYaw,targetCameraYaw)*turnEase;camera.position.lerp(cameraDesired(),followEase);pointCamera(target);}
 function end(success,message){state.running=false;state.ended=true;cancelAnimationFrame(animation);const overlay=$('#gameOverlay');overlay.hidden=false;overlay.innerHTML=`<span class="eyebrow">${success?'3D EXTRACTION COMPLETE':'RUN LOST'}</span><h1>${success?'成功撤離':'行動失敗'}</h1><p>${message}<br>本局戰利品：${state.lootValue.toLocaleString('zh-TW')} 分　警戒：${Math.round(state.heat)}%　評等：${success?rank():'—'}<br>獨立練習成績，不會改變 Discord 帳號。</p><button id="restartGame" type="button">再來一局 <span>↻</span></button>`;$('#restartGame').onclick=()=>{reset();overlay.hidden=true;start();};updateHud();}
 function loop(){if(!state.running)return;const dt=Math.min(.05,clock.getDelta());state.time-=dt;if(state.time<=0){end(false,'警方封鎖了所有出口');return;}move(dt);updateGuards(dt);detect();checkLoot();updateInteraction(dt);updateCamera(dt);syncMeshes();updateHud();renderer.render(scene,camera);animation=requestAnimationFrame(loop);}
 function start(){state.running=true;state.ended=false;clock.start();toast('3D 行動開始：沿金色路徑前進');animation=requestAnimationFrame(loop);}
