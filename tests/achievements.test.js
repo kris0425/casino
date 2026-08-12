@@ -219,22 +219,16 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
 
 test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲大廳',()=>{
   const html=readFileSync(new URL('../activity/public/heist.html',import.meta.url),'utf8');
-  const css=readFileSync(new URL('../activity/public/heist.css',import.meta.url),'utf8');
-  const gameplayCss=readFileSync(new URL('../activity/public/heist-gameplay.css',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/heist-realtime.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/heist.js',import.meta.url),'utf8');
-  for(const id of ['backToGame','missionStage','stageImage','gamePanel','miniBoard','choicePanel','primaryAction','intelSheet']) assert.match(html,new RegExp(`id="${id}"`));
-  for(const file of ['command-lobby.png','infiltration.png','vault-breach.png','getaway.png']) {
-    const image=readFileSync(new URL(`../activity/public/heist/${file}`,import.meta.url));
-    assert.equal(image.subarray(1,4).toString(),'PNG');
-  }
+  for(const id of ['backToGame','heistCanvas','startGame','interactButton','sprintButton','lootValue','heatValue','timeValue']) assert.match(html,new RegExp(`id="${id}"`));
   assert.match(source,/\/heist':'heist\.html'/);
-  assert.match(js,/const stages=\[/);
-  for(const minigame of ['function startInfiltration\(\)','function startVault\(\)','function startEscape\(\)']) assert.match(js,new RegExp(minigame));
-  assert.match(js,/if\(state\.selected===null\)/);
-  assert.match(css,/@media\(min-width:601px\)/);
-  assert.match(gameplayCss,/\.timing-track/);
-  assert.match(gameplayCss,/\.hack-grid/);
-  assert.match(gameplayCss,/\.escape-track/);
+  for(const mechanic of [/function move\(dt\)/,/function updateGuards\(dt\)/,/function detect\(\)/,/function finishInteract\(\)/,/function checkLoot\(\)/]) assert.match(js,mechanic);
+  assert.match(js,/requestAnimationFrame\(loop\)/);
+  assert.match(js,/state\.vault\.open/);
+  assert.match(js,/state\.lootValue>=500/);
+  assert.match(css,/\.game-frame/);
+  assert.match(css,/\.touch-controls/);
 });
 
 test('網站載具 PVP 使用持久化房間與伺服器權威結算',()=>{

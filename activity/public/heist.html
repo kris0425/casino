@@ -4,76 +4,54 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#090710">
-  <title>賭場搶劫｜澳門最大賭場</title>
+  <title>黑曜至尊廳｜賭場搶劫</title>
   <link rel="icon" href="/favicon.svg">
-  <link rel="stylesheet" href="/heist.css?v=20260811.1">
-  <link rel="stylesheet" href="/heist-gameplay.css?v=20260812.1">
+  <link rel="stylesheet" href="/heist-realtime.css?v=20260812.2">
 </head>
 <body>
-  <div class="aurora aurora-a"></div><div class="aurora aurora-b"></div>
-  <main class="app-shell">
+  <main class="heist-shell">
     <header class="topbar">
       <a class="back-link" id="backToGame" href="/game" aria-label="返回遊戲大廳">‹</a>
-      <div class="brand"><span class="brand-mark">♠</span><div><strong>澳門最大賭場</strong><small>HEIST OPERATION · BETA</small></div></div>
-      <button class="intel-button" id="intelButton" type="button" aria-expanded="false">情報 <b>01</b></button>
+      <div class="brand"><span>♠</span><div><strong>澳門最大賭場</strong><small>BLACK OBSIDIAN HEIST · SOLO RUN</small></div></div>
+      <button class="help-button" id="helpButton" type="button">玩法</button>
     </header>
 
-    <section class="mission-head">
-      <div><span class="eyebrow">今晚目標</span><h1>黑曜至尊廳</h1><p>選擇行動方案，避開保全，帶著戰利品離開賭場。</p></div>
-      <div class="heat-card"><span>保全警戒</span><strong id="heatLabel">低</strong><div class="heat-track"><i id="heatBar"></i></div></div>
+    <section class="hud" aria-label="遊戲狀態">
+      <div><small>戰利品</small><strong id="lootValue">0</strong><span>分</span></div>
+      <div><small>警戒</small><strong id="heatValue">0%</strong><i class="heat-bar"><b id="heatBar"></b></i></div>
+      <div><small>撤離倒數</small><strong id="timeValue">03:00</strong><span id="objectiveLabel">尋找保全終端</span></div>
     </section>
 
-    <nav class="mission-steps" aria-label="搶劫流程">
-      <button class="step active" data-stage="0" type="button"><i>01</i><span>部署</span></button>
-      <button class="step" data-stage="1" type="button"><i>02</i><span>潛入</span></button>
-      <button class="step" data-stage="2" type="button"><i>03</i><span>金庫</span></button>
-      <button class="step" data-stage="3" type="button"><i>04</i><span>撤離</span></button>
-    </nav>
+    <section class="game-frame" id="gameFrame">
+      <canvas id="heistCanvas" width="900" height="600" aria-label="俯視角賭場搶劫地圖"></canvas>
+      <div class="game-overlay" id="gameOverlay"><span class="eyebrow">INFILTRATION READY</span><h1>黑曜至尊廳</h1><p>先駭入保全終端，再開啟金庫。戰利品越多，守衛與攝影機越容易發現你。</p><button id="startGame" type="button">開始行動 <span>→</span></button></div>
+      <div class="interact-card" id="interactCard" hidden><strong id="interactTitle">保全終端</strong><p id="interactText">按住互動以駭入。</p><i><b id="interactProgress"></b></i></div>
+    </section>
 
-    <section class="mission-stage" id="missionStage">
-      <img id="stageImage" src="/heist/command-lobby.png" alt="搶劫行動指揮大廳">
-      <div class="image-shade"></div>
-      <div class="stage-content">
-        <span class="stage-kicker" id="stageKicker">MISSION CONTROL</span>
-        <h2 id="stageTitle">部署行動隊伍</h2>
-        <p id="stageDescription">從三條進場路線中選一條；第一版僅為網頁互動展示，不會直接結算金幣。</p>
-        <div class="objective-card"><span>目前目標</span><strong id="stageObjective">挑選進場方案</strong><b id="stageReward">預估戰利品 280,000</b></div>
+    <section class="objective-panel">
+      <div><span class="eyebrow">CURRENT OPERATION</span><h2 id="objectiveTitle">入侵黑曜至尊廳</h2><p id="objectiveText">先找到左上方的保全終端，暫時關閉攝影機。</p></div>
+      <div class="run-stats"><span>🏅 <b id="runRank">—</b></span><small id="runHint">鍵盤 WASD／方向鍵，或使用下方方向鈕。</small></div>
+    </section>
+
+    <section class="touch-controls" aria-label="移動與互動控制">
+      <div class="d-pad">
+        <button data-direction="up" type="button" aria-label="向上移動">▲</button>
+        <button data-direction="left" type="button" aria-label="向左移動">◀</button>
+        <button data-direction="down" type="button" aria-label="向下移動">▼</button>
+        <button data-direction="right" type="button" aria-label="向右移動">▶</button>
       </div>
-      <div class="stage-index" id="stageIndex">01 / 04</div>
+      <div class="action-controls"><button id="sprintButton" type="button">疾跑</button><button id="interactButton" type="button" disabled>互動</button></div>
     </section>
 
-    <section class="game-panel" id="gamePanel" hidden aria-live="polite">
-      <div class="section-head"><div><span class="eyebrow" id="miniKicker">LIVE ACTION</span><h2 id="miniTitle">行動挑戰</h2></div><span id="miniProgress">0 / 0</span></div>
-      <p id="miniInstruction"></p>
-      <div class="mini-board" id="miniBoard"></div>
-      <div class="mini-controls" id="miniControls"></div>
-      <p class="mini-status" id="miniStatus"></p>
-    </section>
-
-    <section class="choice-panel" id="choicePanel" aria-label="行動選擇"></section>
-
-    <section class="crew-section">
-      <div class="section-head"><div><span class="eyebrow">CREW STATUS</span><h2>行動小隊</h2></div><span id="crewReadout">4 人就緒</span></div>
-      <div class="crew-list">
-        <article><span class="crew-icon purple">◈</span><div><strong>夜影駭客</strong><small>監控干擾 · 強項</small></div><b>100</b></article>
-        <article><span class="crew-icon gold">◆</span><div><strong>黃金開鎖手</strong><small>金庫破解 · 強項</small></div><b>100</b></article>
-        <article><span class="crew-icon cyan">✦</span><div><strong>幻影車手</strong><small>撤離加速 · 強項</small></div><b>100</b></article>
-        <article><span class="crew-icon rose">✹</span><div><strong>偽裝專家</strong><small>警戒降低 · 強項</small></div><b>100</b></article>
-      </div>
-    </section>
-
-    <footer class="action-dock">
-      <div><span id="actionHint">選擇進場方案</span><strong id="selectionSummary">尚未選擇</strong></div>
-      <button id="primaryAction" type="button">確認部署 <span>→</span></button>
-    </footer>
+    <section class="legend"><span><i class="you"></i>你</span><span><i class="guard"></i>守衛</span><span><i class="terminal"></i>保全終端</span><span><i class="vault"></i>金庫</span><span><i class="exit"></i>出口</span></section>
   </main>
-  <aside class="intel-sheet" id="intelSheet" aria-hidden="true">
-    <div class="sheet-head"><div><span class="eyebrow">LIVE INTEL</span><h2>保全情報</h2></div><button id="closeIntel" type="button" aria-label="關閉情報">×</button></div>
-    <article><span>⏱</span><div><strong>警衛巡邏</strong><p>西側走廊有 14 秒空檔。</p></div></article>
-    <article><span>◉</span><div><strong>監視器網路</strong><p>駭客可暫時干擾一個區域。</p></div></article>
-    <article><span>⚡</span><div><strong>撤離載具</strong><p>裝甲車已於後巷待命。</p></div></article>
+  <aside class="help-sheet" id="helpSheet" aria-hidden="true">
+    <div><span class="eyebrow">HOW TO PLAY</span><button id="closeHelp" type="button" aria-label="關閉玩法">×</button></div>
+    <h2>這不是答題遊戲</h2>
+    <ol><li>自由移動，避開守衛的紅色視野與攝影機。</li><li>在保全終端旁按住「互動」，使攝影機暫停。</li><li>到金庫旁解鎖；開啟後收集散落的戰利品。</li><li>自己決定何時前往右下角出口。貪心會讓警戒增加。</li></ol>
+    <p>這是獨立練習模式：不扣金幣、不扣體力，也不改變 Discord 搶劫結果。</p>
   </aside>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/heist.js?v=20260811.1" defer></script>
+  <script src="/heist.js?v=20260812.2" defer></script>
 </body>
 </html>
