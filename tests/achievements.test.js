@@ -220,17 +220,28 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
 test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲大廳',()=>{
   const html=readFileSync(new URL('../activity/public/heist.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../activity/public/heist-realtime.css',import.meta.url),'utf8');
-  const js=readFileSync(new URL('../activity/public/heist.js',import.meta.url),'utf8');
+  const css3d=readFileSync(new URL('../activity/public/heist-3d.css',import.meta.url),'utf8');
+  const loader=readFileSync(new URL('../activity/public/heist-loader.js',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/heist-3d.js',import.meta.url),'utf8');
+  const fallback=readFileSync(new URL('../activity/public/heist.js',import.meta.url),'utf8');
   for(const id of ['backToGame','heistCanvas','startGame','interactButton','sprintButton','lootValue','heatValue','timeValue']) assert.match(html,new RegExp(`id="${id}"`));
   assert.match(source,/\/heist':'heist\.html'/);
   for(const mechanic of [/function move\(dt\)/,/function updateGuards\(dt\)/,/function detect\(\)/,/function finishInteract\(\)/,/function checkLoot\(\)/]) assert.match(js,mechanic);
   assert.match(js,/requestAnimationFrame\(loop\)/);
   assert.match(js,/state\.vault\.open/);
   assert.match(js,/state\.lootValue>=500/);
-  assert.match(js,/const safeRoute=/);
-  assert.match(js,/建議路徑/);
+  assert.match(js,/new THREE\.WebGLRenderer/);
+  assert.match(js,/new THREE\.PerspectiveCamera/);
+  assert.match(js,/new THREE\.BoxGeometry/);
+  assert.match(js,/function updateCamera\(dt\)/);
+  assert.match(loader,/getContext\('webgl2'/);
+  assert.match(loader,/import\('\/heist-3d\.js/);
+  assert.match(loader,/heist\.js/);
+  assert.match(fallback,/const safeRoute=/);
+  assert.match(fallback,/建議路徑/);
   assert.match(css,/\.game-frame/);
   assert.match(css,/\.touch-controls/);
+  assert.match(css3d,/\.game-frame\.mode-3d/);
 });
 
 test('網站載具 PVP 使用持久化房間與伺服器權威結算',()=>{
