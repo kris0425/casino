@@ -9,7 +9,7 @@ const walls=[
 const routePoints=[[95,520],[95,115],[95,320],[725,320],[725,145],[790,520]];
 const state={running:false,ended:false,keys:new Set(),player:{x:95,y:520,r:15},guards:[],cameras:[],terminal:{x:130,y:115,done:false},vault:{x:725,y:145,open:false},exit:{x:790,y:520},loot:[],heat:12,lootValue:0,time:180,interact:null,interactProgress:0,cameraDisabledUntil:0,last:0};
 let scene,camera,renderer,clock,playerMesh,terminalMesh,vaultMesh,exitMesh,routeLine,animation=0,toastTimer;
-let cameraYaw=0,targetCameraYaw=0,lastMovementInput='',playerAnimationTime=0;
+let cameraYaw=0,targetCameraYaw=0,playerAnimationTime=0,cameraPointerId=null,cameraPointerX=0;
 const guardMeshes=[],cameraMeshes=[],lootMeshes=[];
 const movementForward=new THREE.Vector3(),movementRight=new THREE.Vector3(),movementDirection=new THREE.Vector3(),cameraFacing=new THREE.Vector3(),cameraLookAt=new THREE.Vector3();
 
@@ -73,7 +73,7 @@ function createScene(canvas){
 }
 function reset(){
   Object.assign(state,{running:false,ended:false,player:{x:95,y:520,r:15},terminal:{x:130,y:115,done:false},vault:{x:725,y:145,open:false},exit:{x:790,y:520},lootValue:0,heat:12,time:180,interact:null,interactProgress:0,cameraDisabledUntil:0,last:0});state.keys.clear();
-  cameraYaw=0;targetCameraYaw=0;lastMovementInput='';playerAnimationTime=0;
+  cameraYaw=0;targetCameraYaw=0;cameraPointerId=null;playerAnimationTime=0;
   state.loot=[{x:745,y:215,taken:false,value:220},{x:690,y:230,taken:false,value:260},{x:770,y:265,taken:false,value:340},{x:635,y:170,taken:false,value:180},{x:590,y:405,taken:false,value:140},{x:735,y:465,taken:false,value:170}];
   state.guards=[{x:295,y:180,dx:1,dy:0,min:265,max:420,axis:'x',speed:72},{x:555,y:130,dx:0,dy:1,min:95,max:345,axis:'y',speed:68},{x:330,y:465,dx:1,dy:0,min:115,max:610,axis:'x',speed:88},{x:760,y:390,dx:0,dy:1,min:340,max:510,axis:'y',speed:66}];
   state.cameras=[{x:175,y:310,angle:.2},{x:480,y:110,angle:1.1},{x:610,y:300,angle:2.7}];
@@ -102,12 +102,11 @@ function move(dt){
   if(state.keys.has('ArrowDown')||state.keys.has('s'))vertical-=1;
   if(state.keys.has('ArrowLeft')||state.keys.has('a'))horizontal-=1;
   if(state.keys.has('ArrowRight')||state.keys.has('d'))horizontal+=1;
-  if(!horizontal&&!vertical){lastMovementInput='';return;}
-  const movementInput=`${horizontal}:${vertical}`;
-  if(movementInput!==lastMovementInput){camera.getWorldDirection(movementForward);movementForward.y=0;movementForward.normalize();movementRight.crossVectors(movementForward,camera.up).normalize();movementDirection.copy(movementForward).multiplyScalar(vertical).addScaledVector(movementRight,horizontal).normalize();targetCameraYaw=Math.atan2(movementDirection.x,movementDirection.z);lastMovementInput=movementInput;}
+  if(!horizontal&&!vertical)return;
+  camera.getWorldDirection(movementForward);movementForward.y=0;movementForward.normalize();movementRight.crossVectors(movementForward,camera.up).normalize();movementDirection.copy(movementForward).multiplyScalar(vertical).addScaledVector(movementRight,horizontal).normalize();
   const sprint=state.keys.has('Shift'),speed=(sprint?215:145)*dt,x=movementDirection.x*speed,y=movementDirection.z*speed;
   const nextX=state.player.x+x,nextY=state.player.y+y;if(!blocked(nextX,state.player.y))state.player.x=nextX;if(!blocked(state.player.x,nextY))state.player.y=nextY;
-  playerMesh.rotation.y=targetCameraYaw+Math.PI;if(sprint)state.heat=clamp(state.heat+dt*1.7,0,100);
+  playerMesh.rotation.y=Math.atan2(movementDirection.x,movementDirection.z)+Math.PI;if(sprint)state.heat=clamp(state.heat+dt*1.7,0,100);
 }
 function updateGuards(dt){state.guards.forEach(guard=>{if(guard.axis==='x'){guard.x+=guard.dx*guard.speed*dt;if(guard.x<guard.min||guard.x>guard.max){guard.dx*=-1;guard.x=clamp(guard.x,guard.min,guard.max);}}else{guard.y+=guard.dy*guard.speed*dt;if(guard.y<guard.min||guard.y>guard.max){guard.dy*=-1;guard.y=clamp(guard.y,guard.min,guard.max);}}});}
 function detect(){let danger=0;state.guards.forEach(guard=>{const d=distance(state.player,guard),direction=guard.axis==='x'?(guard.dx>0?0:Math.PI):(guard.dy>0?Math.PI/2:-Math.PI/2),playerAngle=Math.atan2(state.player.y-guard.y,state.player.x-guard.x),difference=Math.abs(Math.atan2(Math.sin(playerAngle-direction),Math.cos(playerAngle-direction)));if(d<42)danger+=1.9;if(d<125&&difference<.38)danger+=.28;});if(Date.now()>state.cameraDisabledUntil)state.cameras.forEach(item=>{const d=distance(state.player,item),playerAngle=Math.atan2(state.player.y-item.y,state.player.x-item.x),difference=Math.abs(Math.atan2(Math.sin(playerAngle-item.angle),Math.cos(playerAngle-item.angle)));if(d<145&&difference<.39)danger+=.18;});if(danger){state.heat=clamp(state.heat+danger,0,100);if(state.heat>=100)end(false,'你被保全包圍了');}}
@@ -123,13 +122,18 @@ function cameraDesired(){const target=cameraTarget();cameraFacing.set(Math.sin(c
 function pointCamera(target){cameraFacing.set(Math.sin(cameraYaw),0,Math.cos(cameraYaw));cameraLookAt.copy(target).addScaledVector(cameraFacing,.35);camera.lookAt(cameraLookAt.x,cameraLookAt.y+.28,cameraLookAt.z);}
 function snapCamera(){const target=cameraTarget();cameraYaw=targetCameraYaw;camera.position.copy(cameraDesired());pointCamera(target);}
 function updateCamera(dt){const target=cameraTarget(),turnEase=1-Math.pow(.38,dt),followEase=1-Math.pow(.06,dt);cameraYaw+=angleDelta(cameraYaw,targetCameraYaw)*turnEase;camera.position.lerp(cameraDesired(),followEase);pointCamera(target);}
+function rotateCamera(delta){targetCameraYaw+=delta;}
+function updateManualCamera(dt){if(state.keys.has('q'))rotateCamera(-1.25*dt);if(state.keys.has('e'))rotateCamera(1.25*dt);}
 function end(success,message){state.running=false;state.ended=true;cancelAnimationFrame(animation);const overlay=$('#gameOverlay');overlay.hidden=false;overlay.innerHTML=`<span class="eyebrow">${success?'3D EXTRACTION COMPLETE':'RUN LOST'}</span><h1>${success?'成功撤離':'行動失敗'}</h1><p>${message}<br>本局戰利品：${state.lootValue.toLocaleString('zh-TW')} 分　警戒：${Math.round(state.heat)}%　評等：${success?rank():'—'}<br>獨立練習成績，不會改變 Discord 帳號。</p><button id="restartGame" type="button">再來一局 <span>↻</span></button>`;$('#restartGame').onclick=()=>{reset();overlay.hidden=true;start();};updateHud();}
-function loop(){if(!state.running)return;const dt=Math.min(.05,clock.getDelta());state.time-=dt;if(state.time<=0){end(false,'警方封鎖了所有出口');return;}move(dt);animatePlayer(dt);updateGuards(dt);detect();checkLoot();updateInteraction(dt);updateCamera(dt);syncMeshes();updateHud();renderer.render(scene,camera);animation=requestAnimationFrame(loop);}
+function loop(){if(!state.running)return;const dt=Math.min(.05,clock.getDelta());state.time-=dt;if(state.time<=0){end(false,'警方封鎖了所有出口');return;}updateManualCamera(dt);move(dt);animatePlayer(dt);updateGuards(dt);detect();checkLoot();updateInteraction(dt);updateCamera(dt);syncMeshes();updateHud();renderer.render(scene,camera);animation=requestAnimationFrame(loop);}
 function start(){state.running=true;state.ended=false;clock.start();toast('3D 行動開始：沿金色路徑前進');animation=requestAnimationFrame(loop);}
 function bindControls(){
-  document.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','Shift',' '].includes(event.key)){event.preventDefault();state.keys.add(event.key);}});document.addEventListener('keyup',event=>state.keys.delete(event.key));
+  document.addEventListener('keydown',event=>{const key=event.key.length===1?event.key.toLowerCase():event.key;if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','q','e','Shift',' '].includes(key)){event.preventDefault();state.keys.add(key);}});document.addEventListener('keyup',event=>state.keys.delete(event.key.length===1?event.key.toLowerCase():event.key));
   const pressDirection=(direction,down)=>{const key={up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight'}[direction];down?state.keys.add(key):state.keys.delete(key);};
+  const pressCamera=(direction,down)=>{const key=direction==='left'?'q':'e';down?state.keys.add(key):state.keys.delete(key);};
   document.querySelectorAll('[data-direction]').forEach(button=>{const direction=button.dataset.direction;['pointerdown','touchstart'].forEach(type=>button.addEventListener(type,event=>{event.preventDefault();pressDirection(direction,true);}));['pointerup','pointercancel','pointerleave','touchend'].forEach(type=>button.addEventListener(type,event=>{event.preventDefault();pressDirection(direction,false);}));});
+  document.querySelectorAll('[data-camera]').forEach(button=>{const direction=button.dataset.camera;button.addEventListener('pointerdown',event=>{event.preventDefault();pressCamera(direction,true);});['pointerup','pointercancel','pointerleave'].forEach(type=>button.addEventListener(type,event=>{event.preventDefault();pressCamera(direction,false);}));});
+  const canvas=$('#heistCanvas');canvas.addEventListener('pointerdown',event=>{if(!state.running)return;cameraPointerId=event.pointerId;cameraPointerX=event.clientX;canvas.setPointerCapture?.(event.pointerId);});canvas.addEventListener('pointermove',event=>{if(event.pointerId!==cameraPointerId)return;const delta=event.clientX-cameraPointerX;cameraPointerX=event.clientX;rotateCamera(delta*.006);});const stopCameraDrag=event=>{if(event.pointerId===cameraPointerId)cameraPointerId=null;};canvas.addEventListener('pointerup',stopCameraDrag);canvas.addEventListener('pointercancel',stopCameraDrag);
   ['pointerdown','touchstart'].forEach(type=>$('#sprintButton').addEventListener(type,event=>{event.preventDefault();state.keys.add('Shift');}));['pointerup','pointercancel','pointerleave','touchend'].forEach(type=>$('#sprintButton').addEventListener(type,event=>{event.preventDefault();state.keys.delete('Shift');}));['pointerdown','touchstart'].forEach(type=>$('#interactButton').addEventListener(type,event=>{event.preventDefault();state.keys.add(' ');}));['pointerup','pointercancel','pointerleave','touchend'].forEach(type=>$('#interactButton').addEventListener(type,event=>{event.preventDefault();state.keys.delete(' ');cancelInteract();}));
   $('#startGame').onclick=()=>{$('#gameOverlay').hidden=true;start();};$('#helpButton').onclick=()=>{$('#helpSheet').classList.add('open');$('#helpSheet').setAttribute('aria-hidden','false');};$('#closeHelp').onclick=()=>{$('#helpSheet').classList.remove('open');$('#helpSheet').setAttribute('aria-hidden','true');};const session=new URLSearchParams(location.search).get('session');if(session)$('#backToGame').href=`/game?session=${encodeURIComponent(session)}`;
 }

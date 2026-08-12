@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#090710">
   <title>黑曜至尊廳｜賭場搶劫</title>
   <link rel="icon" href="/favicon.svg">
-  <link rel="stylesheet" href="/heist-realtime.css?v=20260812.7">
-  <link rel="stylesheet" href="/heist-3d.css?v=20260812.7">
+  <link rel="stylesheet" href="/heist-realtime.css?v=20260812.8">
+  <link rel="stylesheet" href="/heist-3d.css?v=20260812.8">
 </head>
 <body>
   <main class="heist-shell">
@@ -32,7 +32,7 @@
 
     <section class="objective-panel">
       <div><span class="eyebrow">CURRENT OPERATION</span><h2 id="objectiveTitle">入侵黑曜至尊廳</h2><p id="objectiveText">先找到左上方的保全終端，暫時關閉攝影機。</p></div>
-      <div class="run-stats"><span>🏅 <b id="runRank">—</b></span><small id="runHint">鏡頭會跟隨角色；鍵盤 WASD／方向鍵，手機使用下方方向鈕。</small></div>
+      <div class="run-stats"><span>🏅 <b id="runRank">—</b></span><small id="runHint">拖曳遊戲畫面或按 Q／E 手動旋轉鏡頭；鏡頭只跟隨位置。</small></div>
     </section>
 
     <section class="touch-controls" aria-label="移動與互動控制">
@@ -42,7 +42,7 @@
         <button data-direction="down" type="button" aria-label="向下移動">▼</button>
         <button data-direction="right" type="button" aria-label="向右移動">▶</button>
       </div>
-      <div class="action-controls"><button id="sprintButton" type="button">疾跑</button><button id="interactButton" type="button" disabled>互動</button></div>
+      <div class="action-controls"><div class="camera-controls" aria-label="旋轉鏡頭"><button data-camera="left" type="button" aria-label="向左旋轉鏡頭">↶ 鏡頭</button><button data-camera="right" type="button" aria-label="向右旋轉鏡頭">鏡頭 ↷</button></div><button id="sprintButton" type="button">疾跑</button><button id="interactButton" type="button" disabled>互動</button></div>
     </section>
 
     <section class="legend"><span><i class="you"></i>你</span><span><i class="guard"></i>守衛</span><span><i class="terminal"></i>保全終端</span><span><i class="vault"></i>金庫</span><span><i class="exit"></i>出口</span></section>
@@ -50,10 +50,10 @@
   <aside class="help-sheet" id="helpSheet" aria-hidden="true">
     <div><span class="eyebrow">HOW TO PLAY</span><button id="closeHelp" type="button" aria-label="關閉玩法">×</button></div>
     <h2>3D 潛行搶劫</h2>
-    <ol><li>自由移動，鏡頭會跟隨角色；避開守衛與攝影機的紅色立體視野。</li><li>沿金色地面路徑前往保全終端，按住「互動」關閉攝影機。</li><li>到金庫旁解鎖；開啟後靠近金幣即可拾取戰利品。</li><li>取得至少 500 分後前往藍色出口。警戒達 100% 即告失敗。</li></ol>
+    <ol><li>自由移動；在遊戲畫面左右拖曳，或使用 Q／E 與鏡頭按鈕手動旋轉視角。</li><li>避開守衛與攝影機的紅色立體視野，沿金色路徑前往保全終端。</li><li>按住「互動」關閉攝影機，再到金庫旁解鎖並拾取戰利品。</li><li>取得至少 500 分後前往藍色出口。警戒達 100% 即告失敗。</li></ol>
     <p>這是獨立練習模式：不扣金幣、不扣體力，也不改變 Discord 搶劫結果。</p>
   </aside>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="/heist-loader.js?v=20260812.7"></script>
+  <script type="module" src="/heist-loader.js?v=20260812.8"></script>
 </body>
 </html>

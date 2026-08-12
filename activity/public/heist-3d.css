@@ -1,6 +1,8 @@
 .render-mode{padding:5px 7px;border:1px solid rgba(94,229,190,.38);border-radius:999px;color:var(--mint);background:rgba(12,46,39,.72);font-size:8px;white-space:nowrap}
 .render-mode.fallback{border-color:rgba(247,202,87,.45);color:var(--gold);background:rgba(66,45,13,.72)}
 .game-frame.mode-3d{background:radial-gradient(circle at 50% 12%,#2e1d43,#09070e 70%)}
-.game-frame.mode-3d canvas{image-rendering:auto;cursor:crosshair}
+.game-frame.mode-3d canvas{image-rendering:auto;cursor:grab;touch-action:none}
+.game-frame.mode-3d canvas:active{cursor:grabbing}
+.camera-controls{display:grid;grid-template-columns:1fr 1fr;gap:6px}.camera-controls button{min-height:36px!important;padding:0 6px!important;border-color:rgba(94,229,190,.3)!important;background:#17252b!important;color:#9bf3dc;font-size:10px!important}
 .game-frame.mode-3d::after{content:"3D WEBGL";position:absolute;right:9px;top:8px;z-index:1;padding:4px 6px;border:1px solid rgba(94,229,190,.28);border-radius:6px;background:rgba(5,12,15,.62);color:#79f0ce;font-size:7px;letter-spacing:.13em;pointer-events:none}
 @media(max-width:410px){.render-mode{display:none}}
