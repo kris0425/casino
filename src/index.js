@@ -819,6 +819,22 @@ db.exec(`
     updated_at INTEGER NOT NULL,
     settled_at TEXT
   );
+  CREATE TABLE IF NOT EXISTS web_claw_games (
+    game_id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    cost INTEGER NOT NULL,
+    prizes_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    claw_x REAL NOT NULL DEFAULT 50,
+    selected_prize_id TEXT,
+    won INTEGER NOT NULL DEFAULT 0,
+    result_json TEXT,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    settled_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_web_claw_owner ON web_claw_games(guild_id,user_id,status,expires_at);
   CREATE TABLE IF NOT EXISTS airline_companies (
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
@@ -6392,6 +6408,7 @@ function resolveBet(i,g,u) {
   return bet;
 }
 const miniGameCatalog=[
+  {id:'claw',command:'夾娃娃機',label:'互動夾娃娃機',emoji:'🕹️',description:'操作落爪夾取車輛、房產、槍枝或彈藥',setup:'direct'},
   {id:'target_shooting',command:'打靶',label:'靶場打靶',emoji:'🎯',description:'先選擇自己的槍枝，再挑戰靶心',setup:'direct'},
   {id:'jenga',command:'抽積木',label:'抽積木',emoji:'🧱',description:'抽出積木後選擇繼續冒險或收手',setup:'bet'},
   {id:'highlow',command:'比大小',label:'比大小',emoji:'🃏',description:'與莊家各抽一張牌',setup:'bet'},
@@ -6412,7 +6429,7 @@ const miniGameCatalog=[
   {id:'duel',command:'決鬥',label:'PvP 輪盤決鬥',emoji:'🔫',description:'指定玩家進行虛構槍械決鬥',setup:'pvp'}
 ];
 function miniGameLauncherEmbed() {
-  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🎮 小遊戲大廳').setDescription(`所有 **18 款遊戲**已整合到此入口；從下方選單選擇遊戲，機器人會接著開啟下注、號碼或對手設定。\n\n🎯 **靶場打靶**\n開始前可從自己的武器庫選擇槍枝；槍枝的精準加成會提高命中率。靶場不消耗彈藥，每次消耗 8 體力、完成後冷卻 10 分鐘，命中靶心最高可獲得 **6,000 金幣**。\n\n🧱 **圖片版網頁遊戲：堆積木**\n完成下注後會取得專屬網站連結；網站會以圖片呈現穩定、搖晃及倒塌的積木塔。每回合從左、中、右三塊積木中選一塊，成功後可安全收手或繼續挑戰。完成六次的基礎派彩為 **4.4 倍**，高風險積木成功時還會累加額外倍率。\n\n下注欄可輸入金額，想投入全部金幣時輸入「**歐印**」。\n\n個別遊戲舊指令已移除；工作與搶劫請使用 \`/賺錢\`、\`/團隊搶銀行\`。`);
+  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🎮 小遊戲大廳').setDescription(`所有 **19 款遊戲**已整合到此入口；從下方選單選擇遊戲，機器人會接著開啟下注、號碼或對手設定。\n\n🕹️ **互動網站：夾娃娃機**\n每局 25,000 金幣與 5 體力，親自控制左右位置並落爪；機台內會出現車輛、房產、各式槍枝與彈藥，成功後直接送入資產庫。\n\n🎯 **靶場打靶**\n開始前可從自己的武器庫選擇槍枝；槍枝的精準加成會提高命中率。靶場不消耗彈藥，每次消耗 8 體力、完成後冷卻 10 分鐘，命中靶心最高可獲得 **6,000 金幣**。\n\n🧱 **圖片版網頁遊戲：堆積木**\n完成下注後會取得專屬網站連結；網站會以圖片呈現穩定、搖晃及倒塌的積木塔。每回合從左、中、右三塊積木中選一塊，成功後可安全收手或繼續挑戰。完成六次的基礎派彩為 **4.4 倍**，高風險積木成功時還會累加額外倍率。\n\n下注欄可輸入金額，想投入全部金幣時輸入「**歐印**」。\n\n個別遊戲舊指令已移除；工作與搶劫請使用 \`/賺錢\`、\`/團隊搶銀行\`。`);
 }
 function miniGameMenuRow(ownerId) {
   return new ActionRowBuilder().addComponents(
@@ -7437,7 +7454,7 @@ function riotRow(token,disabled=false) {
   );
 }
 const gameHelpDetails={
-  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/日常 領取\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🎯 靶場訓練｜打靶前可選擇自己的槍枝，精準槍枝提高命中率\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 3 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n所有 18 款遊戲統一由 \`/小遊戲\` 進入；打靶每次消耗 **8 體力**、冷卻 10 分鐘且不消耗彈藥。一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限，也可以輸入「歐印」。`},
+  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/日常 領取\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🕹️ 互動機台｜夾娃娃機可操作落爪，夾取車輛、房產、槍枝與彈藥\n🎯 靶場訓練｜打靶前可選擇自己的槍枝，精準槍枝提高命中率\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 3 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n所有 19 款遊戲統一由 \`/小遊戲\` 進入；夾娃娃機每局 **25,000 金幣／5 體力**。打靶每次消耗 **8 體力**、冷卻 10 分鐘且不消耗彈藥。一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限，也可以輸入「歐印」。`},
   highlow:{label:'比大小',emoji:'🃏',hint:'與莊家各抽一張牌',title:'🃏 比大小',body:'你與莊家各抽一張牌，點數與花色較大者獲勝。勝利獲得下注額 **2 倍**，平手退回下注，落敗則失去下注。'},
   dragon:{label:'射龍門',emoji:'🚪',hint:'判斷第三張牌是否落在門牌中間',title:'🚪 射龍門',body:'先開出兩張門牌，再選擇射牌或不射。第三張牌嚴格落在兩張門牌之間即獲得 **2 倍**；撞柱或射偏會失去下注，不射則退回下注。'},
   horse:{label:'賽馬',emoji:'🏇',hint:'選擇一匹馬觀看即時競賽',title:'🏇 賽馬',body:'從 1～4 號馬選擇一匹下注，畫面會即時更新到衝線。猜中冠軍獲得下注額 **4 倍**。'},
@@ -10540,6 +10557,35 @@ async function handleInteraction(i) {
     if(jailed) throw new Error(`你被關在迷子的小黑屋，還有 ${jailText(jailed)} 才能進行遊戲`);
     const hospitalized=hospitalRemaining(g,u);
     if(hospitalized) throw new Error(`你正在醫院休養，還有 ${jailText(hospitalized)} 才能進行遊戲`);
+    if(i.commandName==='夾娃娃機') {
+      if(!ACTIVITY_PUBLIC_URL||!ACTIVITY_SIGNING_SECRET) throw new Error('網頁版夾娃娃機入口尚未完成設定，請稍後再試');
+      const active=db.prepare("SELECT * FROM web_claw_games WHERE guild_id=? AND user_id=? AND status='pending' AND expires_at>? ORDER BY created_at DESC LIMIT 1").get(g,u,Date.now());
+      if(active) {
+        const activeUrl=clawActivityUrl(g,u,active.game_id,active.expires_at);
+        const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setURL(activeUrl).setLabel('繼續操作夾娃娃機').setEmoji('🕹️').setStyle(ButtonStyle.Link));
+        return i.reply({content:'你已經有一台尚未落爪的夾娃娃機，請先完成或等待 10 分鐘逾時。',components:[row],ephemeral:true});
+      }
+      const needed=staminaCost(g,u,CLAW_MACHINE_STAMINA);
+      if(stamina(g,u)<needed) throw new Error(`夾娃娃機需要 ${needed} 點體力`);
+      if(balance(g,u)<CLAW_MACHINE_COST) throw new Error(`啟動夾娃娃機需要 ${fmt(CLAW_MACHINE_COST)} 金幣`);
+      const gameId=randomUUID(),expiresAt=Date.now()+CLAW_MACHINE_DURATION_MS,url=clawActivityUrl(g,u,gameId,expiresAt);
+      const prizes=clawMachinePrizes(g,u);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        consumeStamina(g,u,CLAW_MACHINE_STAMINA);
+        changeBalanceUnlocked(g,u,-CLAW_MACHINE_COST,'claw_machine',u,'啟動互動夾娃娃機｜金幣直接銷毀');
+        db.prepare(`INSERT INTO web_claw_games(
+          game_id,guild_id,user_id,cost,prizes_json,status,claw_x,expires_at
+        ) VALUES(?,?,?,?,?,'pending',50,?)`).run(gameId,g,u,CLAW_MACHINE_COST,JSON.stringify(prizes),expiresAt);
+        db.exec('COMMIT');
+      } catch(error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+      const embed=new EmbedBuilder().setColor(0xEF4DA8).setTitle('🕹️ 霓虹寶庫｜互動夾娃娃機').setDescription(`機台已啟動！請從網站親自控制爪子左右移動，再選擇落爪位置。\n\n機台費：**${fmt(CLAW_MACHINE_COST)} 金幣**\n體力消耗：**${needed}**\n操作時間：**10 分鐘**\n獎品種類：**車輛／房產／槍枝／彈藥**\n\n瞄得越準越容易抓住；高價獎品爪力較鬆。結果與資產發放均由 Oracle 伺服器判定。`);
+      const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setURL(url).setLabel('開啟互動夾娃娃機').setEmoji('🕹️').setStyle(ButtonStyle.Link));
+      return i.reply({embeds:[embed],components:[row]});
+    }
     if(i.commandName==='抽積木') {
       if(!ACTIVITY_PUBLIC_URL||!ACTIVITY_SIGNING_SECRET) throw new Error('網頁版堆積木入口尚未完成設定，請稍後再試');
       const active=db.prepare("SELECT * FROM web_jenga_games WHERE guild_id=? AND user_id=? AND status='pending' AND expires_at>? ORDER BY created_at DESC LIMIT 1").get(g,u,Date.now());
@@ -11005,6 +11051,15 @@ function jengaActivityUrl(guildId,userId,gameId,expiresAt) {
   const token=jengaActivityToken(guildId,userId,gameId,expiresAt);
   return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/jenga?session=${encodeURIComponent(token)}`:null;
 }
+function clawActivityToken(guildId,userId,gameId,expiresAt) {
+  if(!ACTIVITY_SIGNING_SECRET) return null;
+  const payload=Buffer.from(JSON.stringify({kind:'claw',guildId,userId,gameId,exp:expiresAt})).toString('base64url');
+  return `${payload}.${activitySignature(payload)}`;
+}
+function clawActivityUrl(guildId,userId,gameId,expiresAt) {
+  const token=clawActivityToken(guildId,userId,gameId,expiresAt);
+  return ACTIVITY_PUBLIC_URL&&token?`${ACTIVITY_PUBLIC_URL}/claw?session=${encodeURIComponent(token)}`:null;
+}
 function parseScratchActivityToken(token) {
   if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('刮刮卡連結無效');
   const [payload,signature,...extra]=token.split('.');
@@ -11044,6 +11099,16 @@ function parseAppearanceActivityToken(token) {
   if(expected.length!==received.length||!timingSafeEqual(expected,received)) throw new Error('造型網站連結驗證失敗');
   const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
   if(session.kind!=='appearance'||!session.guildId||!session.userId||!session.channelId||!session.exp||session.exp<Date.now()) throw new Error('造型網站連結已過期，請回到 Discord 重新使用 `/玩家 造型`');
+  return session;
+}
+function parseClawActivityToken(token) {
+  if(!ACTIVITY_SIGNING_SECRET||typeof token!=='string') throw new Error('夾娃娃機連結無效');
+  const [payload,signature,...extra]=token.split('.');
+  if(!payload||!signature||extra.length) throw new Error('夾娃娃機連結格式錯誤');
+  const expected=Buffer.from(activitySignature(payload)),received=Buffer.from(signature);
+  if(expected.length!==received.length||!timingSafeEqual(expected,received)) throw new Error('夾娃娃機連結驗證失敗');
+  const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
+  if(session.kind!=='claw'||!session.guildId||!session.userId||!session.gameId||!session.exp) throw new Error('夾娃娃機資料不完整');
   return session;
 }
 async function parseAppearanceAdminActivityToken(token) {
@@ -11246,7 +11311,7 @@ const activityStaticTypes={
 };
 function serveActivityStatic(request,response,url) {
   if(!['GET','HEAD'].includes(request.method||'')) return false;
-  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/appearance':'style.html','/appearance-admin':'appearance-admin.html','/game':'game.html','/heist':'heist.html'};
+  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/claw':'claw.html','/appearance':'style.html','/appearance-admin':'appearance-admin.html','/game':'game.html','/heist':'heist.html'};
   const assetRequest=url.pathname.startsWith('/assets/'),styleRequest=url.pathname.startsWith('/appearance-styles/'),root=assetRequest?ACTIVITY_ASSET_ROOT:styleRequest?resolve(CHARACTER_STYLE_ROOT,'..'):ACTIVITY_STATIC_ROOT;
   const relative=assetRequest?decodeURIComponent(url.pathname.slice('/assets/'.length)):routeFiles[url.pathname]||decodeURIComponent(url.pathname).replace(/^\/+/,'');
   if(!relative||relative.startsWith('api/')||relative.startsWith('activity/')) return false;
@@ -11542,6 +11607,167 @@ function expireWebJengaGames() {
       db.exec('ROLLBACK');
       console.error(`堆積木逾時結算失敗 game=${candidate.game_id}: ${error.message}`);
     }
+  }
+}
+const CLAW_MACHINE_COST=25000;
+const CLAW_MACHINE_STAMINA=5;
+const CLAW_MACHINE_DURATION_MS=10*60*1000;
+const clawPrizePools={
+  ammo:[
+    {assetId:'ammo_pistol',min:3,max:8},
+    {assetId:'ammo_shotgun',min:2,max:6},
+    {assetId:'ammo_rifle',min:2,max:6},
+    {assetId:'ammo_sniper',min:2,max:5}
+  ],
+  weapon:[
+    {assetId:'weapon_pistol'},{assetId:'weapon_glock17'},{assetId:'weapon_shotgun'},
+    {assetId:'weapon_kar98k'},{assetId:'weapon_ak47'},{assetId:'weapon_m4a1'},{assetId:'weapon_m24_sws'}
+  ],
+  vehicle:[
+    {assetId:'sedan'},{assetId:'toyota_vios_2003'},{assetId:'suzuki_every'},
+    {assetId:'toyota_hilux_gr'},{assetId:'rocket_bunny_rx7'}
+  ],
+  property:[
+    {assetId:'studio'},{assetId:'apartment'},{assetId:'villa'},{assetId:'casino_suite'}
+  ]
+};
+const clawTypeMeta={
+  ammo:{label:'彈藥補給',emoji:'📦',rarity:'常見',grip:0.90},
+  weapon:{label:'武器收藏',emoji:'🔫',rarity:'稀有',grip:0.68},
+  vehicle:{label:'車輛大獎',emoji:'🚗',rarity:'史詩',grip:0.52},
+  property:{label:'房產頭獎',emoji:'🏠',rarity:'傳說',grip:0.34}
+};
+function clawPrizeEntry(type,g,u,used=new Set()) {
+  const available=(clawPrizePools[type]||[]).filter(entry=>{
+    const asset=assetCatalog[entry.assetId];
+    return asset&&!used.has(entry.assetId)&&!(asset.unique&&assetQuantity(g,u,entry.assetId)>0);
+  });
+  const source=available.length?available:(clawPrizePools[type]||[]).filter(entry=>assetCatalog[entry.assetId]);
+  const entry=source[Math.floor(Math.random()*source.length)];
+  if(!entry) throw new Error('夾娃娃機獎品尚未完成設定');
+  used.add(entry.assetId);
+  const quantity=entry.max?Math.floor(Math.random()*(entry.max-entry.min+1))+entry.min:1;
+  return {assetId:entry.assetId,quantity,type};
+}
+function clawMachinePrizes(g,u) {
+  const used=new Set(),types=['ammo','weapon','vehicle','property'];
+  while(types.length<8) {
+    const roll=Math.random();
+    types.push(roll<0.42?'ammo':roll<0.72?'weapon':roll<0.91?'vehicle':'property');
+  }
+  const prizes=types.map(type=>clawPrizeEntry(type,g,u,used));
+  for(let index=prizes.length-1;index>0;index--) {
+    const other=Math.floor(Math.random()*(index+1));
+    [prizes[index],prizes[other]]=[prizes[other],prizes[index]];
+  }
+  const positions=[11,22,33,44,56,67,78,89];
+  return prizes.map((prize,index)=>({...prize,prizeId:randomUUID(),x:positions[index]+(Math.random()*2-1),grip:clawTypeMeta[prize.type].grip}));
+}
+function clawPrizePublic(prize) {
+  const asset=assetCatalog[prize.assetId],meta=clawTypeMeta[prize.type];
+  const image=asset?.image||asset?.images?.[0]||null;
+  return {
+    prizeId:prize.prizeId,
+    assetId:prize.assetId,
+    name:asset?.name||prize.assetId,
+    quantity:prize.quantity,
+    type:prize.type,
+    typeLabel:meta?.label||'神秘獎品',
+    emoji:meta?.emoji||'🎁',
+    rarity:meta?.rarity||'神秘',
+    x:Number(prize.x),
+    image:image?`/assets/${image.split('/').map(encodeURIComponent).join('/')}`:null
+  };
+}
+function webClawRow(session) {
+  const row=db.prepare('SELECT * FROM web_claw_games WHERE game_id=? AND guild_id=? AND user_id=?').get(session.gameId,session.guildId,session.userId);
+  if(!row) throw new Error('找不到這台夾娃娃機，請回到 Discord 重新開始');
+  return row;
+}
+function webClawPublic(row) {
+  const result=row.result_json?JSON.parse(row.result_json):null;
+  return {
+    gameId:row.game_id,
+    serial:row.game_id.replace(/-/g,'').slice(0,12).toUpperCase(),
+    cost:row.cost,
+    status:row.status,
+    clawX:Number(row.claw_x||50),
+    prizes:JSON.parse(row.prizes_json).map(clawPrizePublic),
+    expiresAt:row.expires_at,
+    balance:balance(row.guild_id,row.user_id),
+    result:result?{...result,prize:result.prize?clawPrizePublic(result.prize):null}:null
+  };
+}
+function webClawExpire(row) {
+  const result={outcome:'expired',won:false,message:`操作時間結束，本次 ${fmt(row.cost)} 金幣機台費視為放棄`};
+  db.prepare("UPDATE web_claw_games SET status='expired',result_json=?,settled_at=CURRENT_TIMESTAMP WHERE game_id=? AND status='pending'").run(JSON.stringify(result),row.game_id);
+  return db.prepare('SELECT * FROM web_claw_games WHERE game_id=?').get(row.game_id);
+}
+function webClawState(token) {
+  const session=parseClawActivityToken(token);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    let row=webClawRow(session);
+    if(row.status==='pending'&&(row.expires_at<Date.now()||session.exp<Date.now())) row=webClawExpire(row);
+    const result=webClawPublic(row);
+    db.exec('COMMIT');
+    return result;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function webClawDrop(token,requestedX) {
+  const session=parseClawActivityToken(token),clawX=Number(requestedX);
+  if(!Number.isFinite(clawX)||clawX<5||clawX>95) throw new Error('落爪位置無效');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    let row=webClawRow(session);
+    if(row.status!=='pending') {
+      const result=webClawPublic(row);
+      db.exec('COMMIT');
+      return result;
+    }
+    if(row.expires_at<Date.now()||session.exp<Date.now()) {
+      row=webClawExpire(row);
+      const result=webClawPublic(row);
+      db.exec('COMMIT');
+      return result;
+    }
+    const prizes=JSON.parse(row.prizes_json),catchRadius=7.5;
+    const nearest=prizes.reduce((best,prize)=>{
+      const distance=Math.abs(Number(prize.x)-clawX);
+      return !best||distance<best.distance?{prize,distance}:best;
+    },null);
+    const target=nearest&&nearest.distance<=catchRadius?nearest:null;
+    const gripChance=target?Math.min(0.96,Number(target.prize.grip)+(1-target.distance/catchRadius)*0.08):0;
+    let won=Boolean(target&&Math.random()<gripChance),awarded=target?.prize||null;
+    if(won&&assetCatalog[awarded.assetId]?.unique&&assetQuantity(row.guild_id,row.user_id,awarded.assetId)>0) {
+      awarded={...clawPrizeEntry('ammo',row.guild_id,row.user_id),prizeId:awarded.prizeId,x:awarded.x,grip:clawTypeMeta.ammo.grip};
+    }
+    if(won&&awarded) {
+      addAssetQuantity(row.guild_id,row.user_id,awarded.assetId,awarded.quantity);
+      ensureAssetBuff(row.guild_id,row.user_id,awarded.assetId);
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+        .run(row.guild_id,row.user_id,0,balance(row.guild_id,row.user_id),'asset_prize',row.user_id,`夾娃娃機獲得 ${assetCatalog[awarded.assetId].name} ×${awarded.quantity}`);
+    }
+    const outcome=!target?'missed':won?'won':'slipped';
+    const result={
+      outcome,won,clawX:Number(clawX.toFixed(2)),accuracy:target?Number(Math.max(0,100-target.distance/catchRadius*100).toFixed(0)):0,
+      prize:won?awarded:target?.prize||null,
+      message:won
+        ? `成功夾到 ${assetCatalog[awarded.assetId].name} ×${awarded.quantity}，已直接放入你的資產庫`
+        : target?`爪子碰到獎品，但在出口前鬆脫了`:`落爪位置沒有對準任何獎品`
+    };
+    db.prepare("UPDATE web_claw_games SET status='settled',claw_x=?,selected_prize_id=?,won=?,result_json=?,settled_at=CURRENT_TIMESTAMP WHERE game_id=? AND status='pending'")
+      .run(clawX,target?.prize.prizeId||null,won?1:0,JSON.stringify(result),row.game_id);
+    row=db.prepare('SELECT * FROM web_claw_games WHERE game_id=?').get(row.game_id);
+    const response=webClawPublic(row);
+    db.exec('COMMIT');
+    return response;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
 }
 const WEB_MAHJONG_TILES=['1萬','2萬','3萬','4萬','5萬','6萬','7萬','8萬','9萬','1筒','2筒','3筒','4筒','5筒','6筒','7筒','8筒','9筒','1條','2條','3條','4條','5條','6條','7條','8條','9條','東','南','西','北','中','發','白'];
@@ -11916,6 +12142,13 @@ if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
       if(request.method==='POST'&&url.pathname==='/activity/jenga/chase') {
         const body=await activityRequestBody(request);
         return activityJson(response,200,{ok:true,game:webJengaChase(body.session||'')});
+      }
+      if(request.method==='GET'&&url.pathname==='/activity/claw') {
+        return activityJson(response,200,{ok:true,game:webClawState(url.searchParams.get('session')||'')});
+      }
+      if(request.method==='POST'&&url.pathname==='/activity/claw/drop') {
+        const body=await activityRequestBody(request);
+        return activityJson(response,200,{ok:true,game:webClawDrop(body.session||'',body.clawX)});
       }
       if(request.method==='GET'&&url.pathname==='/activity/health') return activityJson(response,200,{ok:true});
       return activityJson(response,404,{ok:false,error:'Not found'});

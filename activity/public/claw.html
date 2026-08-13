@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#12051f">
+  <title>霓虹寶庫｜互動夾娃娃機</title>
+  <link rel="stylesheet" href="/claw.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="brand-bar">
+      <div class="brand-mark">♠</div>
+      <div><strong>澳門最大賭場</strong><small>NEON VAULT · CLAW ARCADE</small></div>
+      <button id="soundButton" class="sound-button" type="button" aria-label="切換音效">♪</button>
+    </header>
+
+    <section class="game-heading">
+      <div><span class="eyebrow">INTERACTIVE PRIZE MACHINE</span><h1>霓虹寶庫</h1></div>
+      <div class="serial">機台 <strong id="serial">LOADING</strong></div>
+    </section>
+
+    <section class="status-grid" aria-label="遊戲狀態">
+      <article><span>機台費</span><strong id="cost">—</strong></article>
+      <article><span>剩餘時間</span><strong id="timer">—</strong></article>
+      <article><span>金庫餘額</span><strong id="balance">—</strong></article>
+    </section>
+
+    <section class="cabinet" id="cabinet">
+      <div class="cabinet-top"><i></i><span>★ JACKPOT CLAW ★</span><i></i></div>
+      <div class="machine-window" id="machineWindow">
+        <div class="light-strip"></div>
+        <div class="rail"></div>
+        <div class="claw-rig" id="clawRig" style="--claw-x:50%">
+          <div class="trolley"><b></b><b></b></div>
+          <div class="cable"></div>
+          <div class="claw-head"><span></span></div>
+          <div class="claw-jaws"><i></i><i></i></div>
+          <div class="held-prize" id="heldPrize"></div>
+        </div>
+        <div class="prize-field" id="prizeField" aria-label="機台獎品"></div>
+        <div class="glass-shine"></div>
+        <div class="chute"><span>PRIZE</span></div>
+        <div class="floor-grid"></div>
+      </div>
+      <div class="cabinet-panel">
+        <div class="instruction"><span class="pulse-dot"></span><strong id="instructionTitle">移動爪子，對準想要的獎品</strong><small id="instructionText">越接近獎品中心，成功抓住的機會越高</small></div>
+        <div class="joystick" aria-hidden="true"><span></span></div>
+      </div>
+    </section>
+
+    <section class="controls" aria-label="夾娃娃機控制器">
+      <button id="leftButton" class="move-button" type="button"><span>◀</span>向左</button>
+      <button id="dropButton" class="drop-button" type="button"><span>⬇</span>落爪</button>
+      <button id="rightButton" class="move-button" type="button">向右<span>▶</span></button>
+    </section>
+    <p class="keyboard-tip">電腦可使用 A／D 或方向鍵移動，空白鍵落爪</p>
+
+    <section class="legend">
+      <span><i class="ammo"></i>彈藥補給</span><span><i class="weapon"></i>武器收藏</span>
+      <span><i class="vehicle"></i>車輛大獎</span><span><i class="property"></i>房產頭獎</span>
+    </section>
+
+    <section class="result-card" id="resultCard" hidden>
+      <div id="resultIcon" class="result-icon">🎁</div>
+      <span class="eyebrow" id="resultEyebrow">RESULT</span>
+      <h2 id="resultTitle">結算完成</h2>
+      <p id="resultMessage"></p>
+      <button id="returnButton" type="button">返回 Discord</button>
+    </section>
+
+    <div class="error-toast" id="errorToast" role="alert" hidden></div>
+  </main>
+  <script src="/claw.js" defer></script>
+</body>
+</html>

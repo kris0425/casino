@@ -8,6 +8,27 @@ const source=readFileSync(new URL('../src/index.js',import.meta.url),'utf8');
 const cosmeticsSource=readFileSync(new URL('../src/game-data/cosmetics.js',import.meta.url),'utf8');
 const webGameDataSource=readFileSync(new URL('../src/game-data/web-game.js',import.meta.url),'utf8');
 
+test('互動夾娃娃機具備動畫控制、伺服器結算與四類資產獎品',()=>{
+  const html=readFileSync(new URL('../activity/public/claw.html',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/claw.css',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/claw.js',import.meta.url),'utf8');
+  assert.match(source,/CREATE TABLE IF NOT EXISTS web_claw_games/);
+  assert.match(source,/const CLAW_MACHINE_COST=25000/);
+  assert.match(source,/const clawPrizePools=\{[\s\S]+ammo:[\s\S]+weapon:[\s\S]+vehicle:[\s\S]+property:/);
+  assert.match(source,/function webClawDrop\(token,requestedX\)/);
+  assert.match(source,/addAssetQuantity\(row\.guild_id,row\.user_id,awarded\.assetId,awarded\.quantity\)/);
+  assert.match(source,/url\.pathname==='\/activity\/claw\/drop'/);
+  assert.match(source,/id:'claw',command:'夾娃娃機'/);
+  assert.match(html,/id="leftButton"/);
+  assert.match(html,/id="rightButton"/);
+  assert.match(html,/id="dropButton"/);
+  assert.match(css,/\.claw-rig\.dropping \.cable/);
+  assert.match(css,/@keyframes slip/);
+  assert.match(js,/clawX=Math\.max\(5,Math\.min\(95/);
+  assert.match(js,/api\('\/claw\/drop'/);
+  assert.match(js,/event\.code==='Space'/);
+});
+
 test('玩家轉帳移除自訂上限但保留安全規則',()=>{
   assert.doesNotMatch(source,/PLAYER_TRANSFER_MAX/);
   assert.match(source,/Number\.isSafeInteger\(amount\)\|\|amount<1/);
