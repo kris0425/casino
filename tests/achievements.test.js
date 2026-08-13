@@ -172,7 +172,7 @@ test('人物大廳六名全身角色使用透明 PNG 並加入商城',()=>{
     assert.equal(data[25],6,`${file} 必須是具有 alpha 通道的 RGBA PNG`);
   }
   for(const id of ['casino_character','transport_character','heist_character','pomeranian_character','garage_character','rail_character']) assert.match(cosmeticsSource,new RegExp(`id:'${id}',slot:'character'`));
-  assert.match(source,/setThumbnail\(`\$\{ACTIVITY_PUBLIC_URL\}\/appearance\/characters\/\$\{character\.image\}`\)/);
+  assert.match(source,/characterImage:equippedStyle\.style\.image/,'現行造型網站必須回傳完整角色圖片');
 });
 
 test('四套造型以 16 張透明穿戴素材取代 Emoji 疊圖',()=>{
@@ -406,13 +406,9 @@ test('車庫分頁避免手機同時解碼全部大型圖片',()=>{
   assert.match(css,/object-fit:contain/);
 });
 
-test('既有人物換裝保留五官並使用不遮臉的夜行頭飾',()=>{
-  const html=readFileSync(new URL('../activity/public/appearance.html',import.meta.url),'utf8');
-  const js=readFileSync(new URL('../activity/public/appearance.js',import.meta.url),'utf8');
-  assert.match(html,/appearance\.css\?v=20260802\.8/);
-  assert.match(html,/既有人物分層換裝/);
-  assert.match(js,/previewCharacter/);
-  assert.match(js,/previewStage'\)\.dataset\.outfit/);
+test('舊版分層換裝前端已移除但歷史透明素材仍保留',()=>{
+  for(const file of ['appearance.html','appearance.css','appearance.js']) assert.equal(existsSync(new URL(`../activity/public/${file}`,import.meta.url)),false,`停用前端仍存在：${file}`);
+  assert.match(source,/const routeFiles=\{'\/':'index\.html'[^\n]+'\/appearance':'style\.html'/);
   assert.match(cosmeticsSource,/name:'紫影戰術耳機'.*image:'heist\/headwear-open\.png'/);
   assert.match(cosmeticsSource,/name:'紫影戰術鏡'.*image:'heist\/face-open\.png'/);
   const file=readFileSync(new URL('../activity/public/appearance/wearables/heist/headwear-open.png',import.meta.url));
@@ -1671,9 +1667,20 @@ test('移除未接線的舊版造型、交通與下注輔助碼',()=>{
     assert.doesNotMatch(source,new RegExp(`function ${helper}\\(`),`舊版未使用函式仍存在：${helper}`);
   }
   assert.doesNotMatch(source,/const fordBlindBoxPublicIds=/,'未使用的福特盲盒清單仍存在');
+  assert.doesNotMatch(source,/function publishAppearance\(/,'停用的舊造型發布函式仍存在');
+  assert.doesNotMatch(source,/appearancePublishCooldowns/,'停用的舊造型發布冷卻仍存在');
   for(const activeHelper of ['playerAppearance','transportHubEmbed','registerTransportBusinessCompany','startTransportBusinessOperation']) {
     assert.match(source,new RegExp(`function ${activeHelper}\\(`),`現行功能不應被誤刪：${activeHelper}`);
   }
+});
+
+test('每日交通盲盒共用安全抽獎與交易流程',()=>{
+  assert.match(source,/function drawWeightedAssetId\(assetIds,rates,random=Math\.random\)/);
+  assert.match(source,/const dailyBlindBoxTables=\{train:'train_blind_box_daily',coach:'coach_blind_box_daily',shipping:'shipping_blind_box_daily'\}/);
+  assert.match(source,/function openDailyBlindBox\(g,u,\{type,price,assetIds,rates,ledgerKind,reason,alreadyPurchasedMessage,beforeOpen\}\)/);
+  assert.match(source,/const assetId=drawWeightedAssetId\(assetIds,rates\)/);
+  assert.match(source,/INSERT INTO \$\{table\}\(guild_id,user_id,purchase_day\)/);
+  for(const type of ['train','coach','shipping']) assert.match(source,new RegExp(`type:'${type}'`));
 });
 
 test('房地產事業提供建築外觀、維護、牌照、升級與市場事件',()=>{

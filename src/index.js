@@ -12,7 +12,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { COSMETIC_SLOTS, COSMETIC_SLOT_LABELS, cosmeticCatalog, cosmeticById, defaultAppearance } from './game-data/cosmetics.js';
+import { COSMETIC_SLOTS, cosmeticCatalog, cosmeticById, defaultAppearance } from './game-data/cosmetics.js';
 import { WEB_GAME_VERSION, WEB_GAME_MODULES, WEB_TRANSPORT_TYPES, WEB_GARAGE_GROUPS, summarizeWebAssets } from './game-data/web-game.js';
 
 const execFileAsync=promisify(execFile);
@@ -2543,50 +2543,36 @@ function shippingBerthStatus(g,u) {
   return {docks,capacity,vessels,available:Math.max(0,capacity-vessels),overCapacity:Math.max(0,vessels-capacity)};
 }
 const trainRarityRank={一般:1,稀有:2,史詩:3,傳說:4};
-function drawTrainBlindBoxAssetId(random=Math.random) {
+function drawWeightedAssetId(assetIds,rates,random=Math.random) {
   const roll=random()*100;
   let cumulative=0;
-  for(const assetId of trainBlindBoxIds) {
-    cumulative+=trainBlindBoxRates[assetId];
+  for(const assetId of assetIds) {
+    cumulative+=rates[assetId];
     if(roll<cumulative) return assetId;
   }
-  return trainBlindBoxIds.at(-1);
+  return assetIds.at(-1);
 }
-function drawCoachBlindBoxAssetId(random=Math.random) {
-  const roll=random()*100;
-  let cumulative=0;
-  for(const assetId of coachBlindBoxIds) {
-    cumulative+=coachBlindBoxRates[assetId];
-    if(roll<cumulative) return assetId;
-  }
-  return coachBlindBoxIds.at(-1);
+const dailyBlindBoxTables={train:'train_blind_box_daily',coach:'coach_blind_box_daily',shipping:'shipping_blind_box_daily'};
+function dailyBlindBoxPurchasedToday(type,g,u) {
+  const table=dailyBlindBoxTables[type];
+  if(!table) throw new Error('不支援的每日盲盒類型');
+  return db.prepare(`SELECT purchase_day FROM ${table} WHERE guild_id=? AND user_id=?`).get(g,u)?.purchase_day===trainBlindBoxDay();
 }
-function drawShippingBlindBoxAssetId(random=Math.random) {
-  const roll=random()*100;
-  let cumulative=0;
-  for(const assetId of shippingBlindBoxIds) {
-    cumulative+=shippingBlindBoxRates[assetId];
-    if(roll<cumulative) return assetId;
-  }
-  return shippingBlindBoxIds.at(-1);
-}
-function shippingBlindBoxPurchasedToday(g,u) {
-  return db.prepare('SELECT purchase_day FROM shipping_blind_box_daily WHERE guild_id=? AND user_id=?').get(g,u)?.purchase_day===trainBlindBoxDay();
-}
-function openShippingBlindBox(g,u) {
+function openDailyBlindBox(g,u,{type,price,assetIds,rates,ledgerKind,reason,alreadyPurchasedMessage,beforeOpen}) {
+  const table=dailyBlindBoxTables[type];
+  if(!table) throw new Error('不支援的每日盲盒類型');
   ensureWallet(g,u);
   db.exec('BEGIN IMMEDIATE');
   try {
-    const day=trainBlindBoxDay(),daily=db.prepare('SELECT purchase_day FROM shipping_blind_box_daily WHERE guild_id=? AND user_id=?').get(g,u),berth=shippingBerthStatus(g,u);
-    if(daily?.purchase_day===day) throw new Error('你今天已購買過船運盲盒，請於台北時間明天再來');
-    if(!berth.docks.length) throw new Error('請先到 /資產商城 分類:碼頭 購買碼頭，才能開啟船運盲盒');
-    if(berth.available<1) throw new Error(`船位不足（目前船舶 ${berth.vessels}/${berth.capacity}），請先購買船位擴建權`);
-    if(balance(g,u)<SHIPPING_BLIND_BOX_SINGLE_PRICE) throw new Error(`金幣不足，需要 ${fmt(SHIPPING_BLIND_BOX_SINGLE_PRICE)}`);
-    const next=changeBalanceUnlocked(g,u,-SHIPPING_BLIND_BOX_SINGLE_PRICE,'shipping_blind_box',u,'購買每日船運盲盒 x1');
-    const assetId=drawShippingBlindBoxAssetId();
+    const day=trainBlindBoxDay();
+    if(db.prepare(`SELECT purchase_day FROM ${table} WHERE guild_id=? AND user_id=?`).get(g,u)?.purchase_day===day) throw new Error(alreadyPurchasedMessage);
+    beforeOpen?.();
+    if(balance(g,u)<price) throw new Error(`金幣不足，需要 ${fmt(price)}`);
+    const next=changeBalanceUnlocked(g,u,-price,ledgerKind,u,reason);
+    const assetId=drawWeightedAssetId(assetIds,rates);
     addAssetQuantity(g,u,assetId,1);
     ensureAssetBuff(g,u,assetId,'transport');
-    db.prepare(`INSERT INTO shipping_blind_box_daily(guild_id,user_id,purchase_day) VALUES(?,?,?)
+    db.prepare(`INSERT INTO ${table}(guild_id,user_id,purchase_day) VALUES(?,?,?)
       ON CONFLICT(guild_id,user_id) DO UPDATE SET purchase_day=excluded.purchase_day,updated_at=CURRENT_TIMESTAMP`).run(g,u,day);
     db.exec('COMMIT');
     return {assetId,next};
@@ -2594,6 +2580,17 @@ function openShippingBlindBox(g,u) {
     db.exec('ROLLBACK');
     throw error;
   }
+}
+function openShippingBlindBox(g,u) {
+  return openDailyBlindBox(g,u,{
+    type:'shipping',price:SHIPPING_BLIND_BOX_SINGLE_PRICE,assetIds:shippingBlindBoxIds,rates:shippingBlindBoxRates,
+    ledgerKind:'shipping_blind_box',reason:'購買每日船運盲盒 x1',alreadyPurchasedMessage:'你今天已購買過船運盲盒，請於台北時間明天再來',
+    beforeOpen:()=>{
+      const berth=shippingBerthStatus(g,u);
+      if(!berth.docks.length) throw new Error('請先到 /資產商城 分類:碼頭 購買碼頭，才能開啟船運盲盒');
+      if(berth.available<1) throw new Error(`船位不足（目前船舶 ${berth.vessels}/${berth.capacity}），請先購買船位擴建權`);
+    }
+  });
 }
 function shippingBlindBoxCatalogRow(ownerId,selected=null) {
   return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
@@ -2605,7 +2602,7 @@ function shippingBlindBoxCatalogRow(ownerId,selected=null) {
     })));
 }
 function shippingBlindBoxComponents(g,ownerId,selected=null) {
-  const berth=shippingBerthStatus(g,ownerId),purchased=shippingBlindBoxPurchasedToday(g,ownerId),blocked=!berth.docks.length||berth.available<1;
+  const berth=shippingBerthStatus(g,ownerId),purchased=dailyBlindBoxPurchasedToday('shipping',g,ownerId),blocked=!berth.docks.length||berth.available<1;
   return [
     new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`shipping_blind_box_open:${ownerId}`).setLabel(purchased?'今日已購買':blocked?'需要空船位':`每日一盒｜${fmt(SHIPPING_BLIND_BOX_SINGLE_PRICE)}`).setEmoji('🎫').setStyle(ButtonStyle.Primary).setDisabled(purchased||blocked)),
     shippingBlindBoxCatalogRow(ownerId,selected),
@@ -2615,7 +2612,7 @@ function shippingBlindBoxComponents(g,ownerId,selected=null) {
 function shippingBlindBoxOverviewPayload(g,u,notice='') {
   const berth=shippingBerthStatus(g,u),owned=assetsOf(g,u).filter(row=>shippingBlindBoxIds.includes(row.asset_id)&&row.quantity>0),ownedKinds=owned.length;
   const best=assetsOf(g,u).filter(row=>shippingVesselIds.includes(row.asset_id)&&row.quantity>0).sort((a,b)=>(assetCatalog[b.asset_id]?.shipRevenueBonus||0)-(assetCatalog[a.asset_id]?.shipRevenueBonus||0))[0];
-  const showcase=assetCatalog.ship_box_starlight_leviathan,purchased=shippingBlindBoxPurchasedToday(g,u),bestText=best?`${assetCatalog[best.asset_id].name}｜船運營收 **+${Math.round(assetCatalog[best.asset_id].shipRevenueBonus*100)}%**`:'尚未持有船舶';
+  const showcase=assetCatalog.ship_box_starlight_leviathan,purchased=dailyBlindBoxPurchasedToday('shipping',g,u),bestText=best?`${assetCatalog[best.asset_id].name}｜船運營收 **+${Math.round(assetCatalog[best.asset_id].shipRevenueBonus*100)}%**`:'尚未持有船舶';
   const embed=new EmbedBuilder().setColor(0x0B4F6C).setTitle('⚓ 船運盲盒｜10 艘限定船舶')
     .setDescription(`${notice?`${notice}\n\n`:''}每盒：**${fmt(SHIPPING_BLIND_BOX_SINGLE_PRICE)}**｜每日限購：**1 盒**\n今日狀態：**${purchased?'已購買':'尚未購買'}**（台北時間每日重置）\n\n每次開箱都需要 **1 個空船位**；碼頭：**${berth.docks.length} 座**｜停泊：**${berth.vessels}/${berth.capacity} 艘**｜空位：**${berth.available}**。\n抽到的船舶可在 **海上船運 → 選擇事業載具** 中配置，同類型船舶不重複疊加。\n\n**獎池收藏**\n已收集：**${ownedKinds}/10 種**\n最佳船舶：${bestText}\n金庫：**${fmt(balance(g,u))}**`)
     .setFooter({text:'使用下拉選單可查看每艘船的圖片、機率與船運營收加成'});
@@ -2634,29 +2631,11 @@ function shippingBlindBoxResultPayload(g,u,result) {
     .setDescription(`獲得：${asset.name}\n稀有度：**${asset.rarity}**\n船運營收：**+${Math.round(asset.shipRevenueBonus*100)}%**\n\n可立即在 **海上船運 → 選擇事業載具** 中配置。\n目前金庫：**${fmt(result.next)}**`);
   return {...assetMediaPayload(embed,result.assetId,asset),components:shippingBlindBoxComponents(g,u,result.assetId)};
 }
-function coachBlindBoxPurchasedToday(g,u) {
-  return db.prepare('SELECT purchase_day FROM coach_blind_box_daily WHERE guild_id=? AND user_id=?').get(g,u)?.purchase_day===trainBlindBoxDay();
-}
 function openCoachBlindBox(g,u) {
-  ensureWallet(g,u);
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const day=trainBlindBoxDay();
-    const daily=db.prepare('SELECT purchase_day FROM coach_blind_box_daily WHERE guild_id=? AND user_id=?').get(g,u);
-    if(daily?.purchase_day===day) throw new Error('你今天已購買過客運盲盒，請於台北時間明天再來');
-    if(balance(g,u)<COACH_BLIND_BOX_SINGLE_PRICE) throw new Error(`金幣不足，需要 ${fmt(COACH_BLIND_BOX_SINGLE_PRICE)}`);
-    const next=changeBalanceUnlocked(g,u,-COACH_BLIND_BOX_SINGLE_PRICE,'train_blind_box',u,'購買每日客運盲盒 x1');
-    const assetId=drawCoachBlindBoxAssetId();
-    addAssetQuantity(g,u,assetId,1);
-    ensureAssetBuff(g,u,assetId,'transport');
-    db.prepare(`INSERT INTO coach_blind_box_daily(guild_id,user_id,purchase_day) VALUES(?,?,?)
-      ON CONFLICT(guild_id,user_id) DO UPDATE SET purchase_day=excluded.purchase_day,updated_at=CURRENT_TIMESTAMP`).run(g,u,day);
-    db.exec('COMMIT');
-    return {assetId,next};
-  } catch(error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
+  return openDailyBlindBox(g,u,{
+    type:'coach',price:COACH_BLIND_BOX_SINGLE_PRICE,assetIds:coachBlindBoxIds,rates:coachBlindBoxRates,
+    ledgerKind:'train_blind_box',reason:'購買每日客運盲盒 x1',alreadyPurchasedMessage:'你今天已購買過客運盲盒，請於台北時間明天再來'
+  });
 }
 function coachBlindBoxCatalogRow(ownerId,selected=null) {
   return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
@@ -2668,7 +2647,7 @@ function coachBlindBoxCatalogRow(ownerId,selected=null) {
     })));
 }
 function coachBlindBoxComponents(g,ownerId,selected=null) {
-  const purchased=coachBlindBoxPurchasedToday(g,ownerId);
+  const purchased=dailyBlindBoxPurchasedToday('coach',g,ownerId);
   return [
     new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`coach_blind_box_open:${ownerId}`).setLabel(purchased?'今日已購買':`每日一盒｜${fmt(COACH_BLIND_BOX_SINGLE_PRICE)}`).setEmoji('🎫').setStyle(ButtonStyle.Primary).setDisabled(purchased)),
     coachBlindBoxCatalogRow(ownerId,selected),
@@ -2678,7 +2657,7 @@ function coachBlindBoxComponents(g,ownerId,selected=null) {
 function coachBlindBoxOverviewPayload(g,u,notice='') {
   const owned=assetsOf(g,u).filter(row=>coachBlindBoxIds.includes(row.asset_id)&&row.quantity>0),ownedKinds=owned.length;
   const best=assetsOf(g,u).filter(row=>coachAssetIds.includes(row.asset_id)&&row.quantity>0).sort((a,b)=>(assetCatalog[b.asset_id]?.coachRevenueBonus||0)-(assetCatalog[a.asset_id]?.coachRevenueBonus||0))[0];
-  const showcase=assetCatalog.coach_box_starlight_sleeper,purchased=coachBlindBoxPurchasedToday(g,u);
+  const showcase=assetCatalog.coach_box_starlight_sleeper,purchased=dailyBlindBoxPurchasedToday('coach',g,u);
   const bestText=best?`${assetCatalog[best.asset_id].name}｜客運營收 **+${Math.round(assetCatalog[best.asset_id].coachRevenueBonus*100)}%**`:'尚未持有客運巴士';
   const embed=new EmbedBuilder().setColor(0x1565C0).setTitle('🚌 客運盲盒｜10 輛長途巴士')
     .setDescription(`${notice?`${notice}\n\n`:''}每盒：**${fmt(COACH_BLIND_BOX_SINGLE_PRICE)}**｜每日限購：**1 盒**\n今日狀態：**${purchased?'已購買':'尚未購買'}**（台北時間每日重置）\n\n抽到的客運巴士可在 **城際客運 → 選擇事業載具** 中投入營運；同類型巴士不重複疊加，系統使用你選擇的一輛。\n\n**獎池收藏**\n已收集：**${ownedKinds}/10 種**\n最佳巴士：${bestText}\n金庫：**${fmt(balance(g,u))}**`)
@@ -2829,36 +2808,18 @@ function transportBusinessVehicleName(vehicle) {
 function trainBlindBoxDay() {
   return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 }
-function trainBlindBoxPurchasedToday(g,u) {
-  return db.prepare('SELECT purchase_day FROM train_blind_box_daily WHERE guild_id=? AND user_id=?').get(g,u)?.purchase_day===trainBlindBoxDay();
-}
 function openTrainBlindBoxes(g,u,quantity=1) {
   if(quantity!==1) throw new Error('列車盲盒每天限購一盒，不提供十抽');
-  const total=TRAIN_BLIND_BOX_SINGLE_PRICE;
-  ensureWallet(g,u);
   ensureTrainGarage(g,u);
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const day=trainBlindBoxDay();
-    const daily=db.prepare('SELECT purchase_day FROM train_blind_box_daily WHERE guild_id=? AND user_id=?').get(g,u);
-    if(daily?.purchase_day===day) throw new Error('你今天已購買過列車盲盒，請於台北時間明天再來');
-    const garage=db.prepare('SELECT capacity FROM train_garages WHERE guild_id=? AND user_id=?').get(g,u);
-    const used=ownedGarageTrainCount(g,u);
-    if(used>=garage.capacity) throw new Error(`列車車庫已滿（${used}/${garage.capacity}），請先擴充車庫`);
-    const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,u).balance;
-    if(current<total) throw new Error(`金幣不足，需要 ${fmt(total)}`);
-    const next=changeBalanceUnlocked(g,u,-total,'train_blind_box',u,'購買每日列車盲盒 x1');
-    const assetId=drawTrainBlindBoxAssetId();
-    addAssetQuantity(g,u,assetId,1);
-    ensureAssetBuff(g,u,assetId,'transport');
-    db.prepare(`INSERT INTO train_blind_box_daily(guild_id,user_id,purchase_day) VALUES(?,?,?)
-      ON CONFLICT(guild_id,user_id) DO UPDATE SET purchase_day=excluded.purchase_day,updated_at=CURRENT_TIMESTAMP`).run(g,u,day);
-    db.exec('COMMIT');
-    return {pulls:[assetId],total,next};
-  } catch(error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
+  const result=openDailyBlindBox(g,u,{
+    type:'train',price:TRAIN_BLIND_BOX_SINGLE_PRICE,assetIds:trainBlindBoxIds,rates:trainBlindBoxRates,
+    ledgerKind:'train_blind_box',reason:'購買每日列車盲盒 x1',alreadyPurchasedMessage:'你今天已購買過列車盲盒，請於台北時間明天再來',
+    beforeOpen:()=>{
+      const garage=db.prepare('SELECT capacity FROM train_garages WHERE guild_id=? AND user_id=?').get(g,u),used=ownedGarageTrainCount(g,u);
+      if(used>=garage.capacity) throw new Error(`列車車庫已滿（${used}/${garage.capacity}），請先擴充車庫`);
+    }
+  });
+  return {pulls:[result.assetId],total:TRAIN_BLIND_BOX_SINGLE_PRICE,next:result.next};
 }
 function trainRarityColor(rarity) {
   return {配給:0x546E7A,一般:0x78909C,稀有:0x42A5F5,史詩:0xAB47BC,傳說:0xFFD700}[rarity]||0x607D8B;
@@ -2879,7 +2840,7 @@ function trainBlindBoxCatalogRow(ownerId,selected=null) {
 }
 function trainBlindBoxComponents(g,ownerId,selected=null) {
   const garage=ensureTrainGarage(g,ownerId),used=ownedGarageTrainCount(g,ownerId);
-  const purchased=trainBlindBoxPurchasedToday(g,ownerId),full=used>=garage.capacity;
+  const purchased=dailyBlindBoxPurchasedToday('train',g,ownerId),full=used>=garage.capacity;
   const upgradeCost=trainGarageUpgradeCost(garage.capacity);
   return [
     new ActionRowBuilder().addComponents(
@@ -2893,7 +2854,7 @@ function trainBlindBoxComponents(g,ownerId,selected=null) {
 function trainBlindBoxOverviewPayload(g,u,notice='') {
   ensureStarterTrain(g,u);
   const owned=ownedBlindBoxTrainRows(g,u),ownedKinds=owned.filter(row=>row.quantity>0).length,best=bestOwnedTrain(g,u),showcase=assetCatalog.train_orbital_aurora_superconducting;
-  const garage=ensureTrainGarage(g,u),used=ownedGarageTrainCount(g,u),purchased=trainBlindBoxPurchasedToday(g,u);
+  const garage=ensureTrainGarage(g,u),used=ownedGarageTrainCount(g,u),purchased=dailyBlindBoxPurchasedToday('train',g,u);
   const bestText=best?`${assetCatalog[best.asset_id].name}｜鐵路營收 **+${Math.round(assetCatalog[best.asset_id].trainRevenueBonus*100)}%**`:'尚未持有列車';
   const embed=new EmbedBuilder()
     .setColor(0x7E57C2)
@@ -11260,35 +11221,6 @@ async function webGamePayload(session) {
     }),
     expiresAt:session.exp
   };
-}
-const appearancePublishCooldowns=new Map();
-async function publishAppearance(session) {
-  const key=`${session.guildId}:${session.userId}`,now=Date.now(),last=appearancePublishCooldowns.get(key)||0;
-  if(now-last<30_000) throw new Error(`發布冷卻中，請等待 ${Math.ceil((30_000-(now-last))/1000)} 秒`);
-  appearancePublishCooldowns.set(key,now);
-  try {
-    const channel=await client.channels.fetch(session.channelId);
-    if(!channel?.isTextBased()||typeof channel.send!=='function'||channel.guildId!==session.guildId) throw new Error('原本的 Discord 頻道目前無法發布造型');
-    const user=await client.users.fetch(session.userId),appearance=playerAppearance(session.guildId,session.userId);
-    const selected=COSMETIC_SLOTS.map(slot=>({slot,item:cosmeticById[appearance[slot]]})).filter(entry=>entry.item);
-    const embed=new EmbedBuilder()
-      .setColor(0xD7A4FF)
-      .setAuthor({name:`${user.globalName||user.username} 的個人造型`,iconURL:user.displayAvatarURL({extension:'png',size:128})})
-      .setTitle('✨ 澳門最大賭場｜造型名片')
-      .setDescription(selected.length?'已把網站衣櫃中的造型正式穿戴完成。':'目前使用簡約無配件造型。')
-      .addFields(selected.map(({slot,item})=>({name:`${item.icon} ${COSMETIC_SLOT_LABELS[slot]}`,value:item.name,inline:true})))
-      .setFooter({text:'使用 /玩家 造型 打造專屬外觀'})
-      .setTimestamp();
-    const background=cosmeticById[appearance.background];
-    if(background?.image&&ACTIVITY_PUBLIC_URL) embed.setImage(`${ACTIVITY_PUBLIC_URL}/appearance/backgrounds/${background.image}`);
-    const character=cosmeticById[appearance.character];
-    if(character?.image&&ACTIVITY_PUBLIC_URL) embed.setThumbnail(`${ACTIVITY_PUBLIC_URL}/appearance/characters/${character.image}`);
-    const message=await channel.send({embeds:[embed],allowedMentions:{parse:[]}});
-    return {messageUrl:message.url};
-  } catch(error) {
-    if(appearancePublishCooldowns.get(key)===now) appearancePublishCooldowns.delete(key);
-    throw error;
-  }
 }
 function activityJson(response,status,data) {
   response.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
