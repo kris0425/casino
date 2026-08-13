@@ -57,19 +57,39 @@ function resultCopy(result){
 function showResult(result){
   controlsDisabled(true);const copy=resultCopy(result);elements.resultIcon.textContent=copy.icon;elements.resultEyebrow.textContent=copy.eyebrow;elements.resultTitle.textContent=copy.title;elements.resultMessage.textContent=result?.message||'本局已完成';elements.resultCard.hidden=false;
 }
-async function animateDrop(result){
-  elements.instructionTitle.textContent='落爪中…';elements.instructionText.textContent='正在由伺服器判定夾取結果';elements.claw.classList.add('dropping');beep(220,.18);await wait(900);elements.claw.classList.add('closed');await wait(430);
-  if(result.result?.prize){elements.held.textContent=result.result.prize.emoji;elements.claw.classList.add('has-prize');const node=document.querySelector(`[data-id="${result.result.prize.prizeId}"]`);if(result.result.won&&node)node.classList.add('captured')}
-  elements.claw.classList.remove('dropping');beep(result.result?.won?740:260,.18);await wait(950);
-  if(result.result?.won){elements.instructionTitle.textContent='運送獎品到出口…';elements.claw.style.left='11%';await wait(850);elements.claw.classList.remove('closed');await wait(350)}
-  else if(result.result?.outcome==='slipped'){elements.claw.classList.add('slip');await wait(650)}
+function prepareGrab(result){
+  const prize=result.result?.prize,node=prize?document.querySelector(`[data-id="${prize.prizeId}"]`):null;
+  if(!node) return null;
+  const rigRect=elements.claw.getBoundingClientRect(),prizeRect=node.getBoundingClientRect();
+  const distance=Math.max(118,Math.min(205,prizeRect.top+prizeRect.height*.42-rigRect.top-145));
+  const offset=Math.max(-18,Math.min(18,prizeRect.left+prizeRect.width/2-(rigRect.left+rigRect.width/2)));
+  elements.claw.style.setProperty('--drop-distance',`${distance}px`);elements.claw.style.setProperty('--grip-offset',`${offset}px`);
+  return node;
+}
+function mountHeldPrize(prize,node){
+  elements.held.replaceChildren();const visual=node?.querySelector('img,.fallback')?.cloneNode(true);
+  if(visual) elements.held.append(visual);else elements.held.textContent=prize?.emoji||'🎁';
+  elements.claw.classList.add('has-prize');node?.classList.add('grabbed');
+}
+async function animateResolution(result,targetNode){
+  const outcome=result.result?.outcome;
+  elements.claw.classList.add('closed','grabbing');navigator.vibrate?.(outcome==='missed'?[35]:[45,35,70]);beep(outcome==='missed'?260:520,.12);await wait(330);
+  if(targetNode) mountHeldPrize(result.result.prize,targetNode);await wait(210);
+  elements.instructionTitle.textContent=targetNode?'爪子抓住獎品，正在拉升…':'爪子沒有碰到獎品';elements.instructionText.textContent=targetNode?'爪力判定完成，保持住！':'這次落爪位置沒有對準';
+  elements.claw.classList.remove('dropping','grabbing');elements.claw.classList.add('lifting');beep(result.result?.won?720:330,.17);await wait(1050);
+  if(result.result?.won){
+    elements.instructionTitle.textContent='抓穩了！正在送往取物口';elements.instructionText.textContent='獎品會直接放入你的資產庫';elements.claw.classList.add('transporting');elements.claw.style.setProperty('--claw-x','11%');await wait(1200);
+    elements.claw.classList.remove('closed','lifting');elements.claw.classList.add('releasing');beep(880,.2);navigator.vibrate?.([50,35,90]);await wait(780);
+  }else if(outcome==='slipped'){
+    elements.instructionTitle.textContent='爪力鬆脫！獎品掉下去了';elements.instructionText.textContent='已經夾起，但在運送途中滑落';elements.claw.classList.add('slip');elements.claw.classList.remove('closed');beep(180,.28);navigator.vibrate?.([80,35,120]);await wait(900);targetNode?.classList.add('landed');
+  }else{elements.claw.classList.remove('closed');await wait(280)}
   showResult(result.result);
 }
 async function drop(){
   if(busy||!game||game.status!=='pending')return;busy=true;controlsDisabled(true);
+  elements.instructionTitle.textContent='落爪中…';elements.instructionText.textContent='瞄準完成，爪臂正在下降';beep(230,.12);navigator.vibrate?.(35);
   const request=api('/claw/drop',{method:'POST',body:JSON.stringify({session,clawX})});
-  elements.claw.classList.add('dropping');elements.instructionTitle.textContent='落爪中…';beep(230,.12);
-  try{const result=await request;elements.claw.classList.remove('dropping');game=result;await animateDrop(result)}catch(error){elements.claw.classList.remove('dropping');showError(error.message);controlsDisabled(false);busy=false}
+  try{const result=await request,targetNode=prepareGrab(result);elements.claw.classList.add('dropping');await wait(920);game=result;await animateResolution(result,targetNode)}catch(error){elements.claw.classList.remove('dropping','closed','grabbing');showError(error.message);controlsDisabled(false);busy=false}
 }
 for(const [button,direction] of [[elements.left,-1],[elements.right,1]]){
   button.addEventListener('pointerdown',event=>{event.preventDefault();holdMove(direction)});button.addEventListener('pointerup',stopMove);button.addEventListener('pointercancel',stopMove);button.addEventListener('pointerleave',stopMove);
