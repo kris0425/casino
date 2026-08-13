@@ -1291,6 +1291,36 @@ function migrateLegacyAmmo(sourceIds,targetId) {
 migrateLegacyAmmo(['ammo_9x19','ammo_45_acp','ammo_57x28','ammo_50ae','ammo_smg'],'ammo_pistol');
 migrateLegacyAmmo(['ammo_556_nato','ammo_545x39','ammo_762x39','ammo_762x51_nato','ammo_58x42'],'ammo_rifle');
 
+const INTEGER_WALLET_BALANCE_MIGRATION='2026-08-13-normalize-wallet-balances-to-integers';
+function migrateWalletBalancesToIntegers() {
+  if(db.prepare('SELECT 1 FROM system_migrations WHERE migration_id=?').get(INTEGER_WALLET_BALANCE_MIGRATION)) return null;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const rows=db.prepare("SELECT guild_id,user_id,balance FROM wallets WHERE typeof(balance)<>'integer'").all();
+    let repaired=0,skipped=0;
+    for(const row of rows) {
+      const numeric=Number(row.balance),normalized=Math.trunc(numeric);
+      if(!Number.isFinite(numeric)||!Number.isSafeInteger(normalized)||normalized<0) {
+        skipped++;
+        continue;
+      }
+      db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(normalized,row.guild_id,row.user_id);
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+        .run(row.guild_id,row.user_id,0,normalized,'wallet_repair',null,'修正舊版獎勵造成的小數金幣（小數部分捨去）');
+      repaired++;
+    }
+    db.prepare('INSERT INTO system_migrations(migration_id,details_json) VALUES(?,?)')
+      .run(INTEGER_WALLET_BALANCE_MIGRATION,JSON.stringify({repaired,skipped}));
+    db.exec('COMMIT');
+    if(repaired||skipped) console.log(`Wallet integer migration repaired=${repaired} skipped=${skipped}`);
+    return {repaired,skipped};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+migrateWalletBalancesToIntegers();
+
 function ensureWallet(guildId, userId) {
   db.prepare('INSERT OR IGNORE INTO wallets(guild_id,user_id,balance) VALUES(?,?,?)').run(guildId, userId, STARTING);
   return db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(guildId, userId).balance;
@@ -1323,6 +1353,20 @@ function changeBalance(g, u, delta, kind, actor = null, reason = '') {
     db.exec('COMMIT');
     return next;
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+function bribeMizi(g,u) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const current=ensureWallet(g,u);
+    if(current<500) throw new Error(`賄絡需要 ${fmt(500)}，你的金幣不足`);
+    const staminaAfter=consumeStamina(g,u,5);
+    const next=changeBalanceUnlocked(g,u,-500,'bribe',u,'賄絡迷子');
+    db.exec('COMMIT');
+    return {next,staminaAfter};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 function ownsCosmetic(g,u,cosmeticId) {
   const item=cosmeticById[cosmeticId];
@@ -6277,7 +6321,9 @@ async function triggerRandomEvent(i,g,u) {
   const eventMessage=await i.followUp({embeds:[new EmbedBuilder().setColor(color).setTitle(title).setDescription(description)]}).catch(()=>null);
   scheduleDiscordMessageDeletion(eventMessage);
 }
-function scheduleRandomEvent(i,g,u) { setTimeout(()=>triggerRandomEvent(i,g,u),5000); }
+function scheduleRandomEvent(i,g,u) {
+  setTimeout(()=>triggerRandomEvent(i,g,u).catch(error=>console.error(`隨機事件執行失敗 guild=${g} user=${u}:`,error)),5000);
+}
 function applyHospitalRandomEvent(g,u,{balanceChanger=changeBalance}={}) {
   if(Math.random()>=0.35) return {text:'',image:null};
   const roll=Math.floor(Math.random()*6);
@@ -10294,12 +10340,10 @@ async function handleInteraction(i) {
       if(hospitalized) throw new Error(`殭屍病毒封鎖了醫院，你還有 ${jailText(hospitalized)} 才能行動`);
       const remaining=jailRemaining(g,u);
       if(!remaining) throw new Error('你目前不在迷子的小黑屋，不需要賄絡');
-      if(balance(g,u)<500) throw new Error(`賄絡需要 ${fmt(500)}，你的金幣不足`);
-      const staminaAfter=consumeStamina(g,u,5);
-      scheduleRandomEvent(i,g,u);
-      const next=changeBalance(g,u,-500,'bribe',u,'賄絡迷子');
+      const {next,staminaAfter}=bribeMizi(g,u);
       const refused=Math.random()<0.45;
       await i.reply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('💰 嘗試賄絡迷子…').setDescription(`你悄悄遞出一袋 **500 金幣**。\n迷子正在考慮……\n體力：${staminaAfter}/${staminaMax(g,u)}`)]});
+      scheduleRandomEvent(i,g,u);
       await sleep(1600);
       if(refused) {
         return i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🙅 迷子拒絕賄絡！').setDescription(`迷子沒收了 **${fmt(500)}**，但沒有放你出去。\n剩餘服刑：${jailText(jailRemaining(g,u))}\n金庫：${fmt(next)}`)]});
@@ -10477,7 +10521,7 @@ async function handleInteraction(i) {
       };
       const selected=jobs[job];
       if(!selected) throw new Error('未知的工作');
-      const earned=selected.amount*workMultiplier(g,u);
+      const earned=Math.floor(selected.amount*workMultiplier(g,u));
       legalWorkCount(g,u,true);
       const before=balance(g,u), next=changeBalance(g,u,earned,'job',u,selected.title), actual=next-before;
       if(job==='k_car_wash'&&Math.random()<K_CAR_WASH_SCRATCH_CHANCE) {

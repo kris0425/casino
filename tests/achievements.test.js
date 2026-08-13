@@ -1703,3 +1703,23 @@ test('世界首領提供共享血量、體力挑戰、貢獻排行與寶庫比�
   assert.match(update.changes.join('\n'),/最後一擊/);
   assert.match(update.changes.join('\n'),/平日 12:00–14:00/);
 });
+
+test('賄絡迷子會修復舊版小數金庫並以單一交易扣除體力與金幣',()=>{
+  const migration=source.match(/function migrateWalletBalancesToIntegers\(\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(migration,/typeof\(balance\)<>'integer'/);
+  assert.match(migration,/Math\.trunc\(numeric\)/);
+  assert.match(migration,/'wallet_repair'/);
+  assert.match(source,/migrateWalletBalancesToIntegers\(\);/);
+
+  const bribe=source.match(/function bribeMizi\(g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(bribe,/BEGIN IMMEDIATE/);
+  assert.match(bribe,/consumeStamina\(g,u,5\)/);
+  assert.match(bribe,/changeBalanceUnlocked\(g,u,-500,'bribe',u,'賄絡迷子'\)/);
+  assert.match(bribe,/COMMIT/);
+  assert.match(bribe,/ROLLBACK/);
+  assert.match(source,/const \{next,staminaAfter\}=bribeMizi\(g,u\)/);
+  assert.match(source,/const earned=Math\.floor\(selected\.amount\*workMultiplier\(g,u\)\)/,'合法工作收入必須維持整數');
+
+  const scheduler=source.match(/function scheduleRandomEvent\(i,g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(scheduler,/triggerRandomEvent\(i,g,u\)\.catch/,'延遲隨機事件不可產生未處理的 Promise rejection');
+});
