@@ -11,7 +11,7 @@
   <main class="page-shell">
     <header class="brand-bar">
       <div class="brand-mark">♠</div>
-      <div><strong>澳門最大賭場</strong><small>NEON VAULT · CLAW ARCADE</small></div>
+      <div><strong>澳門最大賭場</strong><small>ROYAL ARCADE · MACHINE 07</small></div>
       <button id="soundButton" class="sound-button" type="button" aria-label="切換音效">♪</button>
     </header>
 
@@ -27,9 +27,13 @@
     </section>
 
     <section class="cabinet" id="cabinet">
-      <div class="cabinet-top"><i></i><span>★ JACKPOT CLAW ★</span><i></i></div>
+      <div class="cabinet-top">
+        <div class="marquee-bulbs" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="marquee-logo"><b>♠</b><span><strong>NEON VAULT</strong><small>PREMIUM PRIZE ARCADE</small></span><b>♠</b></div>
+      </div>
       <div class="machine-window" id="machineWindow">
         <div class="light-strip"></div>
+        <div class="machine-hud"><span>CLAW CAM · 01</span><b>● LIVE</b><span>PRIZE VAULT</span></div>
         <div class="rail"></div>
         <div class="claw-rig" id="clawRig" style="--claw-x:50%">
           <div class="trolley"><b></b><b></b></div>
@@ -44,17 +48,19 @@
         <div class="floor-grid"></div>
       </div>
       <div class="cabinet-panel">
-        <div class="instruction"><span class="pulse-dot"></span><strong id="instructionTitle">移動爪子，對準想要的獎品</strong><small id="instructionText">越接近獎品中心，成功抓住的機會越高</small></div>
-        <div class="joystick" aria-hidden="true"><span></span></div>
+        <div class="panel-screen"><span class="pulse-dot"></span><div class="instruction"><strong id="instructionTitle">移動爪子，對準想要的獎品</strong><small id="instructionText">越接近獎品中心，成功抓住的機會越高</small></div></div>
+        <div class="joystick-wrap" aria-hidden="true"><div class="joystick"><span></span></div><small>MOVE</small></div>
       </div>
+      <div class="control-deck">
+        <section class="controls" aria-label="夾娃娃機控制器">
+          <button id="leftButton" class="move-button" type="button"><span>◀</span>向左</button>
+          <button id="dropButton" class="drop-button" type="button"><span>CLAW</span>落爪</button>
+          <button id="rightButton" class="move-button" type="button">向右<span>▶</span></button>
+        </section>
+        <p class="keyboard-tip">A／D 或方向鍵移動 · 空白鍵落爪</p>
+      </div>
+      <div class="cabinet-base" aria-hidden="true"><div class="speaker"></div><div class="machine-crest">♠ <span>MACAU ROYAL ARCADE</span> ♠</div><div class="coin-slot"><i></i><small>PLAYER READY</small></div></div>
     </section>
-
-    <section class="controls" aria-label="夾娃娃機控制器">
-      <button id="leftButton" class="move-button" type="button"><span>◀</span>向左</button>
-      <button id="dropButton" class="drop-button" type="button"><span>⬇</span>落爪</button>
-      <button id="rightButton" class="move-button" type="button">向右<span>▶</span></button>
-    </section>
-    <p class="keyboard-tip">電腦可使用 A／D 或方向鍵移動，空白鍵落爪</p>
 
     <section class="legend">
       <span><i class="ammo"></i>彈藥補給</span><span><i class="weapon"></i>武器收藏</span>
