@@ -14,6 +14,12 @@ test('互動夾娃娃機具備動畫控制、伺服器結算與四類資產獎�
   const js=readFileSync(new URL('../activity/public/claw.js',import.meta.url),'utf8');
   assert.match(source,/CREATE TABLE IF NOT EXISTS web_claw_games/);
   assert.match(source,/const CLAW_MACHINE_COST=25000/);
+  assert.match(source,/const CLAW_MACHINE_PRECISION_BONUS=0\.06/);
+  assert.match(source,/const CLAW_MACHINE_MAX_GRIP_CHANCE=0\.82/);
+  assert.match(source,/ammo:\{[^\n]+grip:0\.72\}/);
+  assert.match(source,/weapon:\{[^\n]+grip:0\.50\}/);
+  assert.match(source,/vehicle:\{[^\n]+grip:0\.32\}/);
+  assert.match(source,/property:\{[^\n]+grip:0\.14\}/);
   assert.match(source,/const clawPrizePools=\{[\s\S]+ammo:[\s\S]+weapon:[\s\S]+vehicle:[\s\S]+property:/);
   assert.match(source,/function webClawDrop\(token,requestedX\)/);
   assert.match(source,/addAssetQuantity\(row\.guild_id,row\.user_id,awarded\.assetId,awarded\.quantity\)/);

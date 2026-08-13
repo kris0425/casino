@@ -11612,6 +11612,8 @@ function expireWebJengaGames() {
 const CLAW_MACHINE_COST=25000;
 const CLAW_MACHINE_STAMINA=5;
 const CLAW_MACHINE_DURATION_MS=10*60*1000;
+const CLAW_MACHINE_PRECISION_BONUS=0.06;
+const CLAW_MACHINE_MAX_GRIP_CHANCE=0.82;
 const clawPrizePools={
   ammo:[
     {assetId:'ammo_pistol',min:3,max:8},
@@ -11632,10 +11634,10 @@ const clawPrizePools={
   ]
 };
 const clawTypeMeta={
-  ammo:{label:'彈藥補給',emoji:'📦',rarity:'常見',grip:0.90},
-  weapon:{label:'武器收藏',emoji:'🔫',rarity:'稀有',grip:0.68},
-  vehicle:{label:'車輛大獎',emoji:'🚗',rarity:'史詩',grip:0.52},
-  property:{label:'房產頭獎',emoji:'🏠',rarity:'傳說',grip:0.34}
+  ammo:{label:'彈藥補給',emoji:'📦',rarity:'常見',grip:0.72},
+  weapon:{label:'武器收藏',emoji:'🔫',rarity:'稀有',grip:0.50},
+  vehicle:{label:'車輛大獎',emoji:'🚗',rarity:'史詩',grip:0.32},
+  property:{label:'房產頭獎',emoji:'🏠',rarity:'傳說',grip:0.14}
 };
 function clawPrizeEntry(type,g,u,used=new Set()) {
   const available=(clawPrizePools[type]||[]).filter(entry=>{
@@ -11740,7 +11742,7 @@ function webClawDrop(token,requestedX) {
       return !best||distance<best.distance?{prize,distance}:best;
     },null);
     const target=nearest&&nearest.distance<=catchRadius?nearest:null;
-    const gripChance=target?Math.min(0.96,Number(target.prize.grip)+(1-target.distance/catchRadius)*0.08):0;
+    const gripChance=target?Math.min(CLAW_MACHINE_MAX_GRIP_CHANCE,Number(target.prize.grip)+(1-target.distance/catchRadius)*CLAW_MACHINE_PRECISION_BONUS):0;
     let won=Boolean(target&&Math.random()<gripChance),awarded=target?.prize||null;
     if(won&&assetCatalog[awarded.assetId]?.unique&&assetQuantity(row.guild_id,row.user_id,awarded.assetId)>0) {
       awarded={...clawPrizeEntry('ammo',row.guild_id,row.user_id),prizeId:awarded.prizeId,x:awarded.x,grip:clawTypeMeta.ammo.grip};
