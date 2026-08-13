@@ -1,0 +1,8 @@
+{
+  "id": "2026-08-13-hideout-loot-percent-rounding",
+  "title": "修正藏身處戰利品百分比顯示",
+  "changes": [
+    "藏身處面板的成功戰利品加成改為四捨五入後顯示。",
+    "修正 JavaScript 浮點誤差造成百分比出現過長小數的問題。"
+  ]
+}

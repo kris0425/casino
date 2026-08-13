@@ -4081,7 +4081,7 @@ function hideoutEmbed(g,u,notice='') {
     const level=Number(row[definition.column]||0),next=hideoutUpgradeCost(row,key);
     return `${definition.emoji} **${definition.name} Lv.${level}/${HIDEOUT_MAX_LEVEL}**\n└ ${definition.effect}${next===null?'｜已滿級':`｜下級 ${fmt(next)}`}`;
   }).join('\n\n');
-  const chance=hideoutHeistChanceBonus(g,u),loot=(hideoutLootMultiplier(g,u)-1)*100,jail=hideoutJailReductionMs(g,u)/1000;
+  const chance=hideoutHeistChanceBonus(g,u),loot=Math.round((hideoutLootMultiplier(g,u)-1)*100),jail=hideoutJailReductionMs(g,u)/1000;
   return new EmbedBuilder().setColor(0x6D4C41).setTitle('🏚️ 我的藏身處').setDescription(`${notice?`${notice}\n\n`:''}目前據點：**${property.name}**\n房產基礎加成：**+${hideoutPropertyChanceBonus(row.property_id)}%** 搶劫成功率\n\n${upgrades}\n\n**目前總效果**\n搶劫成功率：**+${chance}%**\n成功戰利品：**+${loot}%**\n失敗刑期減免：**${jail} 秒**\n\n升級費用會直接銷毀，是高階玩家的長期建設項目。`);
 }
 const hideoutShowcaseCategories={

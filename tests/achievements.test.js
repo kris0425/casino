@@ -1723,3 +1723,9 @@ test('賄絡迷子會修復舊版小數金庫並以單一交易扣除體力與�
   const scheduler=source.match(/function scheduleRandomEvent\(i,g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.match(scheduler,/triggerRandomEvent\(i,g,u\)\.catch/,'延遲隨機事件不可產生未處理的 Promise rejection');
 });
+
+test('藏身處成功戰利品百分比四捨五入顯示',()=>{
+  const embed=source.match(/function hideoutEmbed\(g,u,notice=''\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(embed,/loot=Math\.round\(\(hideoutLootMultiplier\(g,u\)-1\)\*100\)/);
+  assert.match(embed,/成功戰利品：\*\*\+\$\{loot\}%\*\*/);
+});
