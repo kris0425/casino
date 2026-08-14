@@ -1155,16 +1155,21 @@ test('火車站配給基礎列車並支援最多 20 格車庫',()=>{
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ledger').get().count,1);
 });
 
-test('交通事業十三種隨機事件會依事業類型套用收益、成本或時間，員工罷工需玩家支付協調費',()=>{
+test('交通事業十六種隨機事件會依事業類型套用收益、成本或時間，員工罷工需玩家支付協調費',()=>{
   const eventBlock=source.match(/const transportRandomEvents=\[[\s\S]+?\n\];/)?.[0]||'';
   assert.ok(eventBlock,'缺少交通隨機事件清單');
   const events=new Function(`${eventBlock}; return transportRandomEvents;`)();
+  const positiveEventIds=['tailwind','vip_contract','smart_dispatch','festival_travel_boom','bulk_freight_contract','green_transport_subsidy'];
   const negativeEventIds=['safety_inspection','staff_strike','extreme_weather','fuel_price_spike','mechanical_failure','passenger_claim','cargo_damage','road_closure','signal_failure','port_congestion'];
-  for(const eventId of ['tailwind','vip_contract','smart_dispatch',...negativeEventIds]) {
+  for(const eventId of [...positiveEventIds,...negativeEventIds]) {
     assert.match(source,new RegExp(`id:'${eventId}'`),`缺少交通隨機事件 ${eventId}`);
   }
-  assert.equal(events.length,13);
+  assert.equal(events.length,16);
+  assert.equal(events.filter(event=>positiveEventIds.includes(event.id)).length,6);
   assert.ok(events.filter(event=>negativeEventIds.includes(event.id)).length>=10,'負面事件數量不足');
+  assert.deepEqual(events.find(event=>event.id==='festival_travel_boom').businessTypes,['airline','rail','coach']);
+  assert.deepEqual(events.find(event=>event.id==='bulk_freight_contract').businessTypes,['freight','shipping']);
+  assert.equal(events.find(event=>event.id==='green_transport_subsidy').operatingCostMultiplier,0.86);
   assert.deepEqual(events.find(event=>event.id==='passenger_claim').businessTypes,['airline','rail','coach']);
   assert.deepEqual(events.find(event=>event.id==='cargo_damage').businessTypes,['freight','shipping']);
   assert.deepEqual(events.find(event=>event.id==='road_closure').businessTypes,['coach','freight']);
