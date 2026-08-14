@@ -3179,12 +3179,21 @@ const transportRandomEvents=[
   {id:'vip_contract',emoji:'💼',name:'VIP 加急合約',text:'臨時接到高價企業與 VIP 客戶的加急委託。',revenueMultiplier:1.25},
   {id:'smart_dispatch',emoji:'🛰️',name:'智慧調度成功',text:'系統找出更省油的調度方案，降低本次營運成本。',operatingCostMultiplier:0.82},
   {id:'safety_inspection',emoji:'🛠️',name:'臨時安全檢查',text:'主管機關要求加做安全檢查，行程延長且收益略受影響。',revenueMultiplier:0.90,durationMultiplier:1.20},
-  {id:'staff_strike',emoji:'📣',name:'員工罷工',text:'輪班人員集體停工，必須支付協調費才能讓本次任務出發。',requiresResolution:true}
+  {id:'staff_strike',emoji:'📣',name:'員工罷工',text:'輪班人員集體停工，必須支付協調費才能讓本次任務出發。',requiresResolution:true},
+  {id:'extreme_weather',emoji:'⛈️',name:'極端天候',text:'暴雨、強風與低能見度迫使班次降速，部分訂單取消。',revenueMultiplier:0.78,durationMultiplier:1.35},
+  {id:'fuel_price_spike',emoji:'⛽',name:'燃料價格暴漲',text:'臨時燃料與能源附加費上升，本次營運成本增加。',operatingCostMultiplier:1.32},
+  {id:'mechanical_failure',emoji:'🔧',name:'機件臨時故障',text:'出發前發現關鍵零件異常，緊急維修增加成本並延誤行程。',operatingCostMultiplier:1.22,durationMultiplier:1.25},
+  {id:'passenger_claim',emoji:'🧾',name:'旅客服務賠償',text:'班次服務發生爭議，公司須退款及發放補償，實收營收下降。',businessTypes:['airline','rail','coach'],revenueMultiplier:0.82},
+  {id:'cargo_damage',emoji:'📦',name:'貨物破損理賠',text:'部分貨物在裝卸過程受損，理賠金將從本次營收扣除。',businessTypes:['freight','shipping'],revenueMultiplier:0.72},
+  {id:'road_closure',emoji:'🚧',name:'道路臨時封閉',text:'主要幹道施工封閉，車隊必須繞道並支付額外通行成本。',businessTypes:['coach','freight'],operatingCostMultiplier:1.12,durationMultiplier:1.30},
+  {id:'signal_failure',emoji:'🚦',name:'鐵路號誌故障',text:'號誌系統異常導致列車限速，部分旅客辦理退票。',businessTypes:['rail'],revenueMultiplier:0.88,durationMultiplier:1.38},
+  {id:'port_congestion',emoji:'⚓',name:'港口嚴重壅塞',text:'泊位與裝卸設備滿載，船舶須在錨地等待才能靠港。',businessTypes:['shipping'],revenueMultiplier:0.90,durationMultiplier:1.45}
 ];
 const transportEventById=id=>transportRandomEvents.find(event=>event.id===id)||null;
-function rollTransportRandomEvent(random=Math.random) {
+function rollTransportRandomEvent(businessType,random=Math.random) {
   if(random()>=0.45) return null;
-  return transportRandomEvents[Math.floor(random()*transportRandomEvents.length)];
+  const candidates=transportRandomEvents.filter(event=>!event.businessTypes||event.businessTypes.includes(businessType));
+  return candidates[Math.floor(random()*candidates.length)];
 }
 function activeTransportIncident(g,u,businessType) {
   const row=db.prepare('SELECT * FROM transport_incidents WHERE guild_id=? AND user_id=? AND business_type=?').get(g,u,businessType)||null;
@@ -3197,7 +3206,7 @@ function activeTransportIncident(g,u,businessType) {
 function prepareTransportRandomEvent(g,u,businessType,route,{random=Math.random}={}) {
   const pending=activeTransportIncident(g,u,businessType);
   if(pending) return {requiresStrikeResolution:true,event:transportEventById(pending.event_id),incident:pending};
-  const event=rollTransportRandomEvent(random);
+  const event=rollTransportRandomEvent(businessType,random);
   if(!event?.requiresResolution) return {event,incident:null,requiresStrikeResolution:false};
   const fee=Math.max(50000,Math.round(route.operatingCost*0.60));
   const incident={guildId:g,userId:u,businessType,routeId:route.id||'',eventId:event.id,resolutionFee:fee,expiresAt:Date.now()+15*60*1000};
@@ -3229,7 +3238,7 @@ function transportStrikeComponents(u,businessType,incident) {
   )];
 }
 function transportOperationStartedNotice(result,businessType) {
-  const eventNotice=result.event?`\n${result.event.emoji} 突發事件：**${result.event.name}**｜${result.event.text}`:'';
+  const eventNotice=result.event?`\n${result.event.emoji} 突發事件：**${result.event.name}**｜${result.event.text}\n事件影響：**${transportEventEffectText(result.event)}**`:'';
   const upkeepNotice=result.upkeep.graceActivated
     ? '\n🆕 維持費新制寬限已啟用，本次免收；牌照 7 天後續期。'
     : result.upkeep.totalPaid>0?`\n🧾 本次另繳維修／保險／牌照：**${fmt(result.upkeep.totalPaid)}**`:'';
@@ -3238,6 +3247,14 @@ function transportOperationStartedNotice(result,businessType) {
   }
   const vehicleText=result.vehicle?`\n事業載具：${transportBusinessVehicleName(result.vehicle)}${result.vehicle.bonus?`｜營收 **+${Math.round(result.vehicle.bonus*100)}%**`:''}`:'';
   return `${result.type.emoji} **${result.route.name} 已開始營運！**\n場站：${result.station.name}${vehicleText}\n已支付營運成本：**${fmt(result.operatingCost)}**｜消耗體力：**${result.staminaUsed}**\n今日第 **${result.dailyRunNumber}** 趟｜收益係數：**×${result.dailyMultiplier.toFixed(2)}**${eventNotice}${upkeepNotice}\n完成時間：<t:${Math.floor(result.completesAt/1000)}:F>（<t:${Math.floor(result.completesAt/1000)}:R>）`;
+}
+function transportEventEffectText(event) {
+  if(event?.requiresResolution) return '支付協調費後恢復正常營運';
+  const effects=[];
+  if(event?.revenueMultiplier&&event.revenueMultiplier!==1) effects.push(`營收 ${event.revenueMultiplier>1?'+':''}${Math.round((event.revenueMultiplier-1)*100)}%`);
+  if(event?.operatingCostMultiplier&&event.operatingCostMultiplier!==1) effects.push(`營運成本 ${event.operatingCostMultiplier>1?'+':''}${Math.round((event.operatingCostMultiplier-1)*100)}%`);
+  if(event?.durationMultiplier&&event.durationMultiplier!==1) effects.push(`時間 ${event.durationMultiplier>1?'+':''}${Math.round((event.durationMultiplier-1)*100)}%`);
+  return effects.join('｜')||'沒有額外影響';
 }
 function startAirlineFlight(g,u,{skipRandomEvent=false,resolvedEvent=null}={}) {
   const company=airlineCompany(g,u);

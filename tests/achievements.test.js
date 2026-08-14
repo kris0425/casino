@@ -1155,13 +1155,31 @@ test('火車站配給基礎列車並支援最多 20 格車庫',()=>{
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ledger').get().count,1);
 });
 
-test('交通事業五種隨機事件會套用收益、成本或時間，員工罷工需玩家支付協調費',()=>{
-  assert.match(source,/const transportRandomEvents=\[/);
-  for(const eventId of ['tailwind','vip_contract','smart_dispatch','safety_inspection','staff_strike']) {
+test('交通事業十三種隨機事件會依事業類型套用收益、成本或時間，員工罷工需玩家支付協調費',()=>{
+  const eventBlock=source.match(/const transportRandomEvents=\[[\s\S]+?\n\];/)?.[0]||'';
+  assert.ok(eventBlock,'缺少交通隨機事件清單');
+  const events=new Function(`${eventBlock}; return transportRandomEvents;`)();
+  const negativeEventIds=['safety_inspection','staff_strike','extreme_weather','fuel_price_spike','mechanical_failure','passenger_claim','cargo_damage','road_closure','signal_failure','port_congestion'];
+  for(const eventId of ['tailwind','vip_contract','smart_dispatch',...negativeEventIds]) {
     assert.match(source,new RegExp(`id:'${eventId}'`),`缺少交通隨機事件 ${eventId}`);
+  }
+  assert.equal(events.length,13);
+  assert.ok(events.filter(event=>negativeEventIds.includes(event.id)).length>=10,'負面事件數量不足');
+  assert.deepEqual(events.find(event=>event.id==='passenger_claim').businessTypes,['airline','rail','coach']);
+  assert.deepEqual(events.find(event=>event.id==='cargo_damage').businessTypes,['freight','shipping']);
+  assert.deepEqual(events.find(event=>event.id==='road_closure').businessTypes,['coach','freight']);
+  assert.deepEqual(events.find(event=>event.id==='signal_failure').businessTypes,['rail']);
+  assert.deepEqual(events.find(event=>event.id==='port_congestion').businessTypes,['shipping']);
+  for(const event of events) {
+    if(event.revenueMultiplier) assert.ok(event.revenueMultiplier>=0.72,'營收懲罰超出安全下限');
+    if(event.operatingCostMultiplier) assert.ok(event.operatingCostMultiplier<=1.32,'營運成本懲罰超出安全上限');
+    if(event.durationMultiplier) assert.ok(event.durationMultiplier<=1.45,'營運時間懲罰超出安全上限');
   }
   assert.match(source,/CREATE TABLE IF NOT EXISTS transport_incidents/);
   assert.match(source,/function prepareTransportRandomEvent\(/);
+  assert.match(source,/rollTransportRandomEvent\(businessType,random\)/);
+  assert.match(source,/event\.businessTypes\.includes\(businessType\)/);
+  assert.match(source,/function transportEventEffectText\(event\)/);
   assert.match(source,/function resolveTransportStrike\(/);
   assert.match(source,/transport_strike_resolution/);
   assert.match(source,/transport_strike_pay:\$\{u\}:\$\{businessType\}/);
