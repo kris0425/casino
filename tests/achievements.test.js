@@ -865,7 +865,8 @@ test('賭場強化保全與限時拍賣每六小時提醒',()=>{
   assert.match(source,/const CASINO_SECURITY_ESCAPE_PENALTY=10/);
   assert.match(source,/casino_vault:\{name:'🎰 賭場中央寶庫（週日限定）',baseChance:2/);
   assert.match(source,/casinoSecurityMaxHp=heist=>CASINO_SECURITY_BASE_HP\+heist\.members\.length\*CASINO_SECURITY_HP_PER_MEMBER/);
-  assert.match(source,/successRateCap=heist\.casinoSecurityRequired\?CASINO_VAULT_MAX_SUCCESS_RATE:normalSuccessCap/);
+  assert.match(source,/const heistSuccessRateCap=\(bank,normalCap\)=>bank\?\.sundayOnly\?CASINO_VAULT_MAX_SUCCESS_RATE/);
+  assert.match(source,/successRateCap=heistSuccessRateCap\(heistBanks\[heist\.bankId\],normalSuccessCap\)/);
   assert.match(source,/combat\.policePressure-casinoSecurityPenalty/);
   assert.match(source,/casinoVaultBalance\(i\.guildId\)\*CASINO_VAULT_LOOT_RATE/);
   assert.doesNotMatch(source,/casinoVaultBalance\([^\n]+\*0\.8/);
@@ -902,6 +903,35 @@ test('企業升級與限時拍賣公告完整',()=>{
   assert.deepEqual(update.channelNames,['賭場公告']);
 });
 
+test('高額團隊搶劫具有獨立成本、風險上限與經濟保護',()=>{
+  const bankBlock=source.match(/const heistBanks=\{[\s\S]+?\n\};/)?.[0]||'';
+  const banks=new Function(`${bankBlock}; return heistBanks;`)();
+  assert.deepEqual(
+    Object.keys(banks).filter(id=>banks[id].highStake),
+    ['diamond_exchange','offshore_crypto_vault','sovereign_gold_reserve','obsidian_clearing_house']
+  );
+  assert.deepEqual(
+    Object.values(banks).filter(bank=>bank.highStake).map(bank=>bank.reward),
+    [5000000,12000000,30000000,60000000]
+  );
+  assert.deepEqual(
+    Object.values(banks).filter(bank=>bank.highStake).map(bank=>bank.prepFee),
+    [250000,750000,2000000,5000000]
+  );
+  assert.equal(banks.obsidian_clearing_house.minMembers,8);
+  assert.equal(banks.obsidian_clearing_house.staminaCost,80);
+  assert.equal(banks.obsidian_clearing_house.successCap,24);
+  assert.ok(Object.values(banks).filter(bank=>bank.highStake).every(bank=>bank.hotEligible===false));
+  assert.match(source,/function chargeTeamHeistPreparation\(g,members,feePerMember=TEAM_HEIST_PREP_FEE\)/);
+  assert.match(source,/heistSuccessRateCap\(heistBanks\[heist\.bankId\],normalSuccessCap\)/);
+  assert.match(source,/heist\.members\.forEach\(memberId=>consumeStamina\(i\.guildId,memberId,heist\.robberStaminaCost\)\)/);
+  assert.match(source,/\(heistBanks\[heist\.bankId\]\.jailMinutes\|\|8\)\*60_000/);
+  assert.match(source,/bank\.hotEligible!==false/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-14-high-stakes-heists.json',import.meta.url),'utf8'));
+  assert.match(update.summary,/高投入、高風險、高回報/);
+  assert.ok(update.changes.some(change=>change.includes('60,000,000')));
+});
+
 test('限時資產拍賣可指定跨伺服器公告頻道',()=>{
   const scheduler=source.match(/async function processAssetAuctions\(\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.match(source,/async function casinoAuctionAnnouncementChannel\(guildId\)/);
@@ -921,7 +951,7 @@ test('團隊搶劫提高合作逃脫率並小幅下調警方壓制',()=>{
   assert.match(source,/const TEAM_HEIST_POLICE_REINFORCE_PRESSURE = Number\(process\.env\.TEAM_HEIST_POLICE_REINFORCE_PRESSURE \|\| 4\)/);
   assert.match(source,/members\.length-1\)\*TEAM_HEIST_MEMBER_CHANCE_BONUS/);
   assert.match(source,/TEAM_HEIST_SUCCESS_RATE_CAP\+weeklyHeistBonus/);
-  assert.match(source,/CASINO_VAULT_MAX_SUCCESS_RATE:normalSuccessCap/);
+  assert.match(source,/heistSuccessRateCap\(heistBanks\[heist\.bankId\],normalSuccessCap\)/);
 });
 
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{

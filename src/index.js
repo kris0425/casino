@@ -5673,8 +5673,17 @@ const heistBanks={
   metro:{name:'🏙️ 都會中央銀行',baseChance:7,reward:65000},
   crown:{name:'💠 皇冠國際銀行',baseChance:4,reward:150000},
   casino_vault:{name:'🎰 賭場中央寶庫（週日限定）',baseChance:2,reward:0,sundayOnly:true},
-  central_museum:{name:'🏛️ 中央美術館',baseChance:5,reward:120000,museumTarget:true}
+  central_museum:{name:'🏛️ 中央美術館',baseChance:5,reward:120000,museumTarget:true},
+  diamond_exchange:{name:'💎 帝王國際鑽石交易所',baseChance:3,reward:5000000,prepFee:250000,minMembers:4,staminaCost:35,successCap:36,policePressure:18,jailMinutes:12,highStake:true,hotEligible:false,description:'夜間珠寶交割中心，保全以生物辨識與裝甲運鈔隊守護未切割鑽石。'},
+  offshore_crypto_vault:{name:'🧊 離岸加密資產冷庫',baseChance:2,reward:12000000,prepFee:750000,minMembers:5,staminaCost:45,successCap:32,policePressure:20,jailMinutes:16,highStake:true,hotEligible:false,description:'斷網冷錢包與實體金鑰封存在離岸資料堡壘，撤離前必須突破多層電子封鎖。'},
+  sovereign_gold_reserve:{name:'🏛️ 皇家主權黃金儲備庫',baseChance:1,reward:30000000,prepFee:2000000,minMembers:6,staminaCost:60,successCap:28,policePressure:23,jailMinutes:20,highStake:true,hotEligible:false,description:'國家級地下金庫存放戰略黃金，重裝特勤與防爆閘門會全面封鎖撤退路線。'},
+  obsidian_clearing_house:{name:'🌑 黑曜地下清算中心',baseChance:1,reward:60000000,prepFee:5000000,minMembers:8,staminaCost:80,successCap:24,policePressure:26,jailMinutes:25,highStake:true,hotEligible:false,description:'地下金融網的最終清算節點，只接受八人完整隊伍挑戰，是目前最高風險的終局行動。'}
 };
+const heistMinimumMembers=bank=>bank?.minMembers||2;
+const heistPreparationFee=bank=>bank?.prepFee??TEAM_HEIST_PREP_FEE;
+const heistRobberStaminaCost=bank=>bank?.staminaCost||20;
+const heistSuccessRateCap=(bank,normalCap)=>bank?.sundayOnly?CASINO_VAULT_MAX_SUCCESS_RATE:Math.min(normalCap,bank?.successCap??normalCap);
+const heistIsHot=(bankId,daysFromToday=0)=>heistBanks[bankId]?.hotEligible!==false&&hotBankFor(daysFromToday).id===bankId;
 function heistBasePool(g,bankId) {
   const bank=heistBanks[bankId];
   return bank?.sundayOnly?Math.floor(casinoVaultBalance(g)*CASINO_VAULT_LOOT_RATE):(bank?.reward||0);
@@ -5870,21 +5879,21 @@ function casinoSecurityAttack(heist) {
   const damage=Math.max(1,firepower+1+Math.floor(Math.random()*3)+(critical?4:0));
   return {damage,critical,firepower,weapons};
 }
-function chargeTeamHeistPreparation(g,members) {
+function chargeTeamHeistPreparation(g,members,feePerMember=TEAM_HEIST_PREP_FEE) {
   members.forEach(memberId=>ensureWallet(g,memberId));
   db.exec('BEGIN IMMEDIATE');
   try {
     for(const memberId of members) {
       const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,memberId).balance;
-      if(current<TEAM_HEIST_PREP_FEE) throw new Error(`<@${memberId}> 金幣不足，團隊搶劫入場準備費每人需要 ${fmt(TEAM_HEIST_PREP_FEE)}`);
+      if(current<feePerMember) throw new Error(`<@${memberId}> 金幣不足，團隊搶劫入場準備費每人需要 ${fmt(feePerMember)}`);
     }
     for(const memberId of members) {
-      const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,memberId).balance,next=current-TEAM_HEIST_PREP_FEE;
+      const current=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,memberId).balance,next=current-feePerMember;
       db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,g,memberId);
-      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,memberId,-TEAM_HEIST_PREP_FEE,next,'heist_prep',memberId,'團隊搶劫入場準備費｜金幣直接銷毀且不退還');
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,memberId,-feePerMember,next,'heist_prep',memberId,'團隊搶劫入場準備費｜金幣直接銷毀且不退還');
     }
     db.exec('COMMIT');
-    return TEAM_HEIST_PREP_FEE*members.length;
+    return feePerMember*members.length;
   } catch(error) { db.exec('ROLLBACK'); throw error; }
 }
 function consumeHeistAmmunition(g,heist) {
@@ -6135,6 +6144,7 @@ const heistPoliceVehicles={
 };
 function heistNpcPolicePressure(heist) {
   const bank=heistBanks[heist.bankId];
+  if(Number.isFinite(bank?.policePressure)) return bank.policePressure;
   if(bank?.sundayOnly||bank?.museumTarget||(bank?.reward||0)>=100000) return 15;
   if((bank?.reward||0)>=50000) return 11;
   return 7;
@@ -6209,7 +6219,7 @@ function heistCombatModifiers(heist) {
 function hotBankFor(daysFromToday=0) {
   const date=new Date(Date.now()+daysFromToday*86400000);
   const key=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(date);
-  const ids=Object.entries(heistBanks).filter(([,bank])=>!bank.sundayOnly).map(([id])=>id), hash=[...key].reduce((sum,ch)=>sum+ch.charCodeAt(0),0);
+  const ids=Object.entries(heistBanks).filter(([,bank])=>!bank.sundayOnly&&bank.hotEligible!==false).map(([id])=>id), hash=[...key].reduce((sum,ch)=>sum+ch.charCodeAt(0),0);
   return {id:ids[hash%ids.length],date:key};
 }
 function getTeam(g,u) {
@@ -7671,7 +7681,7 @@ const commands = [
     .addSubcommand(s=>s.setName('解散').setDescription('隊長解散隊伍')),
   new SlashCommandBuilder().setName('團隊搶銀行').setDescription('隊伍完成準備與逃跑計畫後搶劫銀行')
     .addStringOption(o=>o.setName('銀行').setDescription('選擇目標銀行').setRequired(true).addChoices(
-      ...Object.entries(heistBanks).map(([value,bank])=>({name:bank.sundayOnly?`${bank.name}｜成功取得寶庫 ${Math.round(CASINO_VAULT_LOOT_RATE*100)}%`:`${bank.name}｜基礎 ${bank.baseChance}%｜獎池 ${bank.reward}`,value}))))
+      ...Object.entries(heistBanks).map(([value,bank])=>({name:bank.sundayOnly?`${bank.name}｜成功取得寶庫 ${Math.round(CASINO_VAULT_LOOT_RATE*100)}%`:bank.highStake?`${bank.name}｜${bank.minMembers}人｜準備費 ${bank.prepFee}｜獎池 ${bank.reward}`:`${bank.name}｜基礎 ${bank.baseChance}%｜獎池 ${bank.reward}`,value}))))
     .addStringOption(o=>o.setName('地圖').setDescription('選擇本次搶劫地圖').setRequired(true).addChoices(
       ...Object.entries(heistMaps).map(([value,map])=>({name:`${map.name}｜成功率 ${map.chance>=0?'+':''}${map.chance}%｜收益 ×${map.rewardMultiplier}`,value})))),
   new SlashCommandBuilder().setName('銀行情報').setDescription('查看今日與明日大量入金銀行'),
@@ -8579,7 +8589,7 @@ async function handleInteraction(i) {
     if(!heist.members.includes(i.user.id)) return i.reply({content:'⚠️ 只有本次劫匪隊伍可以偵查金庫。',ephemeral:true});
     const alreadyScouted=heist.vaultScouted,vault=heistVaultContents[heist.vaultId],bank=heistBanks[heist.bankId],map=heistMaps[heist.mapId];
     heist.vaultScouted=true;
-    const hot=!bank.sundayOnly&&hotBankFor(0).id===heist.bankId;
+    const hot=heistIsHot(heist.bankId);
     const estimatedLoot=vault.fixedReward|| (bank.sundayOnly
       ? heistBasePool(i.guildId,heist.bankId)
       : Math.floor(bank.reward*map.rewardMultiplier*vault.rewardMultiplier*(hot?2:1)));
@@ -8707,7 +8717,8 @@ async function handleInteraction(i) {
     const combat=heistCombatModifiers(heist),map=heistMaps[heist.mapId];
     const effectiveVehicleBonus=Math.max(0,vehicleBonus-combat.vehicleSuppression);
     const effectiveHideoutBonus=Math.max(0,hideoutBonus-combat.hideoutSuppression);
-    const chance=Math.min(TEAM_HEIST_SUCCESS_RATE_CAP+weeklyHeistBonus()+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+combat.robberFirepower,Math.max(1,heistBanks[heist.bankId].baseChance+(heist.members.length-1)*TEAM_HEIST_MEMBER_CHANCE_BONUS+planBonus[plan]+schemeBonus[heist.scheme]+weeklyHeistBonus()+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+map.chance+combat.robberFirepower-combat.policePressure));
+    const normalSuccessCap=TEAM_HEIST_SUCCESS_RATE_CAP+weeklyHeistBonus()+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+combat.robberFirepower;
+    const chance=Math.min(heistSuccessRateCap(heistBanks[heist.bankId],normalSuccessCap),Math.max(1,heistBanks[heist.bankId].baseChance+(heist.members.length-1)*TEAM_HEIST_MEMBER_CHANCE_BONUS+planBonus[plan]+schemeBonus[heist.scheme]+weeklyHeistBonus()+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+map.chance+combat.robberFirepower-combat.policePressure));
     const responseRow=new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`heist_police:${token}:counter`).setLabel('反擊警察').setEmoji('🔫').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId(`heist_police:${token}:evade`).setLabel('專心逃跑').setEmoji('🏃').setStyle(ButtonStyle.Success)
@@ -8767,7 +8778,7 @@ async function handleInteraction(i) {
     if(heist.casinoSecurityRequired&&!heist.securityDefeated) return i.reply({content:'🛡️ 賭場保全仍在阻擋寶庫入口，必須先使用武器將保全擊倒。',ephemeral:true});
     for(const memberId of heist.members) {
       if(jailRemaining(i.guildId,memberId)||hospitalRemaining(i.guildId,memberId)) return i.reply({content:`⚠️ <@${memberId}> 目前無法行動，計畫取消。`,ephemeral:true});
-      if(stamina(i.guildId,memberId)<staminaCost(i.guildId,memberId,20)) return i.reply({content:`⚠️ <@${memberId}> 體力不足 ${staminaCost(i.guildId,memberId,20)}，計畫取消。`,ephemeral:true});
+      if(stamina(i.guildId,memberId)<staminaCost(i.guildId,memberId,heist.robberStaminaCost)) return i.reply({content:`⚠️ <@${memberId}> 體力不足 ${staminaCost(i.guildId,memberId,heist.robberStaminaCost)}，計畫取消。`,ephemeral:true});
     }
     for(const policeId of heist.police) {
       if(jailRemaining(i.guildId,policeId)||hospitalRemaining(i.guildId,policeId)) return i.reply({content:`⚠️ 警方成員 <@${policeId}> 目前無法行動，請重新發起計畫。`,ephemeral:true});
@@ -8777,7 +8788,7 @@ async function handleInteraction(i) {
       heist.ammoConsumed=consumeHeistAmmunition(i.guildId,heist);
       heist.ammunitionConsumed=true;
     }
-    heist.members.forEach(memberId=>consumeStamina(i.guildId,memberId,20));
+    heist.members.forEach(memberId=>consumeStamina(i.guildId,memberId,heist.robberStaminaCost));
     heist.police.forEach(policeId=>consumeStamina(i.guildId,policeId,10));
     const planBonus={car:0,sewer:3,helicopter:5}[heist.plan],schemeBonus={deception:5,force:-3,clever:2}[heist.scheme];
     const schemeMultiplier={deception:0.9,force:1.4,clever:1.1}[heist.scheme];
@@ -8792,7 +8803,7 @@ async function handleInteraction(i) {
     const heistStagePayload=(embed,scene)=>heistScenePayload(embed,isMuseumTarget&&museumInteriorScenes.has(scene)?heist.museumScene:scene);
     const casinoSecurityPenalty=heist.casinoSecurityRequired?CASINO_SECURITY_ESCAPE_PENALTY:0;
     const normalSuccessCap=TEAM_HEIST_SUCCESS_RATE_CAP+weeklyHeistBonus()+counterBonus+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+combat.robberFirepower;
-    const successRateCap=heist.casinoSecurityRequired?CASINO_VAULT_MAX_SUCCESS_RATE:normalSuccessCap;
+    const successRateCap=heistSuccessRateCap(heistBanks[heist.bankId],normalSuccessCap);
     const chance=Math.min(successRateCap,Math.max(1,heistBanks[heist.bankId].baseChance+(heist.members.length-1)*TEAM_HEIST_MEMBER_CHANCE_BONUS+planBonus+schemeBonus+counterBonus+weeklyHeistBonus()+effectiveVehicleBonus+petHeistBonus+effectiveHideoutBonus+map.chance+combat.robberFirepower-combat.policePressure-casinoSecurityPenalty));
     const schemeScenes=isMuseumTarget?{
       deception:['🎭 全隊換上策展與維修人員制服，偽造的閉館工作證順利通過第一道門。','📦 仿製展品被送入館藏區，保全暫時沒有察覺真正的作品已遭調包。'],
@@ -8828,7 +8839,7 @@ async function handleInteraction(i) {
         for(const memberId of heist.members) incrementAchievementProgress(i.guildId,memberId,'pomeranianVictim');
       }
       escapeImage=escapeEvent.scene||(escapeEvent.forceFail?'arrested':'surrounded');
-      const jailDurationMs=Math.max(3*60_000,8*60_000-hideoutJailReductionMs(heist.guildId,heist.leaderId));
+      const jailDurationMs=Math.max(3*60_000,(heistBanks[heist.bankId].jailMinutes||8)*60_000-hideoutJailReductionMs(heist.guildId,heist.leaderId));
       const releaseAt=Date.now()+jailDurationMs;
       const jailMinutes=Math.floor(jailDurationMs/60_000),jailSeconds=Math.floor((jailDurationMs%60_000)/1000);
       const jailDurationText=`${jailMinutes} 分鐘${jailSeconds?` ${jailSeconds} 秒`:''}`;
@@ -8839,7 +8850,7 @@ async function handleInteraction(i) {
         db.prepare('DELETE FROM jail_escape WHERE guild_id=? AND user_id=?').run(i.guildId,memberId);
       }
       const failedBank=heistBanks[heist.bankId];
-      const hot=!failedBank.sundayOnly&&hotBankFor(0).id===heist.bankId;
+      const hot=heistIsHot(heist.bankId);
       const policePool=failedBank.sundayOnly
         ? Math.floor(heistBasePool(i.guildId,heist.bankId)*TEAM_HEIST_POLICE_POOL_RATE)
         : Math.floor(failedBank.reward*(hot?2:1)*vault.rewardMultiplier*TEAM_HEIST_POLICE_POOL_RATE);
@@ -8857,12 +8868,12 @@ async function handleInteraction(i) {
       const informantText=heist.informants.size
         ? `共有 **${heist.informants.size} 名**秘密線人提供情報；每人獲得警方獎勵 **${fmt(TEAM_HEIST_INFORMANT_REWARD)}**，合計 **${fmt(informantTotal)}** 已入帳（身分保密）。`
         : '本次沒有線人。';
-      const payload={...heistStagePayload(new EmbedBuilder().setColor(0xD94A4A).setTitle('🚔 警方成功阻止搶劫！').setDescription(`${policeReinforcements?'🚨 反擊驚動特勤隊，大批警力從四面包圍！':escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美死死咬住隊員的褲管並將人撲倒，整隊當場被逮捕。`:'警方掌握線報並封鎖所有出口，隊伍在最後關頭遭到包圍。'}\n${arrestText}\n\n金庫：${vault.name}（${heistVaultRewardLabel(vault)}）\n地圖：${map.name}\n逃跑載具：${vehicleName}（有效加成 +${effectiveVehicleBonus}%）\n警方人數：${heist.police.size}/8\n警方戰術：${heistPoliceTacticSummary(heist)}\n警方載具：${heistPoliceVehicleSummary(heist)}（壓制 -${combat.policeVehiclePressure}%）\n警方總壓力：-${combat.policePressure}%\n線人情報：${informantText}\n警方應對：${heist.policeStrategy==='counter'?'反擊警察':'專心逃跑'}\n逃脫事件：${escapeEvent.title}\n最終成功率：${finalChance}%\n劫匪體力消耗：20｜警察體力消耗：10\n警方獎勵：每人保底 ${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}，另平分目標獎池 ${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜彈藥消耗：${heist.ammoConsumed} 箱${policePayouts.length?`\n\n**警方實際入帳**\n${policePayouts.join('\n')}`:''}`),escapeImage),components:[]};
+      const payload={...heistStagePayload(new EmbedBuilder().setColor(0xD94A4A).setTitle('🚔 警方成功阻止搶劫！').setDescription(`${policeReinforcements?'🚨 反擊驚動特勤隊，大批警力從四面包圍！':escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美死死咬住隊員的褲管並將人撲倒，整隊當場被逮捕。`:'警方掌握線報並封鎖所有出口，隊伍在最後關頭遭到包圍。'}\n${arrestText}\n\n金庫：${vault.name}（${heistVaultRewardLabel(vault)}）\n地圖：${map.name}\n逃跑載具：${vehicleName}（有效加成 +${effectiveVehicleBonus}%）\n警方人數：${heist.police.size}/8\n警方戰術：${heistPoliceTacticSummary(heist)}\n警方載具：${heistPoliceVehicleSummary(heist)}（壓制 -${combat.policeVehiclePressure}%）\n警方總壓力：-${combat.policePressure}%\n線人情報：${informantText}\n警方應對：${heist.policeStrategy==='counter'?'反擊警察':'專心逃跑'}\n逃脫事件：${escapeEvent.title}\n最終成功率：${finalChance}%\n劫匪體力消耗：${heist.robberStaminaCost}｜警察體力消耗：10\n警方獎勵：每人保底 ${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}，另平分目標獎池 ${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜彈藥消耗：${heist.ammoConsumed} 箱${policePayouts.length?`\n\n**警方實際入帳**\n${policePayouts.join('\n')}`:''}`),escapeImage),components:[]};
       return publishLatestHeistResult(i,payload);
     }
     escapeImage='success';
     const successBank=heistBanks[heist.bankId];
-    const hot=!successBank.sundayOnly&&hotBankFor(0).id===heist.bankId;
+    const hot=heistIsHot(heist.bankId);
     const deedReward=successBank.sundayOnly?(vault.fixedReward||0):0;
     const hideoutLootBonus=hideoutLootMultiplier(heist.guildId,heist.leaderId);
     const lootTotal=deedReward||Math.floor((successBank.sundayOnly
@@ -10028,19 +10039,21 @@ async function handleInteraction(i) {
     if (i.commandName==='團隊搶銀行') {
       const team=getTeam(g,u); if(!team) throw new Error('請先建立或加入隊伍');
       if(team.leader_id!==u) throw new Error('只有隊長可以發起團隊搶銀行');
-      if(team.members.length<2) throw new Error('團隊搶銀行至少需要 2 人');
       if([...activeHeists.values()].some(h=>h.guildId===g&&h.teamId===team.id)) throw new Error('隊伍已有進行中的搶劫計畫');
       const bankId=i.options.getString('銀行',true),bank=heistBanks[bankId],mapId=i.options.getString('地圖',true),map=heistMaps[mapId];
+      if(!bank||!map) throw new Error('找不到這個搶劫目標或地圖');
+      const minimumMembers=heistMinimumMembers(bank),robberStaminaCost=heistRobberStaminaCost(bank),prepFeePerMember=heistPreparationFee(bank);
+      if(team.members.length<minimumMembers) throw new Error(`${bank.name} 至少需要 ${minimumMembers} 名劫匪`);
       if(bank.sundayOnly&&taipeiWeekday()!==0) throw new Error('賭場中央寶庫僅於每週日（台北時間）開放搶劫');
       const projectedPool=heistBasePool(g,bankId);
       if(bank.sundayOnly&&projectedPool<=0) throw new Error('賭場寶庫目前沒有可搶的金幣');
       for(const memberId of team.members) {
         if(jailRemaining(g,memberId)||hospitalRemaining(g,memberId)) throw new Error(`<@${memberId}> 目前無法行動`);
-        if(stamina(g,memberId)<staminaCost(g,memberId,20)) throw new Error(`<@${memberId}> 體力不足 ${staminaCost(g,memberId,20)}`);
+        if(stamina(g,memberId)<staminaCost(g,memberId,robberStaminaCost)) throw new Error(`<@${memberId}> 體力不足 ${staminaCost(g,memberId,robberStaminaCost)}`);
       }
-      const prepFeeTotal=chargeTeamHeistPreparation(g,team.members);
+      const prepFeeTotal=chargeTeamHeistPreparation(g,team.members,prepFeePerMember);
       db.prepare('INSERT INTO announcement_channels(guild_id,channel_id) VALUES(?,?) ON CONFLICT(guild_id) DO UPDATE SET channel_id=excluded.channel_id').run(g,i.channelId);
-      const token=Math.random().toString(36).slice(2,10),heist={guildId:g,channelId:i.channelId,teamId:team.id,teamName:teamDisplayName(team),leaderId:u,bankId,mapId,vaultId:randomHeistVaultId(bankId,mapId),museumScene:bankId==='central_museum'?randomMuseumScene():null,vaultScouted:false,members:team.members,ready:new Set(),informantChoices:new Map(),informants:new Set(),weapons:new Map(),police:new Set(),policeWeapons:new Map(),policeActions:new Map(),policeTactics:new Map(),policeVehicles:new Map(),factionDeadline:Date.now()+60_000,factionLocked:false,lobbyClosed:false,vehicleId:null,scheme:null,plan:null,policeStrategy:null,casinoSecurityRequired:bankId==='casino_vault'&&taipeiWeekday()===0,securityHp:null,securityRounds:0,securityDefeated:false,prepFeePerMember:TEAM_HEIST_PREP_FEE,prepFeeTotal,ammunitionConsumed:false,ammoConsumed:0};
+      const token=Math.random().toString(36).slice(2,10),heist={guildId:g,channelId:i.channelId,teamId:team.id,teamName:teamDisplayName(team),leaderId:u,bankId,mapId,vaultId:randomHeistVaultId(bankId,mapId),museumScene:bankId==='central_museum'?randomMuseumScene():null,vaultScouted:false,members:team.members,ready:new Set(),informantChoices:new Map(),informants:new Set(),weapons:new Map(),police:new Set(),policeWeapons:new Map(),policeActions:new Map(),policeTactics:new Map(),policeVehicles:new Map(),factionDeadline:Date.now()+60_000,factionLocked:false,lobbyClosed:false,vehicleId:null,scheme:null,plan:null,policeStrategy:null,casinoSecurityRequired:bankId==='casino_vault'&&taipeiWeekday()===0,securityHp:null,securityRounds:0,securityDefeated:false,prepFeePerMember,prepFeeTotal,robberStaminaCost,ammunitionConsumed:false,ammoConsumed:0};
       activeHeists.set(token,heist); setTimeout(()=>activeHeists.delete(token),15*60*1000);
       setTimeout(async()=>{
         const current=activeHeists.get(token);
@@ -10056,15 +10069,16 @@ async function handleInteraction(i) {
       },60_000);
       const vehicleBonus=selectedHeistVehicleBonus(heist),petHeistBonus=teamPetHeistBonus(heist),hideoutBonus=hideoutHeistChanceBonus(g,u),hideoutLootBonus=hideoutLootMultiplier(g,u);
       const npcPolicePressure=heistNpcPolicePressure(heist);
-      const initialSuccessCap=bank.sundayOnly?CASINO_VAULT_MAX_SUCCESS_RATE:TEAM_HEIST_SUCCESS_RATE_CAP+weeklyHeistBonus()+vehicleBonus+petHeistBonus+hideoutBonus;
+      const initialSuccessCap=heistSuccessRateCap(bank,TEAM_HEIST_SUCCESS_RATE_CAP+weeklyHeistBonus()+vehicleBonus+petHeistBonus+hideoutBonus);
       const initialSecurityPenalty=bank.sundayOnly?CASINO_SECURITY_ESCAPE_PENALTY:0;
       const initialChance=Math.min(initialSuccessCap,Math.max(1,bank.baseChance+(team.members.length-1)*TEAM_HEIST_MEMBER_CHANCE_BONUS+weeklyHeistBonus()+vehicleBonus+petHeistBonus+hideoutBonus+map.chance-npcPolicePressure-initialSecurityPenalty));
-      const projectedLoot=Math.floor((bank.sundayOnly?projectedPool:bank.reward*map.rewardMultiplier*(hotBankFor(0).id===bankId?2:1))*hideoutLootBonus);
+      const projectedLoot=Math.floor((bank.sundayOnly?projectedPool:bank.reward*map.rewardMultiplier*(heistIsHot(bankId)?2:1))*hideoutLootBonus);
       const projectedTotal=teamHeistTotalPayout(projectedLoot,team.members.length);
       const poolText=bank.sundayOnly
         ? `${fmt(projectedTotal)}（含寶庫 ${Math.round(CASINO_VAULT_LOOT_RATE*100)}% 與團隊獎勵；成功時依當下餘額結算）`
         : `${fmt(projectedTotal)}（已含團隊獎勵，金庫內容倍率尚待偵查）`;
-      const embed=new EmbedBuilder().setColor(0x607D8B).setTitle('🧰 8v8 警匪搶劫｜事前準備').setDescription(`目標：**${bank.name}**\n地圖：**${map.name}**\n${map.scene}\n預估基礎獎池：${poolText}\n金庫情報：**尚未偵查**\n劫匪人數：${team.members.length}/8\n警方人數：等待玩家加入（上限 8）\nNPC 基礎警力：**-${npcPolicePressure}%**\n逃跑載具：**${selectedHeistVehicleName(heist)}**\n載具增益：**+${vehicleBonus}%**\n隊長藏身處：**成功率 +${hideoutBonus}%｜戰利品 +${((hideoutLootBonus-1)*100).toFixed(0)}%**\n地圖成功率：**${map.chance>=0?'+':''}${map.chance}%**\n目前成功率：**${initialChance}%**${heist.casinoSecurityRequired?`\n\n🛡️ **強化賭場保全啟用**：重裝保全耐久提升，突破後仍承受 **-${CASINO_SECURITY_ESCAPE_PENALTY}%** 逃脫壓力；最終成功率最高 **${CASINO_VAULT_MAX_SUCCESS_RATE}%**。`:''}\n\n💸 入場準備費：每名劫匪 **${fmt(TEAM_HEIST_PREP_FEE)}**，合計 **${fmt(prepFeeTotal)}** 已直接銷毀。\n🔫 槍枝必須先在資產商城購買並永久持有；每次行動消耗對應彈藥箱 ×1，武器本身不會消失。\n\n**劫匪必須完成三件事**\n1. 在一分鐘內回覆是否接受警方的秘密線人邀請；逾時會自動成為搶匪\n2. 從選單選擇自己持有且備有彈藥的槍枝\n3. 點擊「完成事前準備」\n\n🚘 隊長可用載具選單從自己的車庫指定逃跑載具；未選擇時使用預設接應車。\n🔎 可在行動開始前點擊「偵查金庫內容」，查看本次固定的戰利品與收益倍率。\n\n**警方玩法**\n1. 點擊「加入警方阻止搶劫」\n2. 選擇自己持有且備有彈藥的槍枝\n3. 選擇「正面對抗劫匪」（+4%）或「呼叫增援」（+5%）\n4. 點擊「警方部署」，秘密選擇戰術與追捕載具\n5. 追捕載具會依逃跑路線提供不同壓制，團隊載具壓制最高 10%\n\n警方勝利時每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。\n隊長可查看誰尚未完成準備，但不會看見線人、警方戰術與載具部署內容。\n劫匪消耗 20 體力，警方消耗 10 體力。`);
+      const highStakeWarning=bank.highStake?`\n\n💀 **高額行動**：至少 ${minimumMembers} 人｜最終成功率上限 **${bank.successCap}%**｜失敗基礎刑期 **${bank.jailMinutes} 分鐘**。\n${bank.description}`:'';
+      const embed=new EmbedBuilder().setColor(bank.highStake?0x8B0000:0x607D8B).setTitle(bank.highStake?'💀 高額搶劫｜事前準備':'🧰 8v8 警匪搶劫｜事前準備').setDescription(`目標：**${bank.name}**\n地圖：**${map.name}**\n${map.scene}\n預估基礎獎池：${poolText}\n金庫情報：**尚未偵查**\n劫匪人數：${team.members.length}/8\n警方人數：等待玩家加入（上限 8）\nNPC 基礎警力：**-${npcPolicePressure}%**\n逃跑載具：**${selectedHeistVehicleName(heist)}**\n載具增益：**+${vehicleBonus}%**\n隊長藏身處：**成功率 +${hideoutBonus}%｜戰利品 +${((hideoutLootBonus-1)*100).toFixed(0)}%**\n地圖成功率：**${map.chance>=0?'+':''}${map.chance}%**\n目前成功率：**${initialChance}%**${heist.casinoSecurityRequired?`\n\n🛡️ **強化賭場保全啟用**：重裝保全耐久提升，突破後仍承受 **-${CASINO_SECURITY_ESCAPE_PENALTY}%** 逃脫壓力；最終成功率最高 **${CASINO_VAULT_MAX_SUCCESS_RATE}%**。`:''}${highStakeWarning}\n\n💸 入場準備費：每名劫匪 **${fmt(prepFeePerMember)}**，合計 **${fmt(prepFeeTotal)}** 已直接銷毀。\n🔫 槍枝必須先在資產商城購買並永久持有；每次行動消耗對應彈藥箱 ×1，武器本身不會消失。\n\n**劫匪必須完成三件事**\n1. 在一分鐘內回覆是否接受警方的秘密線人邀請；逾時會自動成為搶匪\n2. 從選單選擇自己持有且備有彈藥的槍枝\n3. 點擊「完成事前準備」\n\n🚘 隊長可用載具選單從自己的車庫指定逃跑載具；未選擇時使用預設接應車。\n🔎 可在行動開始前點擊「偵查金庫內容」，查看本次固定的戰利品與收益倍率。\n\n**警方玩法**\n1. 點擊「加入警方阻止搶劫」\n2. 選擇自己持有且備有彈藥的槍枝\n3. 選擇「正面對抗劫匪」（+4%）或「呼叫增援」（+5%）\n4. 點擊「警方部署」，秘密選擇戰術與追捕載具\n5. 追捕載具會依逃跑路線提供不同壓制，團隊載具壓制最高 10%\n\n警方勝利時每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。\n隊長可查看誰尚未完成準備，但不會看見線人、警方戰術與載具部署內容。\n劫匪消耗 ${robberStaminaCost} 體力，警方消耗 10 體力。`);
       embed.setDescription(embed.data.description.replace('預估基礎獎池：','預估總獎池：'));
       embed.setDescription(embed.data.description.replace('選擇「正面對抗劫匪」（+4%）或「呼叫增援」（+5%）',`選擇「正面對抗劫匪」（+${TEAM_HEIST_POLICE_CONFRONT_PRESSURE}%）或「呼叫增援」（+${TEAM_HEIST_POLICE_REINFORCE_PRESSURE}%）`));
       embed.addFields(
