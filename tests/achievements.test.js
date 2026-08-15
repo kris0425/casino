@@ -1868,3 +1868,26 @@ test('寵物店新增柴犬、布偶貓與白文鳥並附完整橫向圖片',()=
   assert.match(update.changes.join('\n'),/柴犬｜旺財/);
   assert.match(update.changes.join('\n'),/白文鳥.*不是八哥/);
 });
+
+test('賭場地獄系列三隻神話寵物附橫向圖片、代價與雙重能力',()=>{
+  const pets=[
+    ['infernal_cerberus','冥獄三頭犬｜刻耳柏洛斯','dog',6660000,'pets/infernal_cerberus.png','heist:7,stamina:15'],
+    ['lava_hellcat','熔岩獄貓｜燼瞳','cat',4440000,'pets/lava_hellcat.png','casino:0.06,work:0.07'],
+    ['underworld_phoenix','冥焰不死鳥｜幽藍','bird',8880000,'pets/underworld_phoenix.png','stamina:20,discount:0.07']
+  ];
+  for(const [petId,name,petType,price,imagePath,bonuses] of pets) {
+    const block=source.match(new RegExp(`${petId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(block,new RegExp(`name:'${name}'`));
+    assert.match(block,new RegExp(`price:${price}`));
+    assert.match(block,new RegExp(`petType:'${petType}'`));
+    assert.match(block,/rarity:'地獄神話'/);
+    assert.match(block,new RegExp(`bonuses:\\{${bonuses.replace(/[.]/g,'\\.')}\\}`));
+    assert.match(block,new RegExp(`image:'${imagePath.replace(/[/.]/g,'\\$&')}'`));
+    const image=readFileSync(new URL(`../assets/${imagePath}`,import.meta.url));
+    assert.equal(image.subarray(1,4).toString(),'PNG',`${petId} 缺少 PNG 形象圖`);
+    assert.ok(image.readUInt32BE(16)>image.readUInt32BE(20),`${petId} 形象圖必須為橫向`);
+  }
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-infernal-casino-pets.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-15-infernal-casino-pets');
+  for(const name of ['冥獄三頭犬','熔岩獄貓','冥焰不死鳥']) assert.match(update.changes.join('\n'),new RegExp(name));
+});

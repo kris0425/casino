@@ -108,7 +108,10 @@ const petCatalog={
   orange_tabby:{name:'橘貓｜橘寶',emoji:'🐈',price:14000,image:'pets/orange_tabby.jpg',petType:'cat',bonusType:'stamina',bonusValue:6,bonusText:'每日體力上限最高 +6',description:'貪吃又親人的橘貓，安心的陪伴能讓主人每天多保留一些體力。'},
   shiba_inu:{name:'柴犬｜旺財',emoji:'🐕',price:188000,image:'pets/shiba_inu_lucky_guardian.png',petType:'dog',rarity:'稀有',bonusType:'work',bonusValue:0.06,bonusText:'工作收入最高 +6%',description:'穿著黑金禮賓背心的招財柴犬。保持好心情時，會陪主人巡視工作場所並提高合法工作收入。'},
   ragdoll_cat:{name:'布偶貓｜星砂',emoji:'🐈',price:320000,image:'pets/ragdoll_cat_starlight.png',petType:'cat',rarity:'稀有',bonusType:'discount',bonusValue:0.06,bonusText:'體力商城折扣最高 6%',description:'擁有星砂藍眼的優雅布偶貓，最會在商城裡找到划算補給，陪伴時可提高體力商城折扣。'},
-  white_java_sparrow:{name:'白文鳥｜麻糬',emoji:'🐦',price:888000,image:'pets/white_java_sparrow_mochi.png',petType:'bird',rarity:'傳說',hungerMultiplier:1.2,bonuses:{casino:0.04,heist:4},bonusText:'賭場獲勝派彩最高 +4%｜搶劫成功率最高 +4%',description:'白羽、粉喙、圓滾滾的傳說級白文鳥，和八哥是不同鳥種。食量是一般鳥類的 1.2 倍，保持好心情時能同時帶來牌桌幸運與撤退直覺。'}
+  white_java_sparrow:{name:'白文鳥｜麻糬',emoji:'🐦',price:888000,image:'pets/white_java_sparrow_mochi.png',petType:'bird',rarity:'傳說',hungerMultiplier:1.2,bonuses:{casino:0.04,heist:4},bonusText:'賭場獲勝派彩最高 +4%｜搶劫成功率最高 +4%',description:'白羽、粉喙、圓滾滾的傳說級白文鳥，和八哥是不同鳥種。食量是一般鳥類的 1.2 倍，保持好心情時能同時帶來牌桌幸運與撤退直覺。'},
+  infernal_cerberus:{name:'冥獄三頭犬｜刻耳柏洛斯',emoji:'🐺',price:6660000,image:'pets/infernal_cerberus.png',petType:'dog',rarity:'地獄神話',hungerMultiplier:2,bonuses:{heist:7,stamina:15},bonusText:'搶劫成功率最高 +7%｜每日體力上限最高 +15',description:'鎮守黑曜金庫的三首獄犬，能同時監視三條撤退路線。食量是一般犬類的 2 倍，保持好心情時會提高搶劫成功率與每日體力上限。'},
+  lava_hellcat:{name:'熔岩獄貓｜燼瞳',emoji:'🐈‍⬛',price:4440000,image:'pets/lava_hellcat.png',petType:'cat',rarity:'地獄神話',hungerMultiplier:1.6,bonuses:{casino:0.06,work:0.07},bonusText:'賭場獲勝派彩最高 +6%｜工作收入最高 +7%',description:'從熔岩貴賓廳誕生的黑曜獄貓，金色雙眼能看穿籌碼與商機。每日心情消耗為一般貓的 1.6 倍，同行時可同時強化派彩與工作收入。'},
+  underworld_phoenix:{name:'冥焰不死鳥｜幽藍',emoji:'🦅',price:8880000,image:'pets/underworld_phoenix.png',petType:'bird',rarity:'地獄神話',hungerMultiplier:1.8,bonuses:{stamina:20,discount:0.07},bonusText:'每日體力上限最高 +20｜體力商城折扣最高 7%',description:'棲息在地獄輪盤祭壇上的冥焰不死鳥，幽藍火羽能替主人恢復精神並尋找珍稀補給。每日心情消耗為一般鳥類的 1.8 倍。'}
 };
 const petItemCatalog={
   canned_food:{name:'鮮肉罐頭',emoji:'🥫',price:250,mood:25,description:'恢復陪伴寵物 25 點心情。'},
