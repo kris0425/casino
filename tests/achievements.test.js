@@ -918,7 +918,7 @@ test('高額團隊搶劫具有獨立成本、風險上限與經濟保護',()=>{
     Object.values(banks).filter(bank=>bank.highStake).map(bank=>bank.prepFee),
     [250000,750000,2000000,5000000]
   );
-  assert.equal(banks.obsidian_clearing_house.minMembers,8);
+  assert.ok(Object.values(banks).filter(bank=>bank.highStake).every(bank=>bank.minMembers===2));
   assert.equal(banks.obsidian_clearing_house.staminaCost,80);
   assert.equal(banks.obsidian_clearing_house.successCap,24);
   assert.ok(Object.values(banks).filter(bank=>bank.highStake).every(bank=>bank.hotEligible===false));
@@ -930,6 +930,9 @@ test('高額團隊搶劫具有獨立成本、風險上限與經濟保護',()=>{
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-14-high-stakes-heists.json',import.meta.url),'utf8'));
   assert.match(update.summary,/高投入、高風險、高回報/);
   assert.ok(update.changes.some(change=>change.includes('60,000,000')));
+  const twoPlayerUpdate=JSON.parse(readFileSync(new URL('../updates/2026-08-15-high-stakes-heist-two-player.json',import.meta.url),'utf8'));
+  assert.match(twoPlayerUpdate.summary,/兩名玩家/);
+  assert.ok(twoPlayerUpdate.changes.some(change=>change.includes('最低組隊人數統一改為 2 人')));
 });
 
 test('限時資產拍賣可指定跨伺服器公告頻道',()=>{

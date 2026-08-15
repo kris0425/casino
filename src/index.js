@@ -5674,10 +5674,10 @@ const heistBanks={
   crown:{name:'💠 皇冠國際銀行',baseChance:4,reward:150000},
   casino_vault:{name:'🎰 賭場中央寶庫（週日限定）',baseChance:2,reward:0,sundayOnly:true},
   central_museum:{name:'🏛️ 中央美術館',baseChance:5,reward:120000,museumTarget:true},
-  diamond_exchange:{name:'💎 帝王國際鑽石交易所',baseChance:3,reward:5000000,prepFee:250000,minMembers:4,staminaCost:35,successCap:36,policePressure:18,jailMinutes:12,highStake:true,hotEligible:false,description:'夜間珠寶交割中心，保全以生物辨識與裝甲運鈔隊守護未切割鑽石。'},
-  offshore_crypto_vault:{name:'🧊 離岸加密資產冷庫',baseChance:2,reward:12000000,prepFee:750000,minMembers:5,staminaCost:45,successCap:32,policePressure:20,jailMinutes:16,highStake:true,hotEligible:false,description:'斷網冷錢包與實體金鑰封存在離岸資料堡壘，撤離前必須突破多層電子封鎖。'},
-  sovereign_gold_reserve:{name:'🏛️ 皇家主權黃金儲備庫',baseChance:1,reward:30000000,prepFee:2000000,minMembers:6,staminaCost:60,successCap:28,policePressure:23,jailMinutes:20,highStake:true,hotEligible:false,description:'國家級地下金庫存放戰略黃金，重裝特勤與防爆閘門會全面封鎖撤退路線。'},
-  obsidian_clearing_house:{name:'🌑 黑曜地下清算中心',baseChance:1,reward:60000000,prepFee:5000000,minMembers:8,staminaCost:80,successCap:24,policePressure:26,jailMinutes:25,highStake:true,hotEligible:false,description:'地下金融網的最終清算節點，只接受八人完整隊伍挑戰，是目前最高風險的終局行動。'}
+  diamond_exchange:{name:'💎 帝王國際鑽石交易所',baseChance:3,reward:5000000,prepFee:250000,minMembers:2,staminaCost:35,successCap:36,policePressure:18,jailMinutes:12,highStake:true,hotEligible:false,description:'夜間珠寶交割中心，保全以生物辨識與裝甲運鈔隊守護未切割鑽石。'},
+  offshore_crypto_vault:{name:'🧊 離岸加密資產冷庫',baseChance:2,reward:12000000,prepFee:750000,minMembers:2,staminaCost:45,successCap:32,policePressure:20,jailMinutes:16,highStake:true,hotEligible:false,description:'斷網冷錢包與實體金鑰封存在離岸資料堡壘，撤離前必須突破多層電子封鎖。'},
+  sovereign_gold_reserve:{name:'🏛️ 皇家主權黃金儲備庫',baseChance:1,reward:30000000,prepFee:2000000,minMembers:2,staminaCost:60,successCap:28,policePressure:23,jailMinutes:20,highStake:true,hotEligible:false,description:'國家級地下金庫存放戰略黃金，重裝特勤與防爆閘門會全面封鎖撤退路線。'},
+  obsidian_clearing_house:{name:'🌑 黑曜地下清算中心',baseChance:1,reward:60000000,prepFee:5000000,minMembers:2,staminaCost:80,successCap:24,policePressure:26,jailMinutes:25,highStake:true,hotEligible:false,description:'地下金融網的最終清算節點，兩人即可嘗試挑戰，是目前最高風險的終局行動。'}
 };
 const heistMinimumMembers=bank=>bank?.minMembers||2;
 const heistPreparationFee=bank=>bank?.prepFee??TEAM_HEIST_PREP_FEE;
