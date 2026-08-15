@@ -38,7 +38,7 @@ function renderSidebar(modules){
   primary.append(sidebarItem({icon:'🏠',name:'遊戲大廳',description:'玩家金庫、體力與今日增益',href:'#top',state:'dashboard'}));
   for(const module of modules){
     const item=sidebarItem(module);
-    if(['transport','vehicle-pvp','garage','assets','achievements'].includes(module.id))primary.append(item);
+    if(['real-estate','transport','vehicle-pvp','garage','assets','achievements'].includes(module.id))primary.append(item);
     else games.append(item);
   }
 }

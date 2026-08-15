@@ -14,6 +14,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { COSMETIC_SLOTS, cosmeticCatalog, cosmeticById, defaultAppearance } from './game-data/cosmetics.js';
 import { WEB_GAME_VERSION, WEB_GAME_MODULES, WEB_TRANSPORT_TYPES, WEB_GARAGE_GROUPS, summarizeWebAssets } from './game-data/web-game.js';
+import { WEB_REAL_ESTATE_MAX_LEVEL, WEB_REAL_ESTATE_PLOTS, WEB_REAL_ESTATE_BUILDINGS, WEB_REAL_ESTATE_EVENTS, webRealEstateUpgradeCost, webRealEstateRevenue } from './game-data/web-real-estate.js';
 
 const execFileAsync=promisify(execFile);
 
@@ -655,6 +656,30 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_property_operations_completion
     ON property_operations(completes_at);
+  CREATE TABLE IF NOT EXISTS web_real_estate_plots (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    plot_no INTEGER NOT NULL,
+    building_id TEXT,
+    level INTEGER NOT NULL DEFAULT 1,
+    condition INTEGER NOT NULL DEFAULT 100,
+    construction_started_at INTEGER,
+    construction_completes_at INTEGER,
+    operation_started_at INTEGER,
+    operation_completes_at INTEGER,
+    operation_revenue INTEGER,
+    operation_cost INTEGER,
+    operation_event_id TEXT,
+    maintenance_day TEXT,
+    insurance_day TEXT,
+    license_week TEXT,
+    total_collected INTEGER NOT NULL DEFAULT 0,
+    unlocked_at INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id,plot_no)
+  );
+  CREATE INDEX IF NOT EXISTS idx_web_real_estate_operations
+    ON web_real_estate_plots(operation_completes_at);
   CREATE TABLE IF NOT EXISTS asset_bonuses (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, asset_id TEXT NOT NULL, buff_id TEXT NOT NULL,
     assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -11515,6 +11540,145 @@ function webGameGaragePayload(g,u) {
   });
   return {count:groups.reduce((sum,group)=>sum+group.count,0),kinds:groups.reduce((sum,group)=>sum+group.kinds,0),groups};
 }
+function ensureWebRealEstateStarterPlot(g,u) {
+  db.prepare('INSERT OR IGNORE INTO web_real_estate_plots(guild_id,user_id,plot_no,unlocked_at) VALUES(?,?,1,?)').run(g,u,Date.now());
+}
+function webRealEstatePlotRow(g,u,plotNo) {
+  return db.prepare('SELECT * FROM web_real_estate_plots WHERE guild_id=? AND user_id=? AND plot_no=?').get(g,u,plotNo)||null;
+}
+function webRealEstatePlotDefinition(plotNo) {
+  const value=Number(plotNo),plot=WEB_REAL_ESTATE_PLOTS.find(item=>item.no===value);
+  if(!Number.isInteger(value)||!plot) throw new Error('城市地塊不存在');
+  return plot;
+}
+function webRealEstateBuildingDefinition(buildingId) {
+  const id=String(buildingId||''),building=WEB_REAL_ESTATE_BUILDINGS[id];
+  if(!building) throw new Error('請選擇有效的建築');
+  return {id,...building};
+}
+function webRealEstateRepairCost(building,condition) {
+  const missing=100-Math.max(40,Math.min(100,Number(condition)||100));
+  return missing?Math.max(10_000,Math.round(building.cost*.035*missing/10)):0;
+}
+function webRealEstateUpkeep(row,building) {
+  const today=taipeiDay(),week=propertyBusinessWeek(),scale=1+(Math.max(1,Number(row.level)||1)-1)*.12;
+  const charges=[];
+  if(row.maintenance_day!==today) charges.push({kind:'web_property_maintenance',label:'建築維修',amount:Math.round(building.cost*.002*scale)});
+  if(row.insurance_day!==today) charges.push({kind:'web_property_insurance',label:'營運保險',amount:Math.round(building.cost*.001*scale)});
+  if(row.license_week!==week) charges.push({kind:'web_property_license',label:'公司牌照續期',amount:Math.round(building.cost*.0015*scale)});
+  return {today,week,charges,total:charges.reduce((sum,item)=>sum+item.amount,0)};
+}
+function unlockWebRealEstatePlot(g,u,plotNo) {
+  ensureWebRealEstateStarterPlot(g,u);
+  const plot=webRealEstatePlotDefinition(plotNo);
+  if(plot.no===1||webRealEstatePlotRow(g,u,plot.no)) throw new Error('這塊土地已經解鎖');
+  if(!webRealEstatePlotRow(g,u,plot.no-1)) throw new Error('請先解鎖前一塊土地');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if(webRealEstatePlotRow(g,u,plot.no)) throw new Error('這塊土地已經解鎖');
+    changeBalanceUnlocked(g,u,-plot.price,'web_property_land',u,`城市建設｜購買 ${plot.name}`);
+    db.prepare('INSERT INTO web_real_estate_plots(guild_id,user_id,plot_no,unlocked_at) VALUES(?,?,?,?)').run(g,u,plot.no,Date.now());
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  return plot;
+}
+function buildWebRealEstate(g,u,plotNo,buildingId) {
+  const plot=webRealEstatePlotDefinition(plotNo),building=webRealEstateBuildingDefinition(buildingId),row=webRealEstatePlotRow(g,u,plot.no);
+  if(!row) throw new Error('請先購買這塊土地');
+  if(row.building_id) throw new Error('這塊土地已經有建築');
+  const now=Date.now(),completesAt=now+building.buildMs;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const fresh=webRealEstatePlotRow(g,u,plot.no);
+    if(!fresh||fresh.building_id) throw new Error('地塊狀態已改變，請重新整理');
+    changeBalanceUnlocked(g,u,-building.cost,'web_property_construction',u,`城市建設｜${building.name}`);
+    db.prepare(`UPDATE web_real_estate_plots SET building_id=?,level=1,condition=100,construction_started_at=?,construction_completes_at=?,updated_at=CURRENT_TIMESTAMP
+      WHERE guild_id=? AND user_id=? AND plot_no=?`).run(building.id,now,completesAt,g,u,plot.no);
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  return {plot,building,completesAt};
+}
+function startWebRealEstateOperation(g,u,plotNo) {
+  const plot=webRealEstatePlotDefinition(plotNo),row=webRealEstatePlotRow(g,u,plot.no);
+  if(!row?.building_id) throw new Error('這塊土地還沒有可營運的建築');
+  if(Date.now()<Number(row.construction_completes_at||0)) throw new Error('建築仍在施工中');
+  if(row.operation_completes_at) throw new Error('目前已有一筆營運案進行中');
+  if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法管理房地產事業');
+  const building=webRealEstateBuildingDefinition(row.building_id),upkeep=webRealEstateUpkeep(row,building),totalCost=building.operationCost+upkeep.total;
+  const event=WEB_REAL_ESTATE_EVENTS[Math.floor(Math.random()*WEB_REAL_ESTATE_EVENTS.length)];
+  const revenue=webRealEstateRevenue(building,Number(row.level),Number(row.condition),event.multiplier);
+  const now=Date.now(),completesAt=now+building.operationMs,conditionAfter=Math.max(40,Number(row.condition)-(5+Math.floor(Math.random()*8)));
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const fresh=webRealEstatePlotRow(g,u,plot.no);
+    if(!fresh||fresh.operation_completes_at) throw new Error('營運狀態已改變，請重新整理');
+    for(const charge of upkeep.charges) changeBalanceUnlocked(g,u,-charge.amount,charge.kind,u,`${building.name}｜${charge.label}`);
+    changeBalanceUnlocked(g,u,-building.operationCost,'web_property_operation',u,`${building.name}｜${building.kind}營運成本`);
+    db.prepare(`UPDATE web_real_estate_plots SET condition=?,operation_started_at=?,operation_completes_at=?,operation_revenue=?,operation_cost=?,operation_event_id=?,maintenance_day=?,insurance_day=?,license_week=?,updated_at=CURRENT_TIMESTAMP
+      WHERE guild_id=? AND user_id=? AND plot_no=?`).run(conditionAfter,now,completesAt,revenue,totalCost,event.id,upkeep.today,upkeep.today,upkeep.week,g,u,plot.no);
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  return {plot,building,event,revenue,totalCost,completesAt};
+}
+function claimWebRealEstateRevenue(g,u,plotNo) {
+  const plot=webRealEstatePlotDefinition(plotNo);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row=webRealEstatePlotRow(g,u,plot.no);
+    if(!row?.operation_completes_at||!Number.isSafeInteger(Number(row.operation_revenue))) throw new Error('目前沒有可領取的營收');
+    if(Date.now()<row.operation_completes_at) throw new Error('本期營運尚未完成');
+    const revenue=Number(row.operation_revenue),building=webRealEstateBuildingDefinition(row.building_id);
+    const next=changeBalanceUnlocked(g,u,revenue,'web_property_revenue',u,`${building.name}｜${building.kind}收入`);
+    db.prepare(`UPDATE web_real_estate_plots SET operation_started_at=NULL,operation_completes_at=NULL,operation_revenue=NULL,operation_cost=NULL,operation_event_id=NULL,total_collected=total_collected+?,updated_at=CURRENT_TIMESTAMP
+      WHERE guild_id=? AND user_id=? AND plot_no=?`).run(revenue,g,u,plot.no);
+    db.exec('COMMIT');
+    return {plot,building,revenue,next};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+function upgradeWebRealEstate(g,u,plotNo) {
+  const plot=webRealEstatePlotDefinition(plotNo),row=webRealEstatePlotRow(g,u,plot.no);
+  if(!row?.building_id) throw new Error('這塊土地還沒有建築');
+  if(Date.now()<Number(row.construction_completes_at||0)||row.operation_completes_at) throw new Error('施工或營運期間無法升級');
+  const building=webRealEstateBuildingDefinition(row.building_id),cost=webRealEstateUpgradeCost(building,Number(row.level));
+  if(cost===null) throw new Error('這棟建築已達最高等級');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const fresh=webRealEstatePlotRow(g,u,plot.no);
+    if(!fresh||fresh.level!==row.level||fresh.operation_completes_at) throw new Error('建築狀態已改變，請重新整理');
+    changeBalanceUnlocked(g,u,-cost,'web_property_upgrade',u,`${building.name}｜升級 Lv.${Number(row.level)+1}`);
+    db.prepare('UPDATE web_real_estate_plots SET level=level+1,condition=MIN(100,condition+10),updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=? AND plot_no=?').run(g,u,plot.no);
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  return {plot,building,cost};
+}
+function repairWebRealEstate(g,u,plotNo) {
+  const plot=webRealEstatePlotDefinition(plotNo),row=webRealEstatePlotRow(g,u,plot.no);
+  if(!row?.building_id) throw new Error('這塊土地還沒有建築');
+  if(row.operation_completes_at) throw new Error('營運期間無法進行全面維修');
+  const building=webRealEstateBuildingDefinition(row.building_id),cost=webRealEstateRepairCost(building,row.condition);
+  if(!cost) throw new Error('建築狀況良好，不需要維修');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const fresh=webRealEstatePlotRow(g,u,plot.no),freshCost=fresh?webRealEstateRepairCost(building,fresh.condition):0;
+    if(!fresh||fresh.operation_completes_at) throw new Error('建築狀態已改變，請重新整理');
+    if(!freshCost||freshCost!==cost) throw new Error('建築狀況已更新，請重新整理');
+    changeBalanceUnlocked(g,u,-cost,'web_property_repair',u,`${building.name}｜全面維修`);
+    db.prepare('UPDATE web_real_estate_plots SET condition=100,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=? AND plot_no=?').run(g,u,plot.no);
+    db.exec('COMMIT');
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+  return {plot,building,cost};
+}
+async function webRealEstatePayload(session) {
+  const g=session.guildId,u=session.userId;ensureWebRealEstateStarterPlot(g,u);
+  const user=await client.users.fetch(u),now=Date.now();
+  const plots=WEB_REAL_ESTATE_PLOTS.map(plot=>{
+    const row=webRealEstatePlotRow(g,u,plot.no),building=row?.building_id?webRealEstateBuildingDefinition(row.building_id):null;
+    const event=row?.operation_event_id?WEB_REAL_ESTATE_EVENTS.find(item=>item.id===row.operation_event_id)||null:null;
+    const phase=!row?'locked':!building?'vacant':now<Number(row.construction_completes_at||0)?'building':row.operation_completes_at?(now>=row.operation_completes_at?'collect':'operating'):'ready';
+    return {...plot,unlocked:Boolean(row),phase,building:building?{...building,level:Number(row.level),condition:Number(row.condition),upgradeCost:webRealEstateUpgradeCost(building,Number(row.level)),repairCost:webRealEstateRepairCost(building,Number(row.condition))}:null,constructionCompletesAt:row?.construction_completes_at||null,operation:row?.operation_completes_at?{completesAt:row.operation_completes_at,revenue:Number(row.operation_revenue),cost:Number(row.operation_cost),event}:null,totalCollected:Number(row?.total_collected||0)};
+  });
+  return {version:WEB_GAME_VERSION,player:{name:user.globalName||user.username,avatar:user.displayAvatarURL({extension:'png',size:128}),balance:ensureWallet(g,u)},plots,buildings:Object.entries(WEB_REAL_ESTATE_BUILDINGS).map(([id,item])=>({id,...item})),summary:{unlocked:plots.filter(item=>item.unlocked).length,built:plots.filter(item=>item.building).length,totalCollected:plots.reduce((sum,item)=>sum+item.totalCollected,0)},homeUrl:gameActivityUrl(g,u,session.channelId),expiresAt:session.exp};
+}
 async function webGamePayload(session) {
   const g=session.guildId,u=session.userId,user=await client.users.fetch(u);
   const coins=ensureWallet(g,u),currentStamina=stamina(g,u),maxStamina=staminaMax(g,u);
@@ -11547,7 +11711,7 @@ async function webGamePayload(session) {
       ...module,state:'coming',description:'角色造型系統暫時維護中',href:'#'
     }:{
       ...module,
-      href:module.id==='appearance'?appearanceActivityUrl(g,u,session.channelId):module.id==='mahjong'?`${ACTIVITY_PUBLIC_URL}/mahjong`:`#${module.id}`
+      href:module.id==='real-estate'?`${ACTIVITY_PUBLIC_URL}/real-estate?session=${encodeURIComponent(gameActivityToken(g,u,session.channelId))}`:module.id==='appearance'?appearanceActivityUrl(g,u,session.channelId):module.id==='mahjong'?`${ACTIVITY_PUBLIC_URL}/mahjong`:`#${module.id}`
     }),
     expiresAt:session.exp
   };
@@ -11573,7 +11737,7 @@ const activityStaticTypes={
 };
 function serveActivityStatic(request,response,url) {
   if(!['GET','HEAD'].includes(request.method||'')) return false;
-  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/claw':'claw.html','/appearance':'style.html','/appearance-admin':'appearance-admin.html','/game':'game.html','/heist':'heist.html'};
+  const routeFiles={'/':'index.html','/mahjong':'mahjong.html','/scratch':'scratch.html','/jenga':'jenga.html','/claw':'claw.html','/appearance':'style.html','/appearance-admin':'appearance-admin.html','/game':'game.html','/heist':'heist.html','/real-estate':'real-estate.html'};
   const assetRequest=url.pathname.startsWith('/assets/'),styleRequest=url.pathname.startsWith('/appearance-styles/'),root=assetRequest?ACTIVITY_ASSET_ROOT:styleRequest?resolve(CHARACTER_STYLE_ROOT,'..'):ACTIVITY_STATIC_ROOT;
   const relative=assetRequest?decodeURIComponent(url.pathname.slice('/assets/'.length)):routeFiles[url.pathname]||decodeURIComponent(url.pathname).replace(/^\/+/,'');
   if(!relative||relative.startsWith('api/')||relative.startsWith('activity/')) return false;
@@ -12351,6 +12515,23 @@ if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
         const body=await activityRequestBody(request),session=parseGameActivityToken(body.session);
         const result=claimDailyStaminaRestore(session.guildId,session.userId);
         return activityJson(response,200,{ok:true,message:`已免費恢復 ${result.restored} 點體力`,result,...await webGamePayload(session)});
+      }
+      if(request.method==='GET'&&url.pathname==='/activity/real-estate') {
+        const session=parseGameActivityToken(url.searchParams.get('session'));
+        return activityJson(response,200,{ok:true,...await webRealEstatePayload(session)});
+      }
+      if(request.method==='POST'&&url.pathname.startsWith('/activity/real-estate/')) {
+        const body=await activityRequestBody(request),session=parseGameActivityToken(body.session),g=session.guildId,u=session.userId;
+        const action=url.pathname.slice('/activity/real-estate/'.length);
+        let message='城市資料已更新';
+        if(action==='unlock') { const result=unlockWebRealEstatePlot(g,u,body.plotNo);message=`已購買「${result.name}」`; }
+        else if(action==='build') { const result=buildWebRealEstate(g,u,body.plotNo,body.buildingId);message=`${result.building.name} 已開始施工`; }
+        else if(action==='operate') { const result=startWebRealEstateOperation(g,u,body.plotNo);message=`${result.building.name} 已開始營運，本期事件：${result.event.name}`; }
+        else if(action==='claim') { const result=claimWebRealEstateRevenue(g,u,body.plotNo);message=`已領取 ${fmt(result.revenue)} 金幣營收`; }
+        else if(action==='upgrade') { const result=upgradeWebRealEstate(g,u,body.plotNo);message=`${result.building.name} 已完成升級`; }
+        else if(action==='repair') { const result=repairWebRealEstate(g,u,body.plotNo);message=`${result.building.name} 已恢復至 100 狀況`; }
+        else throw new Error('不支援的城市建設操作');
+        return activityJson(response,200,{ok:true,message,...await webRealEstatePayload(session)});
       }
       if(request.method==='GET'&&url.pathname==='/activity/game/vehicle-pvp') {
         const session=parseGameActivityToken(url.searchParams.get('session'));

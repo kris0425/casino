@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { summarizeWebAssets } from '../src/game-data/web-game.js';
+import { WEB_REAL_ESTATE_BUILDINGS, WEB_REAL_ESTATE_PLOTS, webRealEstateUpgradeCost, webRealEstateRevenue } from '../src/game-data/web-real-estate.js';
 
 const source=readFileSync(new URL('../src/index.js',import.meta.url),'utf8');
 const cosmeticsSource=readFileSync(new URL('../src/game-data/cosmetics.js',import.meta.url),'utf8');
@@ -218,8 +219,8 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.03\.3'/);
-  for(const id of ['appearance','transport','garage','vehicle-pvp','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.15\.7'/);
+  for(const id of ['real-estate','appearance','transport','garage','vehicle-pvp','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
   assert.match(source,/session\.kind!=='game'/);
@@ -242,6 +243,31 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   assert.match(js,/function closeDrawer\(\)/);
   assert.match(source,/function webGameGaragePayload\(g,u\)/);
   assert.match(source,/url\.pathname\.startsWith\('\/assets\/'\)/);
+});
+
+test('網頁房地產城市提供買地、施工、營運、收租、升級與維修',()=>{
+  const html=readFileSync(new URL('../activity/public/real-estate.html',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/real-estate.css',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/real-estate.js',import.meta.url),'utf8');
+  assert.equal(WEB_REAL_ESTATE_PLOTS.length,6);
+  assert.equal(Object.keys(WEB_REAL_ESTATE_BUILDINGS).length,4);
+  assert.equal(WEB_REAL_ESTATE_PLOTS[0].price,0);
+  assert.equal(WEB_REAL_ESTATE_PLOTS.at(-1).price,750_000_000);
+  assert.equal(webRealEstateRevenue(WEB_REAL_ESTATE_BUILDINGS.residence,1,100,1),180_000);
+  assert.ok(webRealEstateRevenue(WEB_REAL_ESTATE_BUILDINGS.residence,2,100,1)>180_000);
+  assert.ok(webRealEstateUpgradeCost(WEB_REAL_ESTATE_BUILDINGS.tower,1)>0);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS web_real_estate_plots/);
+  for(const helper of ['unlockWebRealEstatePlot','buildWebRealEstate','startWebRealEstateOperation','claimWebRealEstateRevenue','upgradeWebRealEstate','repairWebRealEstate','webRealEstatePayload']) assert.match(source,new RegExp(`function ${helper}\\(`));
+  for(const route of ['unlock','build','operate','claim','upgrade','repair']) assert.match(source,new RegExp(`action==='${route}'`));
+  assert.match(source,/\/real-estate':'real-estate\.html'/);
+  assert.match(source,/module\.id==='real-estate'/);
+  for(const id of ['homeLink','balance','city','catalog','sheet','sheetBody']) assert.match(html,new RegExp(`id="${id}"`));
+  assert.match(css,/\.city/);assert.match(css,/\.building \.front/);assert.match(css,/@media\(max-width:760px\)/);
+  assert.match(js,/api\(`\/api\/real-estate\/\$\{action\.type\}`/);
+  assert.match(js,/setInterval/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-web-real-estate-city.json',import.meta.url),'utf8'));
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  assert.match(update.changes.join('\n'),/維修、保險與牌照/);
 });
 
 test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲大廳',()=>{
