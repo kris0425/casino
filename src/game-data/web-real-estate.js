@@ -24,6 +24,39 @@ export const WEB_REAL_ESTATE_EVENTS=[
   {id:'breakdown',name:'設備故障',icon:'🧰',multiplier:.75,text:'臨時故障造成部分營收損失。'}
 ];
 
+export const WEB_CITY_SIZE=12;
+export const WEB_CITY_TICK_MS=5*60*1000;
+export const WEB_CITY_TOOLS={
+  road:{name:'道路',icon:'🛣️',cost:25_000,description:'所有分區都必須緊鄰道路'},
+  residential:{name:'住宅區',icon:'🏠',cost:120_000,description:'吸引居民入住並增加人口'},
+  commercial:{name:'商業區',icon:'🏬',cost:200_000,description:'提供工作與較高稅收'},
+  industrial:{name:'工業區',icon:'🏭',cost:280_000,description:'大量工作與稅收，但會降低鄰近滿意度'},
+  power:{name:'發電站',icon:'⚡',cost:2_500_000,description:'供應 30 格分區所需電力'},
+  park:{name:'城市公園',icon:'🌳',cost:450_000,description:'提高周圍居民滿意度'},
+  bulldoze:{name:'拆除',icon:'🚧',cost:10_000,description:'清除建築或道路，不退還建造費'}
+};
+
+export function createWebCityTiles(size=WEB_CITY_SIZE) {
+  const tiles=[];
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++) tiles.push({x,y,type:'grass',level:0,occupancy:0});
+  const set=(x,y,type)=>Object.assign(tiles[y*size+x],{type,level:type==='power'?1:0});
+  for(let x=2;x<=9;x++) set(x,6,'road');
+  for(let y=3;y<=9;y++) set(5,y,'road');
+  set(3,8,'power');set(4,8,'road');
+  return tiles;
+}
+
+export function webCityStats(tiles) {
+  const zones=tiles.filter(tile=>['residential','commercial','industrial'].includes(tile.type));
+  const population=tiles.filter(tile=>tile.type==='residential').reduce((sum,tile)=>sum+(tile.occupancy||0),0);
+  const jobs=tiles.filter(tile=>['commercial','industrial'].includes(tile.type)).reduce((sum,tile)=>sum+Math.round((tile.occupancy||0)*(tile.type==='industrial'?1.25:.9)),0);
+  const powerSupply=tiles.filter(tile=>tile.type==='power').length*30,powerDemand=zones.length;
+  const parks=tiles.filter(tile=>tile.type==='park').length,industry=tiles.filter(tile=>tile.type==='industrial').length;
+  const happiness=Math.max(25,Math.min(100,Math.round(58+parks*4-Math.max(0,industry-parks)*1.5+(powerSupply>=powerDemand?8:-18))));
+  const developed=zones.filter(tile=>tile.level>0).length;
+  return {population,jobs,happiness,powerSupply,powerDemand,developed,zones:zones.length,roads:tiles.filter(tile=>tile.type==='road').length,parks};
+}
+
 export function webRealEstateUpgradeCost(building,level) {
   if(!building||level>=WEB_REAL_ESTATE_MAX_LEVEL) return null;
   return Math.round(building.cost*(.22+level*.08));

@@ -14,7 +14,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { COSMETIC_SLOTS, cosmeticCatalog, cosmeticById, defaultAppearance } from './game-data/cosmetics.js';
 import { WEB_GAME_VERSION, WEB_GAME_MODULES, WEB_TRANSPORT_TYPES, WEB_GARAGE_GROUPS, summarizeWebAssets } from './game-data/web-game.js';
-import { WEB_REAL_ESTATE_MAX_LEVEL, WEB_REAL_ESTATE_PLOTS, WEB_REAL_ESTATE_BUILDINGS, WEB_REAL_ESTATE_EVENTS, webRealEstateUpgradeCost, webRealEstateRevenue } from './game-data/web-real-estate.js';
+import { WEB_REAL_ESTATE_MAX_LEVEL, WEB_REAL_ESTATE_PLOTS, WEB_REAL_ESTATE_BUILDINGS, WEB_REAL_ESTATE_EVENTS, WEB_CITY_SIZE, WEB_CITY_TICK_MS, WEB_CITY_TOOLS, createWebCityTiles, webCityStats, webRealEstateUpgradeCost, webRealEstateRevenue } from './game-data/web-real-estate.js';
 
 const execFileAsync=promisify(execFile);
 
@@ -680,6 +680,16 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_web_real_estate_operations
     ON web_real_estate_plots(operation_completes_at);
+  CREATE TABLE IF NOT EXISTS web_city_states (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    tiles_json TEXT NOT NULL,
+    unclaimed_tax INTEGER NOT NULL DEFAULT 0,
+    total_tax INTEGER NOT NULL DEFAULT 0,
+    last_tick_at INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id)
+  );
   CREATE TABLE IF NOT EXISTS asset_bonuses (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, asset_id TEXT NOT NULL, buff_id TEXT NOT NULL,
     assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -11668,6 +11678,84 @@ function repairWebRealEstate(g,u,plotNo) {
   } catch(error) { db.exec('ROLLBACK'); throw error; }
   return {plot,building,cost};
 }
+function ensureWebCity(g,u) {
+  const now=Date.now();
+  db.prepare('INSERT OR IGNORE INTO web_city_states(guild_id,user_id,tiles_json,last_tick_at) VALUES(?,?,?,?)')
+    .run(g,u,JSON.stringify(createWebCityTiles()),now);
+  return db.prepare('SELECT * FROM web_city_states WHERE guild_id=? AND user_id=?').get(g,u);
+}
+function webCityTileHasRoad(tiles,tile) {
+  return tiles.some(other=>other.type==='road'&&Math.abs(other.x-tile.x)+Math.abs(other.y-tile.y)===1);
+}
+function simulateWebCity(g,u) {
+  const row=ensureWebCity(g,u),now=Date.now(),ticks=Math.min(288,Math.max(0,Math.floor((now-Number(row.last_tick_at))/WEB_CITY_TICK_MS)));
+  const tiles=JSON.parse(row.tiles_json);let addedTax=0;
+  for(let tick=0;tick<ticks;tick++) {
+    let remainingPower=webCityStats(tiles).powerSupply;
+    for(const tile of tiles) {
+      if(!['residential','commercial','industrial'].includes(tile.type)) continue;
+      const active=webCityTileHasRoad(tiles,tile)&&remainingPower>0;
+      if(active) {
+        remainingPower--;
+        if(!tile.level) { tile.level=1;tile.occupancy=4; }
+        else {
+          const capacity=[0,18,45,90][tile.level];
+          tile.occupancy=Math.min(capacity,(tile.occupancy||0)+Math.max(2,Math.ceil(capacity*.14)));
+          if(tile.occupancy>=capacity&&tile.level<3) tile.level++;
+        }
+      } else tile.occupancy=Math.max(0,(tile.occupancy||0)-2);
+    }
+    const stats=webCityStats(tiles),gross=stats.population*90+stats.jobs*75;
+    const upkeep=stats.roads*120+stats.parks*900+Math.floor(stats.powerSupply/30)*6000;
+    addedTax+=Math.max(0,Math.floor(gross*stats.happiness/100)-upkeep);
+  }
+  if(ticks) db.prepare(`UPDATE web_city_states SET tiles_json=?,unclaimed_tax=unclaimed_tax+?,last_tick_at=?,updated_at=CURRENT_TIMESTAMP
+    WHERE guild_id=? AND user_id=?`).run(JSON.stringify(tiles),addedTax,now,g,u);
+  return db.prepare('SELECT * FROM web_city_states WHERE guild_id=? AND user_id=?').get(g,u);
+}
+function buildWebCityTiles(g,u,toolId,requestedCells) {
+  const tool=WEB_CITY_TOOLS[String(toolId||'')];
+  if(!tool) throw new Error('請選擇有效的城市建設工具');
+  const cells=Array.isArray(requestedCells)?requestedCells:[];
+  if(!cells.length||cells.length>30) throw new Error('每次可建設 1 至 30 格');
+  const unique=new Map();
+  for(const cell of cells) {
+    const x=Number(cell?.x),y=Number(cell?.y);
+    if(!Number.isInteger(x)||!Number.isInteger(y)||x<0||y<0||x>=WEB_CITY_SIZE||y>=WEB_CITY_SIZE) throw new Error('城市座標無效');
+    unique.set(`${x}:${y}`,{x,y});
+  }
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row=simulateWebCity(g,u),tiles=JSON.parse(row.tiles_json),changed=[];
+    for(const cell of unique.values()) {
+      const tile=tiles.find(item=>item.x===cell.x&&item.y===cell.y);
+      if(toolId==='bulldoze'?(tile.type!=='grass'):(tile.type==='grass')) changed.push(tile);
+    }
+    if(!changed.length) throw new Error(toolId==='bulldoze'?'選取範圍沒有可拆除設施':'只能在空地上進行建設');
+    const totalCost=tool.cost*changed.length;
+    changeBalanceUnlocked(g,u,-totalCost,toolId==='bulldoze'?'web_city_bulldoze':'web_city_build',u,`城市建設｜${tool.name} ×${changed.length}`);
+    for(const tile of changed) Object.assign(tile,{type:toolId==='bulldoze'?'grass':toolId,level:toolId==='power'||toolId==='park'?1:0,occupancy:0});
+    db.prepare('UPDATE web_city_states SET tiles_json=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(JSON.stringify(tiles),g,u);
+    db.exec('COMMIT');
+    return {tool,cells:changed.length,totalCost};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+function claimWebCityTax(g,u) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row=simulateWebCity(g,u),amount=Number(row.unclaimed_tax||0);
+    if(!Number.isSafeInteger(amount)||amount<=0) throw new Error('目前沒有可領取的城市稅收');
+    const next=changeBalanceUnlocked(g,u,amount,'web_city_tax',u,'金光海灣｜城市稅收');
+    db.prepare('UPDATE web_city_states SET unclaimed_tax=0,total_tax=total_tax+?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(amount,g,u);
+    db.exec('COMMIT');
+    return {amount,next};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+function webCityPayload(g,u) {
+  const row=simulateWebCity(g,u),tiles=JSON.parse(row.tiles_json),stats=webCityStats(tiles);
+  const population=stats.population,level=population>=2500?6:population>=1200?5:population>=500?4:population>=180?3:population>=50?2:1;
+  return {size:WEB_CITY_SIZE,tiles,stats:{...stats,level},tools:Object.entries(WEB_CITY_TOOLS).map(([id,tool])=>({id,...tool})),unclaimedTax:Number(row.unclaimed_tax||0),totalTax:Number(row.total_tax||0),nextTickAt:Number(row.last_tick_at)+WEB_CITY_TICK_MS};
+}
 async function webRealEstatePayload(session) {
   const g=session.guildId,u=session.userId;ensureWebRealEstateStarterPlot(g,u);
   const user=await client.users.fetch(u),now=Date.now();
@@ -11677,7 +11765,7 @@ async function webRealEstatePayload(session) {
     const phase=!row?'locked':!building?'vacant':now<Number(row.construction_completes_at||0)?'building':row.operation_completes_at?(now>=row.operation_completes_at?'collect':'operating'):'ready';
     return {...plot,unlocked:Boolean(row),phase,building:building?{...building,level:Number(row.level),condition:Number(row.condition),upgradeCost:webRealEstateUpgradeCost(building,Number(row.level)),repairCost:webRealEstateRepairCost(building,Number(row.condition))}:null,constructionCompletesAt:row?.construction_completes_at||null,operation:row?.operation_completes_at?{completesAt:row.operation_completes_at,revenue:Number(row.operation_revenue),cost:Number(row.operation_cost),event}:null,totalCollected:Number(row?.total_collected||0)};
   });
-  return {version:WEB_GAME_VERSION,player:{name:user.globalName||user.username,avatar:user.displayAvatarURL({extension:'png',size:128}),balance:ensureWallet(g,u)},plots,buildings:Object.entries(WEB_REAL_ESTATE_BUILDINGS).map(([id,item])=>({id,...item})),summary:{unlocked:plots.filter(item=>item.unlocked).length,built:plots.filter(item=>item.building).length,totalCollected:plots.reduce((sum,item)=>sum+item.totalCollected,0)},homeUrl:gameActivityUrl(g,u,session.channelId),expiresAt:session.exp};
+  return {version:WEB_GAME_VERSION,player:{name:user.globalName||user.username,avatar:user.displayAvatarURL({extension:'png',size:128}),balance:ensureWallet(g,u)},city:webCityPayload(g,u),plots,buildings:Object.entries(WEB_REAL_ESTATE_BUILDINGS).map(([id,item])=>({id,...item})),summary:{unlocked:plots.filter(item=>item.unlocked).length,built:plots.filter(item=>item.building).length,totalCollected:plots.reduce((sum,item)=>sum+item.totalCollected,0)},homeUrl:gameActivityUrl(g,u,session.channelId),expiresAt:session.exp};
 }
 async function webGamePayload(session) {
   const g=session.guildId,u=session.userId,user=await client.users.fetch(u);
@@ -12524,7 +12612,9 @@ if(ACTIVITY_BACKEND_SECRET&&ACTIVITY_SIGNING_SECRET) {
         const body=await activityRequestBody(request),session=parseGameActivityToken(body.session),g=session.guildId,u=session.userId;
         const action=url.pathname.slice('/activity/real-estate/'.length);
         let message='城市資料已更新';
-        if(action==='unlock') { const result=unlockWebRealEstatePlot(g,u,body.plotNo);message=`已購買「${result.name}」`; }
+        if(action==='city-build') { const result=buildWebCityTiles(g,u,String(body.tool||''),body.cells);message=`已完成 ${result.tool.name} ×${result.cells}，支付 ${fmt(result.totalCost)} 金幣`; }
+        else if(action==='city-claim') { const result=claimWebCityTax(g,u);message=`已領取 ${fmt(result.amount)} 金幣城市稅收`; }
+        else if(action==='unlock') { const result=unlockWebRealEstatePlot(g,u,body.plotNo);message=`已購買「${result.name}」`; }
         else if(action==='build') { const result=buildWebRealEstate(g,u,body.plotNo,body.buildingId);message=`${result.building.name} 已開始施工`; }
         else if(action==='operate') { const result=startWebRealEstateOperation(g,u,body.plotNo);message=`${result.building.name} 已開始營運，本期事件：${result.event.name}`; }
         else if(action==='claim') { const result=claimWebRealEstateRevenue(g,u,body.plotNo);message=`已領取 ${fmt(result.revenue)} 金幣營收`; }

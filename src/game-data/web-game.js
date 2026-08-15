@@ -1,4 +1,4 @@
-export const WEB_GAME_VERSION='2026.08.15.8';
+export const WEB_GAME_VERSION='2026.08.15.9';
 
 export const WEB_GAME_MODULES=[
   {id:'real-estate',icon:'🏙️',name:'城市建設',description:'買地、蓋樓並經營自己的房地產事業',state:'available'},

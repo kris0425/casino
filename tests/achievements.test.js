@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { summarizeWebAssets } from '../src/game-data/web-game.js';
-import { WEB_REAL_ESTATE_BUILDINGS, WEB_REAL_ESTATE_PLOTS, webRealEstateUpgradeCost, webRealEstateRevenue } from '../src/game-data/web-real-estate.js';
+import { WEB_CITY_SIZE, WEB_CITY_TOOLS, WEB_REAL_ESTATE_BUILDINGS, WEB_REAL_ESTATE_PLOTS, createWebCityTiles, webCityStats, webRealEstateUpgradeCost, webRealEstateRevenue } from '../src/game-data/web-real-estate.js';
 
 const source=readFileSync(new URL('../src/index.js',import.meta.url),'utf8');
 const cosmeticsSource=readFileSync(new URL('../src/game-data/cosmetics.js',import.meta.url),'utf8');
@@ -219,7 +219,7 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.15\.8'/);
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.15\.9'/);
   for(const id of ['real-estate','appearance','transport','garage','vehicle-pvp','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
@@ -271,6 +271,29 @@ test('網頁房地產城市提供買地、施工、營運、收租、升級與�
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-web-real-estate-city.json',import.meta.url),'utf8'));
   assert.deepEqual(update.channelNames,['賭場公告']);
   assert.match(update.changes.join('\n'),/維修、保險與牌照/);
+});
+
+test('城市建設第二版提供道路分區電力公園與伺服器稅收模擬',()=>{
+  const html=readFileSync(new URL('../activity/public/real-estate.html',import.meta.url),'utf8');
+  const css=readFileSync(new URL('../activity/public/real-estate-city.css',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/real-estate.js',import.meta.url),'utf8');
+  const tiles=createWebCityTiles();
+  assert.equal(WEB_CITY_SIZE,12);
+  assert.equal(tiles.length,144);
+  assert.ok(tiles.some(tile=>tile.type==='road'));
+  assert.ok(tiles.some(tile=>tile.type==='power'));
+  assert.deepEqual(Object.keys(WEB_CITY_TOOLS),['road','residential','commercial','industrial','power','park','bulldoze']);
+  assert.equal(webCityStats(tiles).powerSupply,30);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS web_city_states/);
+  for(const helper of ['ensureWebCity','simulateWebCity','buildWebCityTiles','claimWebCityTax','webCityPayload']) assert.match(source,new RegExp(`function ${helper}\\(`));
+  for(const route of ['city-build','city-claim']) assert.match(source,new RegExp(`action==='${route}'`));
+  for(const id of ['population','happiness','power','cityTax','toolbox','metroGrid','claimTax','nextTick']) assert.match(html,new RegExp(`id="${id}"`));
+  assert.match(css,/\.metro-grid/);assert.match(css,/rotateX\(53deg\) rotateZ\(-45deg\)/);assert.match(css,/@media\(max-width:620px\)/);
+  assert.match(js,/\/api\/real-estate\/city-build/);assert.match(js,/\/api\/real-estate\/city-claim/);assert.match(js,/pointerdown/);assert.match(js,/pointerover/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-web-city-builder-v2.json',import.meta.url),'utf8'));
+  assert.equal(update.version,'2026.08.15.9');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  assert.match(update.changes.join('\n'),/道路/);assert.match(update.changes.join('\n'),/電力/);assert.match(update.changes.join('\n'),/5 分鐘/);
 });
 
 test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲大廳',()=>{
