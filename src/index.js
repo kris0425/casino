@@ -5369,6 +5369,8 @@ const ALL_IN_HERO_TARGET=50;
 const allInTitleNotificationsInFlight=new Set();
 const CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD='賭場公告';
 const CASINO_ANNOUNCEMENT_CHANNEL_ID=String(process.env.CASINO_ANNOUNCEMENT_CHANNEL_ID||'').trim();
+const CASINO_ALL_IN_PUSH_CHANNEL_KEYWORD='賭場推播';
+const CASINO_ALL_IN_PUSH_CHANNEL_ID=String(process.env.CASINO_ALL_IN_PUSH_CHANNEL_ID||'').trim();
 const allInBroadcastsInFlight=new Set();
 function casinoAllInCount(g,u) {
   return db.prepare('SELECT all_in_count FROM casino_all_in_stats WHERE guild_id=? AND user_id=?').get(g,u)?.all_in_count||0;
@@ -5403,6 +5405,36 @@ async function casinoAnnouncementChannel(guildId) {
   matches=casinoAnnouncementTextChannels([...fetched.values()].filter(Boolean));
   return matches[0]||null;
 }
+function casinoAllInPushChannelRank(name) {
+  const normalized=String(name||'').trim();
+  if(normalized===CASINO_ALL_IN_PUSH_CHANNEL_KEYWORD) return 0;
+  if(normalized.endsWith(`｜${CASINO_ALL_IN_PUSH_CHANNEL_KEYWORD}`)||normalized.endsWith(`|${CASINO_ALL_IN_PUSH_CHANNEL_KEYWORD}`)) return 1;
+  return normalized.includes(CASINO_ALL_IN_PUSH_CHANNEL_KEYWORD)?2:99;
+}
+function casinoAllInPushTextChannels(channels) {
+  return [...channels].filter(channel=>channel
+    &&[ChannelType.GuildText,ChannelType.GuildAnnouncement].includes(channel.type)
+    &&typeof channel.send==='function'
+    &&casinoAllInPushChannelRank(channel.name)<99
+  ).sort((left,right)=>casinoAllInPushChannelRank(left.name)-casinoAllInPushChannelRank(right.name)||left.position-right.position);
+}
+async function casinoAllInPushChannel(guildId) {
+  const guild=client.guilds.cache.get(guildId)||await client.guilds.fetch(guildId);
+  if(CASINO_ALL_IN_PUSH_CHANNEL_ID) {
+    const configured=await client.channels.fetch(CASINO_ALL_IN_PUSH_CHANNEL_ID).catch(()=>null);
+    if(configured
+      &&configured.guildId===guild.id
+      &&[ChannelType.GuildText,ChannelType.GuildAnnouncement].includes(configured.type)
+      &&typeof configured.send==='function'
+    ) return configured;
+    console.warn(`賭場推播頻道設定無效 guild=${guild.id} channel=${CASINO_ALL_IN_PUSH_CHANNEL_ID}`);
+  }
+  let matches=casinoAllInPushTextChannels(guild.channels.cache.values());
+  if(matches.length) return matches[0];
+  const fetched=await guild.channels.fetch();
+  matches=casinoAllInPushTextChannels([...fetched.values()].filter(Boolean));
+  return matches[0]||null;
+}
 async function casinoAuctionAnnouncementChannel(guildId) {
   if(CASINO_ANNOUNCEMENT_CHANNEL_ID) {
     const configured=await client.channels.fetch(CASINO_ANNOUNCEMENT_CHANNEL_ID).catch(()=>null);
@@ -5420,8 +5452,8 @@ async function announceCasinoAllInEvent(eventId) {
   if(!event) return false;
   allInBroadcastsInFlight.add(eventId);
   try {
-    const channel=await casinoAnnouncementChannel(event.guild_id);
-    if(!channel) throw new Error(`找不到名稱包含「${CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD}」的文字頻道`);
+    const channel=await casinoAllInPushChannel(event.guild_id);
+    if(!channel) throw new Error(`找不到名稱包含「${CASINO_ALL_IN_PUSH_CHANNEL_KEYWORD}」的文字頻道`);
     const message=await channel.send({
       embeds:[new EmbedBuilder()
         .setColor(0xE53935)
@@ -5432,7 +5464,7 @@ async function announceCasinoAllInEvent(eventId) {
           {name:'🎮 遊戲',value:event.game,inline:true},
           {name:'🔥 累積歐印',value:`${fmt(event.all_in_count)} 次`,inline:true}
         )
-        .setFooter({text:'賭場公告自動播報｜本局結果請回原遊戲頻道查看'})
+        .setFooter({text:'賭場推播自動警報｜本局結果請回原遊戲頻道查看'})
         .setTimestamp()],
       allowedMentions:{parse:[]}
     });

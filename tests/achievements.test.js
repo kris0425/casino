@@ -459,13 +459,17 @@ test('成就累加資料表可安全累計與取最大值',()=>{
   assert.equal(db.prepare("SELECT value FROM achievement_progress WHERE metric='comebackReached'").get().value,1);
 });
 
-test('完成歐印時排入賭場公告自動播報',()=>{
+test('完成歐印時只排入賭場推播且不再送往賭場公告',()=>{
   assert.match(source,/recordCasinoAllIn\(g,u,game,bet\)/);
   assert.match(source,/allIn\?recordCasinoAllIn\(g,u,game,bet\):null/);
   assert.match(source,/CREATE TABLE IF NOT EXISTS casino_all_in_events/);
-  assert.match(source,/CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD='賭場公告'/);
-  assert.match(source,/CASINO_ANNOUNCEMENT_CHANNEL_ID=String\(process\.env\.CASINO_ANNOUNCEMENT_CHANNEL_ID\|\|''\)\.trim\(\)/);
-  assert.match(source,/client\.channels\.fetch\(CASINO_ANNOUNCEMENT_CHANNEL_ID\)/);
+  assert.match(source,/CASINO_ALL_IN_PUSH_CHANNEL_KEYWORD='賭場推播'/);
+  assert.match(source,/CASINO_ALL_IN_PUSH_CHANNEL_ID=String\(process\.env\.CASINO_ALL_IN_PUSH_CHANNEL_ID\|\|''\)\.trim\(\)/);
+  assert.match(source,/client\.channels\.fetch\(CASINO_ALL_IN_PUSH_CHANNEL_ID\)/);
+  const broadcaster=source.match(/async function announceCasinoAllInEvent\(eventId\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(broadcaster,/casinoAllInPushChannel\(event\.guild_id\)/);
+  assert.match(broadcaster,/賭場推播自動警報/);
+  assert.doesNotMatch(broadcaster,/casinoAnnouncementChannel|賭場公告/);
   assert.doesNotMatch(source,/FREE_LOBBY_CHANNEL_KEYWORD|自由大廳自動播報/);
   assert.match(source,/setInterval\(\(\)=>notifyPendingCasinoAllIns\(\)\.catch/);
   assert.match(source,/allowedMentions:\{parse:\[\]\}/);
@@ -484,6 +488,14 @@ test('完成歐印時排入賭場公告自動播報',()=>{
   assert.equal(pending.bet,50000);
   assert.equal(pending.game,'比大小');
   assert.equal(pending.all_in_count,3);
+});
+
+test('歐印警報頻道分流更新公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-all-in-push-channel.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-15-all-in-push-channel');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  assert.match(update.changes.join('\n'),/賭場推播/);
+  assert.match(update.changes.join('\n'),/賭場公告.*不再/s);
 });
 
 test('歐印勇者每日只能發動一次並於台北時間換日重置',()=>{
