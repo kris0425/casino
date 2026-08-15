@@ -91,7 +91,7 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   for(const name of removed) {
     assert.doesNotMatch(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${name}'\\)`),`舊指令 /${name} 仍在註冊`);
   }
-  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',稱號:'稱號'\}/);
+  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',生涯:'賭城生涯',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',稱號:'稱號'\}/);
   assert.match(source,/日常:\{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'\}/);
   assert.match(source,/補給:\{商城:'商城',背包:'背包',購買:'購買',使用:'使用'\}/);
   assert.match(source,/寵物:\{商店:'寵物店',我的:'我的寵物'\}/);
@@ -1890,4 +1890,35 @@ test('賭場地獄系列三隻神話寵物附橫向圖片、代價與雙重能�
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-infernal-casino-pets.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-08-15-infernal-casino-pets');
   for(const name of ['冥獄三頭犬','熔岩獄貓','冥焰不死鳥']) assert.match(update.changes.join('\n'),new RegExp(name));
+});
+
+test('賭城生涯提供每日每週合約、資產配置與五區聲望',()=>{
+  for(const table of ['casino_career_profiles','casino_district_reputation','casino_career_contracts']) {
+    assert.match(source,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
+  for(const district of ['harbor','lisboa','taipa','coloane','underworld']) assert.match(source,new RegExp(`${district}:\\{name:`));
+  assert.match(source,/const careerContractCatalog=\{/);
+  assert.equal((source.match(/cycle:'daily'/g)||[]).length,6);
+  assert.equal((source.match(/cycle:'weekly'/g)||[]).length,5);
+  for(const helper of ['syncCareerContracts','careerSuccessProfile','selectCareerAsset','completeCareerContract','careerHomeEmbed','careerDetailComponents']) {
+    assert.match(source,new RegExp(`function ${helper}\\(`),`缺少賭城生涯功能：${helper}`);
+  }
+  const settlement=source.match(/function completeCareerContract\(g,u,slot\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(settlement,/BEGIN IMMEDIATE/);
+  assert.match(settlement,/changeBalanceUnlocked\(g,u,-contract\.fee,'career_contract_fee'/);
+  assert.match(settlement,/changeBalanceUnlocked\(g,u,reward,'career_contract_reward'/);
+  assert.match(settlement,/consumeStamina\(g,u,contract\.stamina\)/);
+  assert.match(settlement,/COMMIT/);
+  assert.match(settlement,/ROLLBACK/);
+  assert.match(source,/Math\.min\(15/,'私人資產成功率加成必須限制最高 15%');
+  assert.match(source,/Math\.min\(5/,'同行寵物成功率加成必須限制最高 5%');
+  assert.match(source,/Math\.min\(10/,'區域聲望成功率加成必須限制最高 10%');
+  assert.match(source,/setName\('生涯'\)/);
+  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',生涯:'賭城生涯'/);
+  assert.match(source,/i\.customId\.startsWith\('career_'\)/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-casino-career-contracts.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-15-casino-career-contracts');
+  assert.match(update.changes.join('\n'),/每日 3 份/);
+  assert.match(update.changes.join('\n'),/每週 1 份/);
+  assert.match(update.changes.join('\n'),/\/玩家 生涯/);
 });

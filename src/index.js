@@ -82,10 +82,32 @@ const ECONOMY_SINK_LABELS={
   train_blind_box:'列車盲盒',
   shipping_blind_box:'船運盲盒',
   cosmetic_purchase:'個人造型商城',
+  career_contract_fee:'賭城生涯合約保證金',
   transfer_fee:'玩家轉帳手續費'
 };
 const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund','auction_legacy_refund','auction_singleton_refund']);
 const BASE_STAMINA = 800;
+const CAREER_REPUTATION_LEVELS=[0,100,250,500,1000,2000];
+const careerDistricts={
+  harbor:{name:'外港商業區',emoji:'⚓',description:'港口、物流與跨境運輸中心'},
+  lisboa:{name:'葡京娛樂區',emoji:'🎰',description:'賭場、飯店與高額貴賓服務區'},
+  taipa:{name:'氹仔觀光區',emoji:'🏨',description:'大型房產、會展與觀光活動區'},
+  coloane:{name:'路環後勤區',emoji:'🌿',description:'倉儲、補給與低風險委託區'},
+  underworld:{name:'地下賭城',emoji:'🌑',description:'高風險、高報酬的灰色委託區'}
+};
+const careerContractCatalog={
+  vip_night_transfer:{name:'黑金貴賓夜間接送',emoji:'🚘',cycle:'daily',district:'lisboa',assetCategories:['汽車','客運巴士','飛行器'],stamina:25,fee:12000,reward:48000,reputation:18,baseSuccess:74,description:'在不驚動媒體的情況下，把神秘貴賓安全送抵黑金套房。'},
+  harbor_cold_chain:{name:'外港冷鏈緊急調度',emoji:'📦',cycle:'daily',district:'harbor',assetCategories:['卡車','列車','郵輪'],stamina:28,fee:15000,reward:62000,reputation:20,baseSuccess:70,description:'冷藏貨櫃即將逾時，必須重新安排陸海運載具完成交接。'},
+  taipa_property_patrol:{name:'氹仔豪宅夜間巡檢',emoji:'🏢',cycle:'daily',district:'taipa',assetCategories:['房地產','汽車','武器'],stamina:22,fee:10000,reward:45000,reputation:17,baseSuccess:76,description:'處理租戶投訴、設備異常與可疑人士，維持豪宅營運品質。'},
+  coloane_supply_run:{name:'路環山道補給任務',emoji:'🛵',cycle:'daily',district:'coloane',assetCategories:['機車','汽車','卡車'],stamina:18,fee:8000,reward:35000,reputation:14,baseSuccess:80,description:'沿著山道將醫療與餐飲補給送往偏遠據點。'},
+  casino_security_escort:{name:'賭場籌碼武裝護送',emoji:'🛡️',cycle:'daily',district:'lisboa',assetCategories:['武器','汽車','飛行器'],stamina:32,fee:22000,reward:90000,reputation:24,baseSuccess:66,description:'護送高額籌碼穿越娛樂區，沿途可能遭遇攔截。'},
+  underworld_exchange:{name:'地下賭城秘密交割',emoji:'🕶️',cycle:'daily',district:'underworld',assetCategories:['武器','汽車','機車'],stamina:40,fee:45000,reward:180000,reputation:32,baseSuccess:56,description:'在地下賭城完成一筆不留下帳務痕跡的高風險交割。'},
+  golden_weekend:{name:'黃金週末全城接待',emoji:'👑',cycle:'weekly',district:'lisboa',assetCategories:['房地產','汽車','飛行器'],stamina:75,fee:220000,reward:900000,reputation:95,baseSuccess:64,description:'連續承辦一整週的高額玩家接待、住宿與交通調度。'},
+  bay_supply_chain:{name:'大灣區聯合供應鏈',emoji:'🌉',cycle:'weekly',district:'harbor',assetCategories:['卡車','列車','郵輪'],stamina:80,fee:260000,reward:1050000,reputation:105,baseSuccess:61,description:'整合鐵路、貨運與船運，維持整週跨境物資供應。'},
+  taipa_expo:{name:'氹仔國際博覽週',emoji:'🎪',cycle:'weekly',district:'taipa',assetCategories:['房地產','客運巴士','汽車'],stamina:70,fee:180000,reward:820000,reputation:90,baseSuccess:68,description:'統籌展館、住房與接駁車隊，接待來自各地的參展團隊。'},
+  underworld_sweep:{name:'地下賭城黑名單清掃',emoji:'🔥',cycle:'weekly',district:'underworld',assetCategories:['武器','汽車','機車'],stamina:100,fee:500000,reward:2200000,reputation:140,baseSuccess:48,description:'追查一整週的作弊集團線索，最終突入地下據點完成清掃。'},
+  city_grand_tour:{name:'澳門全境尊榮巡禮',emoji:'🌆',cycle:'weekly',district:'coloane',assetCategories:['汽車','客運巴士','飛行器','郵輪'],stamina:65,fee:150000,reward:700000,reputation:80,baseSuccess:72,description:'規劃橫跨外港、氹仔與路環的高端旅遊行程。'}
+};
 const assetPath=name=>resolve(process.cwd(),'assets',name);
 const CHARACTER_STYLE_ROOT=resolve(process.cwd(),'data','appearance-styles');
 mkdirSync(CHARACTER_STYLE_ROOT,{recursive:true});
@@ -465,6 +487,36 @@ db.exec(`
     claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id, user_id)
   );
+  CREATE TABLE IF NOT EXISTS casino_career_profiles (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL,
+    total_reputation INTEGER NOT NULL DEFAULT 0,
+    contracts_completed INTEGER NOT NULL DEFAULT 0,
+    successful_contracts INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id)
+  );
+  CREATE TABLE IF NOT EXISTS casino_district_reputation (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, district_id TEXT NOT NULL,
+    reputation INTEGER NOT NULL DEFAULT 0,
+    contracts_completed INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id,district_id)
+  );
+  CREATE TABLE IF NOT EXISTS casino_career_contracts (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, slot TEXT NOT NULL,
+    cycle_key TEXT NOT NULL, contract_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed')),
+    outcome TEXT CHECK (outcome IN ('success','failed')),
+    selected_asset_id TEXT,
+    reward INTEGER NOT NULL DEFAULT 0,
+    reputation_awarded INTEGER NOT NULL DEFAULT 0,
+    accepted_at TEXT,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id,slot,cycle_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_casino_career_contracts_current
+    ON casino_career_contracts(guild_id,user_id,cycle_key,status);
   CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, leader_id TEXT NOT NULL,
     name TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -5189,6 +5241,180 @@ function petMoodBar(value) {
   const bars=Math.max(0,Math.min(10,Math.round(value/10)));
   return `${'🟩'.repeat(bars)}${'⬛'.repeat(10-bars)} **${value}/100**`;
 }
+function careerWeekKey() {
+  const localDate=new Date(`${taipeiDay()}T00:00:00Z`);
+  localDate.setUTCDate(localDate.getUTCDate()-localDate.getUTCDay());
+  return localDate.toISOString().slice(0,10);
+}
+function careerRotationIndex(value,length) {
+  let hash=0;
+  for(const character of value) hash=(Math.imul(hash,31)+character.codePointAt(0))>>>0;
+  return length?hash%length:0;
+}
+function syncCareerContracts(g,u) {
+  const dailyKey=taipeiDay(),weeklyKey=careerWeekKey();
+  const dailyIds=Object.entries(careerContractCatalog).filter(([,item])=>item.cycle==='daily').map(([id])=>id);
+  const weeklyIds=Object.entries(careerContractCatalog).filter(([,item])=>item.cycle==='weekly').map(([id])=>id);
+  const dailyStart=careerRotationIndex(`daily:${dailyKey}`,dailyIds.length);
+  const dailySlots=['daily_1','daily_2','daily_3'];
+  dailySlots.forEach((slot,index)=>db.prepare(`INSERT OR IGNORE INTO casino_career_contracts(guild_id,user_id,slot,cycle_key,contract_id)
+    VALUES(?,?,?,?,?)`).run(g,u,slot,dailyKey,dailyIds[(dailyStart+index)%dailyIds.length]));
+  const weeklyId=weeklyIds[careerRotationIndex(`weekly:${weeklyKey}`,weeklyIds.length)];
+  db.prepare(`INSERT OR IGNORE INTO casino_career_contracts(guild_id,user_id,slot,cycle_key,contract_id)
+    VALUES(?,?,?,?,?)`).run(g,u,'weekly_1',weeklyKey,weeklyId);
+  const dailyRows=db.prepare(`SELECT * FROM casino_career_contracts WHERE guild_id=? AND user_id=? AND cycle_key=?
+    AND slot IN ('daily_1','daily_2','daily_3') ORDER BY slot`).all(g,u,dailyKey);
+  const weeklyRow=db.prepare(`SELECT * FROM casino_career_contracts WHERE guild_id=? AND user_id=? AND cycle_key=?
+    AND slot='weekly_1'`).get(g,u,weeklyKey);
+  return [...dailyRows,...(weeklyRow?[weeklyRow]:[])];
+}
+function careerProfile(g,u) {
+  db.prepare('INSERT OR IGNORE INTO casino_career_profiles(guild_id,user_id) VALUES(?,?)').run(g,u);
+  return db.prepare('SELECT * FROM casino_career_profiles WHERE guild_id=? AND user_id=?').get(g,u);
+}
+function careerDistrictRows(g,u) {
+  const stored=new Map(db.prepare('SELECT district_id,reputation,contracts_completed FROM casino_district_reputation WHERE guild_id=? AND user_id=?').all(g,u).map(row=>[row.district_id,row]));
+  return Object.entries(careerDistricts).map(([districtId,district])=>({districtId,district,reputation:stored.get(districtId)?.reputation||0,contractsCompleted:stored.get(districtId)?.contracts_completed||0}));
+}
+function careerReputationLevel(reputation) {
+  const base=CAREER_REPUTATION_LEVELS.filter(threshold=>reputation>=threshold).length;
+  return reputation<CAREER_REPUTATION_LEVELS.at(-1)?base:base+Math.floor((reputation-CAREER_REPUTATION_LEVELS.at(-1))/1000);
+}
+function careerAssignment(g,u,slot) {
+  const row=syncCareerContracts(g,u).find(item=>item.slot===slot);
+  if(!row||!careerContractCatalog[row.contract_id]) throw new Error('這份合約已經過期，請返回合約中心重新選擇');
+  return row;
+}
+function careerAssetChoices(g,u,contract) {
+  return assetsOf(g,u).map(row=>({row,asset:assetCatalog[row.asset_id]}))
+    .filter(entry=>entry.asset&&contract.assetCategories.includes(entry.asset.category))
+    .sort((a,b)=>(b.asset.price||0)-(a.asset.price||0))
+    .slice(0,24);
+}
+function careerAssetBonus(g,u,row,contract) {
+  if(!row.selected_asset_id) return 0;
+  const asset=assetCatalog[row.selected_asset_id];
+  if(!asset||assetQuantity(g,u,row.selected_asset_id)<1||!contract.assetCategories.includes(asset.category)) return 0;
+  return Math.min(15,Math.max(3,Math.floor(Math.log10(Math.max(10,asset.price||10))*2)));
+}
+function careerPetSupport(g,u) {
+  const active=activePet(g,u);
+  if(!active||active.happiness<20) return {active,bonus:0};
+  return {active,bonus:Math.min(5,1+Math.floor(active.happiness/25))};
+}
+function careerSuccessProfile(g,u,row) {
+  const contract=careerContractCatalog[row.contract_id],districtRow=careerDistrictRows(g,u).find(item=>item.districtId===contract.district);
+  const assetBonus=careerAssetBonus(g,u,row,contract),petSupport=careerPetSupport(g,u),reputationBonus=Math.min(10,Math.floor((districtRow?.reputation||0)/100));
+  const chance=Math.max(10,Math.min(95,contract.baseSuccess+assetBonus+petSupport.bonus+reputationBonus));
+  return {chance,assetBonus,petBonus:petSupport.bonus,activePet:petSupport.active,reputationBonus,districtReputation:districtRow?.reputation||0};
+}
+function selectCareerAsset(g,u,slot,assetId) {
+  const row=careerAssignment(g,u,slot),contract=careerContractCatalog[row.contract_id];
+  if(row.status==='completed') throw new Error('這份合約已經結算，無法更換配置');
+  if(assetId!=='standard') {
+    const asset=assetCatalog[assetId];
+    if(!asset||assetQuantity(g,u,assetId)<1) throw new Error('你已不再持有這項資產');
+    if(!contract.assetCategories.includes(asset.category)) throw new Error('這項資產不適用於目前合約');
+  }
+  db.prepare(`UPDATE casino_career_contracts SET selected_asset_id=?,accepted_at=COALESCE(accepted_at,CURRENT_TIMESTAMP)
+    WHERE guild_id=? AND user_id=? AND slot=? AND cycle_key=?`).run(assetId==='standard'?null:assetId,g,u,row.slot,row.cycle_key);
+  return careerAssignment(g,u,slot);
+}
+function completeCareerContract(g,u,slot) {
+  const row=careerAssignment(g,u,slot),contract=careerContractCatalog[row.contract_id];
+  if(row.status==='completed') throw new Error('這份合約已經完成，請等待下一次輪替');
+  if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前無法執行賭城生涯合約');
+  if(row.selected_asset_id&&(!assetCatalog[row.selected_asset_id]||assetQuantity(g,u,row.selected_asset_id)<1)) throw new Error('配置的資產已不在你的收藏中，請重新選擇');
+  const successProfile=careerSuccessProfile(g,u,row),success=Math.random()*100<successProfile.chance;
+  const reward=success?Math.floor(contract.reward*(0.9+Math.random()*0.21)):0;
+  const reputation=success?contract.reputation:Math.max(2,Math.floor(contract.reputation*0.15));
+  if(!Number.isSafeInteger(reward)||!Number.isSafeInteger(contract.fee)) throw new Error('合約金額計算異常，行動已取消');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const locked=db.prepare('SELECT status FROM casino_career_contracts WHERE guild_id=? AND user_id=? AND slot=? AND cycle_key=?').get(g,u,row.slot,row.cycle_key);
+    if(!locked||locked.status!=='pending') throw new Error('這份合約已被結算，請重新整理');
+    if(ensureWallet(g,u)<contract.fee) throw new Error(`合約保證金不足，需要 ${fmt(contract.fee)}`);
+    const beforeStamina=stamina(g,u),staminaAfter=consumeStamina(g,u,contract.stamina),chargedStamina=beforeStamina-staminaAfter;
+    changeBalanceUnlocked(g,u,-contract.fee,'career_contract_fee',u,`${contract.name}｜合約保證金`);
+    if(success&&reward>0) changeBalanceUnlocked(g,u,reward,'career_contract_reward',u,`${contract.name}｜合約報酬`);
+    const updated=db.prepare(`UPDATE casino_career_contracts SET status='completed',outcome=?,reward=?,reputation_awarded=?,completed_at=CURRENT_TIMESTAMP
+      WHERE guild_id=? AND user_id=? AND slot=? AND cycle_key=? AND status='pending'`).run(success?'success':'failed',reward,reputation,g,u,row.slot,row.cycle_key);
+    if(Number(updated.changes)!==1) throw new Error('合約狀態已改變，交易已取消');
+    db.prepare(`INSERT INTO casino_career_profiles(guild_id,user_id,total_reputation,contracts_completed,successful_contracts)
+      VALUES(?,?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET
+      total_reputation=total_reputation+excluded.total_reputation,
+      contracts_completed=contracts_completed+1,
+      successful_contracts=successful_contracts+excluded.successful_contracts,
+      updated_at=CURRENT_TIMESTAMP`).run(g,u,reputation,1,success?1:0);
+    db.prepare(`INSERT INTO casino_district_reputation(guild_id,user_id,district_id,reputation,contracts_completed)
+      VALUES(?,?,?,?,1) ON CONFLICT(guild_id,user_id,district_id) DO UPDATE SET
+      reputation=reputation+excluded.reputation,
+      contracts_completed=contracts_completed+1,
+      updated_at=CURRENT_TIMESTAMP`).run(g,u,contract.district,reputation);
+    db.exec('COMMIT');
+    return {success,reward,reputation,fee:contract.fee,chargedStamina,chance:successProfile.chance,contract,balance:balance(g,u)};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function careerContractLabel(row) {
+  const contract=careerContractCatalog[row.contract_id],district=careerDistricts[contract.district];
+  const status=row.status==='completed'?(row.outcome==='success'?'✅':'❌'):'📋';
+  return `${status} ${contract.emoji} ${contract.name}｜${district.emoji} ${district.name}`;
+}
+function careerHomeEmbed(g,u,notice='') {
+  const assignments=syncCareerContracts(g,u),profile=careerProfile(g,u),districts=careerDistrictRows(g,u);
+  const daily=assignments.filter(row=>row.slot.startsWith('daily_')),weekly=assignments.find(row=>row.slot==='weekly_1');
+  const contractLine=row=>{
+    const contract=careerContractCatalog[row.contract_id],state=row.status==='completed'?(row.outcome==='success'?`✅ 成功｜+${fmt(row.reward)} 金幣｜+${row.reputation_awarded} 聲望`:`❌ 失敗｜+${row.reputation_awarded} 聲望`):`保證金 ${fmt(contract.fee)}｜報酬約 ${fmt(contract.reward)}｜${contract.stamina} 體力`;
+    return `**${careerContractLabel(row)}**\n${state}`;
+  };
+  const districtLines=districts.map(({district,reputation,contractsCompleted})=>`${district.emoji} **${district.name} Lv.${careerReputationLevel(reputation)}**｜${fmt(reputation)} 聲望｜${contractsCompleted} 份`).join('\n');
+  return new EmbedBuilder().setColor(0xC28BFF).setTitle('🌆 賭城生涯｜合約中心')
+    .setDescription(`${notice?`${notice}\n\n`:''}每天輪替 **3 份城市合約**，每週另有 **1 份大型合約**。選擇合約後可配置自己持有的資產；同行寵物與區域聲望也會提升成功率。\n\n**今日合約**\n${daily.map(contractLine).join('\n\n')}\n\n**本週大型合約**\n${contractLine(weekly)}`)
+    .addFields(
+      {name:'🏙️ 區域聲望',value:districtLines,inline:false},
+      {name:'📈 生涯紀錄',value:`總聲望：**${fmt(profile.total_reputation)}**\n完成：**${profile.contracts_completed}**｜成功：**${profile.successful_contracts}**`,inline:true},
+      {name:'💰 目前資源',value:`金庫：**${fmt(balance(g,u))}**\n體力：**${stamina(g,u)}/${staminaMax(g,u)}**`,inline:true}
+    ).setFooter({text:'每日於台北時間 00:00 輪替；每週日 00:00 更換大型合約｜保證金不論成敗都會銷毀'});
+}
+function careerContractMenu(g,u,selectedSlot=null) {
+  return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`career_contract:${u}`).setPlaceholder('選擇今日或本週合約').addOptions(
+    syncCareerContracts(g,u).map(row=>({label:careerContractLabel(row).slice(0,100),description:(row.status==='completed'?'本期已結算':'查看條件、配置資產並執行').slice(0,100),value:row.slot,default:row.slot===selectedSlot}))
+  ));
+}
+function careerHomeComponents(g,u) {
+  return [careerContractMenu(g,u),new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`career_home:${u}`).setLabel('重新整理').setEmoji('🔄').setStyle(ButtonStyle.Secondary))];
+}
+function careerDetailEmbed(g,u,slot,notice='') {
+  const row=careerAssignment(g,u,slot),contract=careerContractCatalog[row.contract_id],district=careerDistricts[contract.district],success=careerSuccessProfile(g,u,row);
+  const asset=row.selected_asset_id?assetCatalog[row.selected_asset_id]:null,pet=success.activePet;
+  const state=row.status==='completed'?(row.outcome==='success'?`✅ 已成功完成｜獲得 ${fmt(row.reward)} 金幣與 ${row.reputation_awarded} 聲望`:`❌ 行動失敗｜獲得 ${row.reputation_awarded} 安慰聲望`):'🟢 可執行';
+  return new EmbedBuilder().setColor(contract.cycle==='weekly'?0xF5B942:0x7C4DFF).setTitle(`${contract.emoji} ${contract.name}`)
+    .setDescription(`${notice?`${notice}\n\n`:''}${contract.description}\n\n**任務狀態：${state}**`)
+    .addFields(
+      {name:'📍 行動區域',value:`${district.emoji} ${district.name}\n${district.description}`,inline:true},
+      {name:'💼 成本與獎勵',value:`保證金：${fmt(contract.fee)}\n體力：${contract.stamina}\n預估報酬：${fmt(contract.reward)}\n成功聲望：+${contract.reputation}`,inline:true},
+      {name:'🚘 配置資產',value:asset?`${asset.name}\n${asset.category}｜成功率 +${success.assetBonus}%`:'賭場標準裝備｜無額外加成',inline:false},
+      {name:'🐾 同行支援',value:pet?`${petDisplayName(pet.petId,pet.nickname)}｜心情 ${pet.happiness}/100｜成功率 +${success.petBonus}%`:'沒有可支援的同行寵物',inline:true},
+      {name:'⭐ 區域經驗',value:`${fmt(success.districtReputation)} 聲望｜成功率 +${success.reputationBonus}%`,inline:true},
+      {name:'🎯 最終成功率',value:`**${success.chance}%**（基礎 ${contract.baseSuccess}%）`,inline:true},
+      {name:'✅ 可用資產類型',value:contract.assetCategories.join('、'),inline:false}
+    ).setFooter({text:'保證金會直接銷毀；失敗仍可獲得少量區域聲望，但本期合約不能重試'});
+}
+function careerDetailComponents(g,u,slot) {
+  const row=careerAssignment(g,u,slot),contract=careerContractCatalog[row.contract_id],choices=careerAssetChoices(g,u,contract);
+  const assetOptions=[{label:'賭場標準裝備',description:'不使用私人資產，沒有額外成功率加成',value:'standard',emoji:'🎒',default:!row.selected_asset_id},...choices.map(({row:owned,asset})=>({label:asset.name.slice(0,100),description:`${asset.category}｜持有 ${owned.quantity}｜成功率加成依價值計算`.slice(0,100),value:owned.asset_id,default:owned.asset_id===row.selected_asset_id}))];
+  return [
+    careerContractMenu(g,u,slot),
+    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`career_asset:${u}:${slot}`).setPlaceholder('配置本次合約使用的資產').setDisabled(row.status==='completed').addOptions(assetOptions)),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`career_execute:${u}:${slot}`).setLabel(row.status==='completed'?'本期已結算':'確認配置並執行').setEmoji('🎯').setStyle(ButtonStyle.Primary).setDisabled(row.status==='completed'),
+      new ButtonBuilder().setCustomId(`career_home:${u}`).setLabel('返回合約中心').setEmoji('↩️').setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
 function petMediaPayload(embed,petId) {
   const pet=petCatalog[petId];
   if(!pet?.image) return {embeds:[embed]};
@@ -7507,7 +7733,7 @@ const gameHelpDetails={
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
   assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具、**21 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運、貨運與船運營運統一由 \`/交通事業\` 進入。可在 \`/資產商城 分類:碼頭\` 購買遊艇碼頭、國際港、深水碼頭與船位擴建；持有任一碼頭即可獨立註冊船運公司，船位決定後續可購入與停泊的船舶數量。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n使用 \`/房地產\` 經營服務式公寓、商辦與飯店：每日首次招商支付維護與保險、每週續期牌照，並可升級至 Lv.10 提高租金；市場事件與建築狀況會影響每期收益。交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
-  playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、成就、造型與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 成就`、`/玩家 造型` 與 `/玩家 稱號`，集中管理角色資訊與外觀。'},
+  playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、賭城生涯、成就、造型與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 生涯`、`/玩家 成就`、`/玩家 造型` 與 `/玩家 稱號`，集中管理角色資訊、每日與每週城市合約、區域聲望及外觀。'},
   dailyHub:{label:'日常中心',emoji:'📅',hint:'每日獎勵、增益與體力',title:'📅 日常中心',body:'使用 `/日常 領取` 領每日獎勵；`/日常 增益` 查看輪替效果；`/日常 體力` 與 `/日常 回體力` 管理每日體力。'},
   supplyHub:{label:'補給中心',emoji:'🛒',hint:'商城、背包、購買與使用',title:'🛒 補給中心',body:'使用 `/補給 商城` 與 `/補給 背包` 查看物品，再以 `/補給 購買`、`/補給 使用` 完成補給。'},
   pets:{label:'寵物系統',emoji:'🐾',hint:'領養、陪伴、照顧與特殊增益',title:'🐾 寵物陪伴系統',body:'使用 `/寵物 商店` 預覽並領養寵物或購買用品，再用 `/寵物 我的` 設定同行夥伴與使用用品。寵物每天心情 -10，心情低於 20 時特殊功能暫停。'}
@@ -7642,9 +7868,10 @@ const playerTitleChoices=[
   {name:'❌ 取消目前稱號',value:'clear'}
 ];
 const commands = [
-  new SlashCommandBuilder().setName('玩家').setDescription('統一查看金庫、資料、成就、造型、網頁遊戲與稱號')
+  new SlashCommandBuilder().setName('玩家').setDescription('統一查看金庫、資料、生涯、成就、造型、網頁遊戲與稱號')
     .addSubcommand(s=>s.setName('金庫').setDescription('查看自己或其他玩家的金幣').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('資料').setDescription('查看類似 Tatsu 的玩家資料卡').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
+    .addSubcommand(s=>s.setName('生涯').setDescription('開啟每日、每週賭城合約與城市區域聲望'))
     .addSubcommand(s=>s.setName('成就').setDescription('查看自己或其他玩家的成就進度').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('造型').setDescription('選擇角色與管理員發布的完整造型'))
     .addSubcommand(s=>s.setName('遊戲').setDescription('開啟網頁遊戲大廳與個人經營總覽'))
@@ -7825,9 +8052,37 @@ async function handleWorldBossInteraction(i) {
   }
 }
 
+async function handleCareerInteraction(i) {
+  const [,ownerId,slot]=i.customId.split(':');
+  if(i.user.id!==ownerId) return i.reply({content:'這是其他玩家的賭城生涯面板，請使用 `/玩家 生涯` 開啟自己的合約中心。',ephemeral:true});
+  try {
+    await i.deferUpdate();
+    if(i.customId.startsWith('career_home:')) return i.editReply({embeds:[careerHomeEmbed(i.guildId,ownerId)],components:careerHomeComponents(i.guildId,ownerId)});
+    if(i.customId.startsWith('career_contract:')) {
+      const selectedSlot=i.values[0];
+      return i.editReply({embeds:[careerDetailEmbed(i.guildId,ownerId,selectedSlot)],components:careerDetailComponents(i.guildId,ownerId,selectedSlot)});
+    }
+    if(i.customId.startsWith('career_asset:')) {
+      selectCareerAsset(i.guildId,ownerId,slot,i.values[0]);
+      return i.editReply({embeds:[careerDetailEmbed(i.guildId,ownerId,slot,'✅ 合約配置已更新。')],components:careerDetailComponents(i.guildId,ownerId,slot)});
+    }
+    if(i.customId.startsWith('career_execute:')) {
+      const result=completeCareerContract(i.guildId,ownerId,slot);
+      const notice=result.success
+        ? `✅ **${result.contract.name}完成！** 成功率 ${result.chance}%，獲得 **${fmt(result.reward)}** 金幣與 **${result.reputation}** 聲望；支付保證金 ${fmt(result.fee)}、消耗 ${result.chargedStamina} 體力。`
+        : `❌ **${result.contract.name}失敗。** 本次成功率 ${result.chance}%，保證金 ${fmt(result.fee)} 已銷毀、消耗 ${result.chargedStamina} 體力；仍獲得 **${result.reputation}** 聲望。`;
+      return i.editReply({embeds:[careerHomeEmbed(i.guildId,ownerId,notice)],components:careerHomeComponents(i.guildId,ownerId)});
+    }
+  } catch(error) {
+    console.error(`賭城生涯互動失敗 guild=${i.guildId} user=${i.user.id}: ${error.stack||error.message}`);
+    return i.editReply({embeds:[careerHomeEmbed(i.guildId,ownerId,`⚠️ ${error.message}`)],components:careerHomeComponents(i.guildId,ownerId)}).catch(()=>null);
+  }
+}
+
 async function handleInteraction(i) {
   touchTransportPanelInteraction(i);
   if(i.isButton()&&['world_boss_attack','world_boss_refresh'].includes(i.customId)&&i.guildId) return handleWorldBossInteraction(i);
+  if((i.isButton()||i.isStringSelectMenu())&&i.customId.startsWith('career_')&&i.guildId) return handleCareerInteraction(i);
   if(i.isAutocomplete()) {
     const focused=i.options.getFocused(true),query=String(focused.value||'').trim().toLowerCase();
     if(i.commandName==='稱號設定'&&focused.name==='稱號') {
@@ -9679,7 +9934,7 @@ async function handleInteraction(i) {
   if (!i.isChatInputCommand() || !i.guildId) return;
   const g=i.guildId, u=i.user.id;
   const hubRoutes={
-    玩家:{金庫:'金庫',資料:'個人資料',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',稱號:'稱號'},
+    玩家:{金庫:'金庫',資料:'個人資料',生涯:'賭城生涯',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',稱號:'稱號'},
     日常:{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'},
     補給:{商城:'商城',背包:'背包',購買:'購買',使用:'使用'},
     寵物:{商店:'寵物店',我的:'我的寵物'}
@@ -9766,6 +10021,7 @@ async function handleInteraction(i) {
       db.prepare('INSERT INTO player_profiles(guild_id,user_id,title) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET title=excluded.title,updated_at=CURRENT_TIMESTAMP').run(g,u,selected);
       return i.reply({content:`✅ 已裝備個人稱號 **${profileTitles[selected]}**。`,ephemeral:true});
     }
+    if(routedCommand==='賭城生涯') return i.reply({ephemeral:true,embeds:[careerHomeEmbed(g,u)],components:careerHomeComponents(g,u)});
     if(routedCommand==='個人造型') {
       if(!CHARACTER_STYLE_SYSTEM_ENABLED) return i.reply({content:'🛠️ 角色造型系統目前暫時關閉維護中。既有角色與資料都會完整保留。',ephemeral:true});
       const url=appearanceActivityUrl(g,u,i.channelId);
@@ -9797,7 +10053,7 @@ async function handleInteraction(i) {
       const earned=db.prepare("SELECT COALESCE(SUM(CASE WHEN delta>0 THEN delta ELSE 0 END),0) total FROM ledger WHERE guild_id=? AND user_id=?").get(g,target.id).total;
       const items=db.prepare('SELECT COALESCE(SUM(quantity),0) total FROM inventory WHERE guild_id=? AND user_id=?').get(g,target.id).total;
       const ownedAssets=assetsOf(g,target.id),assetCount=ownedAssets.reduce((sum,row)=>sum+row.quantity,0),assetValue=ownedAssets.reduce((sum,row)=>sum+(assetCatalog[row.asset_id]?.price||0)*row.quantity,0);
-      const team=getTeam(g,target.id),jailed=jailRemaining(g,target.id),hospitalized=hospitalRemaining(g,target.id),achievementState=syncAchievements(g,target.id);
+      const team=getTeam(g,target.id),jailed=jailRemaining(g,target.id),hospitalized=hospitalRemaining(g,target.id),achievementState=syncAchievements(g,target.id),career=careerProfile(g,target.id);
       const status=jailed?`🔒 小黑屋（${jailText(jailed)}）`:hospitalized?`🏥 住院（${jailText(hospitalized)}）`:'🟢 自由行動';
       const bars=Math.max(0,Math.min(10,Math.round(energy/maxEnergy*10)));
       return i.reply({embeds:[new EmbedBuilder().setColor(0x5865F2).setAuthor({name:`${target.username} 的個人資料卡`,iconURL:target.displayAvatarURL()}).setThumbnail(target.displayAvatarURL({size:256})).setTitle(profileRank(coins)).setDescription(`⚡ ${'🟦'.repeat(bars)}${'⬛'.repeat(10-bars)} **${energy}/${maxEnergy}**`).addFields(
@@ -9806,6 +10062,7 @@ async function handleInteraction(i) {
         {name:'🏷️ 特殊稱號',value:playerTitle(g,target.id),inline:true},
         {name:'✨ 角色造型',value:`${appearanceSummary(g,target.id)}\n使用 /玩家 造型 選擇完整造型`,inline:false},
         {name:'🏆 成就收藏',value:`已解鎖：${achievementState.unlocked.size}/${achievementDefinitions.length}\n徽章：${achievementBadgeText(g,target.id)}\n使用 /玩家 成就 查看完整進度`,inline:true},
+        {name:'🌆 賭城生涯',value:`總聲望：${fmt(career.total_reputation)}\n完成合約：${career.contracts_completed}\n使用 /玩家 生涯 接取城市委託`,inline:true},
         {name:'🏠 豪華資產',value:`持有數量：${assetCount}\n原價總值：${fmt(assetValue)}`,inline:true},
         {name:'🎒 社交與狀態',value:`背包物品：${items}\n隊伍：${team?`${teamDisplayName(team)}（${team.members.length} 人）`:'尚未加入'}\n狀態：${status}`,inline:false},
         {name:`${todayBuff().icon} 今日增益｜${todayBuff().name}`,value:todayBuff().text,inline:false}
