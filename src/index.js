@@ -45,6 +45,7 @@ const CHARACTER_STYLE_SYSTEM_ENABLED = String(process.env.CHARACTER_STYLE_SYSTEM
 const PLAYER_TRANSFER_FEE_RATE = 0.02;
 const PLAYER_TRANSFER_MIZI_CHANCE = 0.05;
 const PLAYER_TRANSFER_EXTRA_ZERO_CHANCE = 0.05;
+const ALL_IN_HERO_PAYOUT_MULTIPLIER = 2;
 const K_CAR_WASH_BASE_REWARD = 12_000;
 const K_CAR_WASH_SCRATCH_CHANCE = 0.10;
 const K_CAR_WASH_SCRATCH_COMPENSATION = 20_000;
@@ -276,8 +277,8 @@ function settleGamePayout(g,u,bet,payout,game,{balanceChanger=changeBalance,allI
     if(allIn&&equippedTitleId(g,u)==='all_in_hero'&&claimAllInHeroDaily(g,u)) {
       titleId='all_in_hero';
       titleActive=true;
-      titleInitialMultiplier=3;
-      titleMultiplier=3;
+      titleInitialMultiplier=ALL_IN_HERO_PAYOUT_MULTIPLIER;
+      titleMultiplier=ALL_IN_HERO_PAYOUT_MULTIPLIER;
     } else {
       titleId=luckyReturnsTitleId(g,u);
       titleActive=Boolean(titleId);
@@ -5346,7 +5347,7 @@ function claimAllInHeroDaily(g,u) {
 function titleLuckNotice(settlement) {
   let notice='';
   if(settlement.titleActive) {
-    if(settlement.titleId==='all_in_hero') notice='🔥 **傳奇稱號「歐印勇者」發動：歐印勝利派彩 ×3！**';
+    if(settlement.titleId==='all_in_hero') notice=`🔥 **傳奇稱號「歐印勇者」發動：歐印勝利派彩 ×${ALL_IN_HERO_PAYOUT_MULTIPLIER}！**`;
     else {
       const title=profileTitles[settlement.titleId],skill=returnTitleSkillNames[settlement.titleId];
       notice=settlement.titleSkillTriggered
@@ -5362,7 +5363,7 @@ function titleLuckNotice(settlement) {
 }
 function playerTitle(g,u) {
   const id=equippedTitleId(g,u),name=profileTitles[id]||'尚未設定特殊稱號';
-  if(id==='all_in_hero') return `${name}\n稀有度：傳奇｜每日第一次歐印獲勝時派彩 ×3（台北時間 00:00 重置）`;
+  if(id==='all_in_hero') return `${name}\n稀有度：傳奇｜每日第一次歐印獲勝時派彩 ×${ALL_IN_HERO_PAYOUT_MULTIPLIER}（台北時間 00:00 重置）`;
   return returnTitleSkillNames[id]?`${name}\n每次賭場獲勝隨機獲得 ×0.1～×10 派彩；3% 發動「${returnTitleSkillNames[id]}」重抽一次`:name;
 }
 const ALL_IN_HERO_TARGET=50;
@@ -5523,7 +5524,7 @@ async function notifyAllInHeroUnlock(g,u) {
         .setDescription('你已在賭場遊戲完成 **50 次歐印**，正式獲得傳奇稱號 **🔥 歐印勇者**！')
         .addFields(
           {name:'🎰 解鎖進度',value:`${Math.min(row.all_in_count,ALL_IN_HERO_TARGET)}/${ALL_IN_HERO_TARGET}`,inline:true},
-          {name:'🔥 稱號效果',value:'配戴期間，每天第一次在賭場遊戲使用歐印並獲勝時，派彩提升為 **3 倍**。',inline:false},
+          {name:'🔥 稱號效果',value:`配戴期間，每天第一次在賭場遊戲使用歐印並獲勝時，派彩提升為 **${ALL_IN_HERO_PAYOUT_MULTIPLIER} 倍**。`,inline:false},
           {name:'🏷️ 配戴方式',value:'回到伺服器使用 `/玩家 稱號`，選擇 **🔥 歐印勇者｜傳奇**。',inline:false}
         )
         .setFooter({text:'每日最多發動一次，台北時間 00:00 重置；一般下注不受影響'})

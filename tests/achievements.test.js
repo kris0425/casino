@@ -502,7 +502,11 @@ test('歐印勇者每日只能發動一次並於台北時間換日重置',()=>{
   assert.match(source,/hero_trigger_day TEXT/);
   assert.match(source,/ALTER TABLE casino_all_in_stats ADD COLUMN hero_trigger_day TEXT/);
   assert.match(source,/allIn&&equippedTitleId\(g,u\)==='all_in_hero'&&claimAllInHeroDaily\(g,u\)/);
-  assert.match(source,/每日第一次歐印獲勝時派彩 ×3（台北時間 00:00 重置）/);
+  assert.match(source,/const ALL_IN_HERO_PAYOUT_MULTIPLIER = 2/);
+  assert.match(source,/titleInitialMultiplier=ALL_IN_HERO_PAYOUT_MULTIPLIER/);
+  assert.match(source,/titleMultiplier=ALL_IN_HERO_PAYOUT_MULTIPLIER/);
+  assert.match(source,/每日第一次歐印獲勝時派彩 ×\$\{ALL_IN_HERO_PAYOUT_MULTIPLIER\}（台北時間 00:00 重置）/);
+  assert.doesNotMatch(source,/歐印勇者[^\n]{0,100}(?:派彩 ×3|3 倍)/);
 
   const block=source.match(/function claimAllInHeroDaily\(g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少歐印勇者每日觸發限制函式');
@@ -520,6 +524,14 @@ test('歐印勇者每日只能發動一次並於台北時間換日重置',()=>{
   assert.equal(claim('guild','other-player'),true,'其他玩家仍可各自發動');
   today='2026-08-01';
   assert.equal(claim('guild','player'),true,'台北時間換日後應可再次發動');
+});
+
+test('歐印勇者派彩調降為每日首次兩倍公告完整',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-all-in-hero-double-payout.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-15-all-in-hero-double-payout');
+  assert.match(update.summary,/3 倍.*2 倍/);
+  assert.match(update.changes.join('\n'),/每日第一次.*2 倍/);
+  assert.match(update.changes.join('\n'),/每日一次/);
 });
 
 test('幫 K 佬洗車提供 12000 工資並有 10% 豪車刮傷賠償事件',()=>{
