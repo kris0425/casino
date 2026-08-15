@@ -219,7 +219,7 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.15\.7'/);
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.15\.8'/);
   for(const id of ['real-estate','appearance','transport','garage','vehicle-pvp','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
@@ -264,6 +264,9 @@ test('網頁房地產城市提供買地、施工、營運、收租、升級與�
   for(const id of ['homeLink','balance','city','catalog','sheet','sheetBody']) assert.match(html,new RegExp(`id="${id}"`));
   assert.match(css,/\.city/);assert.match(css,/\.building \.front/);assert.match(css,/@media\(max-width:760px\)/);
   assert.match(js,/api\(`\/api\/real-estate\/\$\{action\.type\}`/);
+  assert.match(js,/if\(plot\.phase==='operating'\)return plot\.operation\?/,'營運倒數必須先確認 operation 存在');
+  assert.doesNotMatch(js,/return \{locked:[^\n]+operation\.completesAt/,'狀態文字不可用會提前計算所有分支的物件字面值');
+  assert.match(html,/\[hidden\]\{display:none!important\}/,'載入完成後必須能隱藏遮罩');
   assert.match(js,/setInterval/);
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-web-real-estate-city.json',import.meta.url),'utf8'));
   assert.deepEqual(update.channelNames,['賭場公告']);

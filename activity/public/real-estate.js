@@ -5,7 +5,15 @@ function node(tag,className,text){const el=document.createElement(tag);if(classN
 function toast(message,error=false){const el=$('#toast');el.textContent=message;el.className=`toast show${error?' error':''}`;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.className='toast',3200);}
 async function api(path,{method='GET',body={}}={}){const options={method,headers:{}};let url=path;if(method==='GET')url+=`?session=${encodeURIComponent(session)}`;else{options.headers['content-type']='application/json';options.body=JSON.stringify({session,...body});}const response=await fetch(url,options),data=await response.json().catch(()=>({}));if(!response.ok||!data.ok)throw new Error(data.error||'城市暫時無法連線');return data;}
 function duration(ms){if(ms<=0)return '已完成';const seconds=Math.ceil(ms/1000),hours=Math.floor(seconds/3600),minutes=Math.floor(seconds%3600/60),rest=seconds%60;return hours?`${hours} 小時 ${minutes} 分`:minutes?`${minutes} 分 ${rest} 秒`:`${rest} 秒`;}
-function phaseText(plot){return {locked:`購地 ${format(plot.price)}`,vacant:'可興建',building:`施工 ${duration(plot.constructionCompletesAt-Date.now())}`,ready:'可開始營運',operating:`營運 ${duration(plot.operation.completesAt-Date.now())}`,collect:`可領 ${format(plot.operation.revenue)}`}[plot.phase]||plot.phase;}
+function phaseText(plot){
+  if(plot.phase==='locked')return `購地 ${format(plot.price)}`;
+  if(plot.phase==='vacant')return '可興建';
+  if(plot.phase==='building')return `施工 ${duration(Number(plot.constructionCompletesAt||0)-Date.now())}`;
+  if(plot.phase==='ready')return '可開始營運';
+  if(plot.phase==='operating')return plot.operation?`營運 ${duration(Number(plot.operation.completesAt||0)-Date.now())}`:'等待重新整理';
+  if(plot.phase==='collect')return plot.operation?`可領 ${format(plot.operation.revenue)}`:'等待重新整理';
+  return plot.phase||'等待資料';
+}
 function buildingVisual(plot){if(plot.phase==='locked')return node('div','lock-mark','🔒');if(!plot.building)return node('div','vacant-mark','＋');if(plot.phase==='building')return node('div','construction','🏗️');const wrap=node('div',`building ${plot.building.id}`);wrap.style.setProperty('--tower-color',plot.building.color);wrap.append(node('i','side'),node('i','front'),node('i','roof'));return wrap;}
 function render(){const data=state.data;$('#avatar').src=data.player.avatar;$('#playerName').textContent=data.player.name;$('#balance').textContent=format(data.player.balance);$('#unlocked').textContent=data.summary.unlocked;$('#built').textContent=data.summary.built;$('#collected').textContent=format(data.summary.totalCollected);$('#homeLink').href=data.homeUrl||`/game?session=${encodeURIComponent(session)}`;
   const city=$('#city');city.replaceChildren();for(const plot of data.plots){const card=node('button',`plot ${plot.phase}`);card.type='button';card.dataset.plotNo=plot.no;card.append(node('span','plot-number',`LOT 0${plot.no}`),buildingVisual(plot));const copy=node('div','plot-copy');copy.append(node('strong','',plot.building?.name||plot.name),node('small','',plot.building?`${plot.district}｜Lv.${plot.building.level}｜狀況 ${plot.building.condition}`:plot.district),node('span','plot-status',phaseText(plot)));card.append(copy);card.onclick=()=>openPlot(plot.no);city.append(card);}
