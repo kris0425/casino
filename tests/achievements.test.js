@@ -1819,3 +1819,28 @@ test('藏身處成功戰利品百分比四捨五入顯示',()=>{
   assert.match(embed,/loot=Math\.round\(\(hideoutLootMultiplier\(g,u\)-1\)\*100\)/);
   assert.match(embed,/成功戰利品：\*\*\+\$\{loot\}%\*\*/);
 });
+
+test('寵物店新增柴犬、布偶貓與白文鳥並附完整橫向圖片',()=>{
+  const pets=[
+    ['shiba_inu','柴犬｜旺財','dog',188000,'pets/shiba_inu_lucky_guardian.png'],
+    ['ragdoll_cat','布偶貓｜星砂','cat',320000,'pets/ragdoll_cat_starlight.png'],
+    ['white_java_sparrow','白文鳥｜麻糬','bird',888000,'pets/white_java_sparrow_mochi.png']
+  ];
+  for(const [petId,name,petType,price,imagePath] of pets) {
+    const block=source.match(new RegExp(`${petId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(block,new RegExp(`name:'${name}'`));
+    assert.match(block,new RegExp(`price:${price}`));
+    assert.match(block,new RegExp(`petType:'${petType}'`));
+    assert.match(block,new RegExp(`image:'${imagePath.replace(/[/.]/g,'\\$&')}'`));
+    const image=readFileSync(new URL(`../assets/${imagePath}`,import.meta.url));
+    assert.equal(image.subarray(1,4).toString(),'PNG',`${petId} 缺少 PNG 寵物素材`);
+    assert.ok(image.readUInt32BE(16)>image.readUInt32BE(20),`${petId} 寵物素材必須為橫向`);
+  }
+  const javaSparrow=source.match(/white_java_sparrow:\{[^\n]+/)?.[0]||'';
+  assert.match(javaSparrow,/和八哥是不同鳥種/,'白文鳥說明必須與八哥明確區分');
+  assert.match(javaSparrow,/bonuses:\{casino:0\.04,heist:4\}/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-three-new-pets.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-15-three-new-pets');
+  assert.match(update.changes.join('\n'),/柴犬｜旺財/);
+  assert.match(update.changes.join('\n'),/白文鳥.*不是八哥/);
+});

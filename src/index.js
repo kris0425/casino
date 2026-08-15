@@ -104,7 +104,10 @@ const petCatalog={
   budgerigar:{name:'虎皮鸚鵡｜豆豆',emoji:'🐦',price:12000,petType:'bird',bonusType:'discount',bonusValue:0.03,bonusText:'體力商城折扣最高 3%',description:'小巧活潑的虎皮鸚鵡，陪主人逛商城時總能找到划算的補給品。'},
   snowy_owl:{name:'雪鴞｜白夜',emoji:'🦉',price:30000,petType:'bird',bonusType:'stamina',bonusValue:10,bonusText:'每日體力上限最高 +10',description:'安靜可靠的雪鴞，會在夜晚守護主人，讓每天的冒險更有精神。'},
   fat_myna:{name:'肥八哥｜八寶',emoji:'🐦‍⬛',price:88000,image:'pets/fat_myna.jpg',petType:'bird',rarity:'傳說',hungerMultiplier:1.5,bonuses:{casino:0.05,heist:5},bonusText:'賭場獲勝派彩最高 +5%｜搶劫成功率最高 +5%',description:'圓滾滾的傳說級八哥，食量是一般鳥類的 1.5 倍。只要維持好心情，牠就會替主人帶來強大幸運與搶劫加成。'},
-  orange_tabby:{name:'橘貓｜橘寶',emoji:'🐈',price:14000,image:'pets/orange_tabby.jpg',petType:'cat',bonusType:'stamina',bonusValue:6,bonusText:'每日體力上限最高 +6',description:'貪吃又親人的橘貓，安心的陪伴能讓主人每天多保留一些體力。'}
+  orange_tabby:{name:'橘貓｜橘寶',emoji:'🐈',price:14000,image:'pets/orange_tabby.jpg',petType:'cat',bonusType:'stamina',bonusValue:6,bonusText:'每日體力上限最高 +6',description:'貪吃又親人的橘貓，安心的陪伴能讓主人每天多保留一些體力。'},
+  shiba_inu:{name:'柴犬｜旺財',emoji:'🐕',price:188000,image:'pets/shiba_inu_lucky_guardian.png',petType:'dog',rarity:'稀有',bonusType:'work',bonusValue:0.06,bonusText:'工作收入最高 +6%',description:'穿著黑金禮賓背心的招財柴犬。保持好心情時，會陪主人巡視工作場所並提高合法工作收入。'},
+  ragdoll_cat:{name:'布偶貓｜星砂',emoji:'🐈',price:320000,image:'pets/ragdoll_cat_starlight.png',petType:'cat',rarity:'稀有',bonusType:'discount',bonusValue:0.06,bonusText:'體力商城折扣最高 6%',description:'擁有星砂藍眼的優雅布偶貓，最會在商城裡找到划算補給，陪伴時可提高體力商城折扣。'},
+  white_java_sparrow:{name:'白文鳥｜麻糬',emoji:'🐦',price:888000,image:'pets/white_java_sparrow_mochi.png',petType:'bird',rarity:'傳說',hungerMultiplier:1.2,bonuses:{casino:0.04,heist:4},bonusText:'賭場獲勝派彩最高 +4%｜搶劫成功率最高 +4%',description:'白羽、粉喙、圓滾滾的傳說級白文鳥，和八哥是不同鳥種。食量是一般鳥類的 1.2 倍，保持好心情時能同時帶來牌桌幸運與撤退直覺。'}
 };
 const petItemCatalog={
   canned_food:{name:'鮮肉罐頭',emoji:'🥫',price:250,mood:25,description:'恢復陪伴寵物 25 點心情。'},
