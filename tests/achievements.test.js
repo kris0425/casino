@@ -219,7 +219,7 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.15\.10'/);
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.16\.1'/);
   for(const id of ['real-estate','appearance','transport','garage','vehicle-pvp','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
@@ -296,21 +296,24 @@ test('城市建設第二版提供道路分區電力公園與伺服器稅收模�
   assert.match(update.changes.join('\n'),/道路/);assert.match(update.changes.join('\n'),/電力/);assert.match(update.changes.join('\n'),/5 分鐘/);
 });
 
-test('城市建造使用六張正式等角美術素材並避免大型 PNG 直接載入手機',()=>{
+test('城市建造使用十二張正式等角美術素材並穩定輪替建築外觀',()=>{
   const html=readFileSync(new URL('../activity/public/real-estate.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../activity/public/real-estate-art.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/real-estate.js',import.meta.url),'utf8');
-  for(const name of ['residential','commercial','industrial','power','park','city-hall']) {
+  for(const name of ['residential','residential-townhouse','residential-waterfront','commercial','commercial-casino','commercial-office','industrial','industrial-logistics','power','park','park-waterfront','city-hall']) {
     const path=new URL(`../assets/game/city-builder/${name}.webp`,import.meta.url);
     assert.ok(existsSync(path),`${name} 美術素材必須存在`);
     assert.ok(readFileSync(path).length<100_000,`${name} 網站素材必須低於 100 KB`);
   }
-  assert.match(html,/real-estate-art\.css\?v=20260815\.10/);
+  assert.match(html,/real-estate-art\.css\?v=20260816\.1/);
   assert.match(html,/city-hall\.webp/);
-  for(const name of ['residential','commercial','industrial','power','park']) assert.match(js,new RegExp(`${name}:'\\/assets\\/game\\/city-builder\\/${name}\\.webp'`));
+  for(const name of ['residential-townhouse','residential-waterfront','commercial-casino','commercial-office','industrial-logistics','park-waterfront']) assert.match(js,new RegExp(`${name}\\.webp`));
+  assert.match(js,/const seed=Math\.abs\(tile\.x\*31\+tile\.y\*17\+\(tile\.level\|\|0\)\*13\)/);
   assert.match(css,/\.tile-art/);assert.match(css,/\.city-hall-art/);
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-15-city-builder-art.json',import.meta.url),'utf8'));
   assert.equal(update.version,'2026.08.15.10');assert.deepEqual(update.channelNames,['賭場公告']);
+  const variantsUpdate=JSON.parse(readFileSync(new URL('../updates/2026-08-16-city-builder-art-variants.json',import.meta.url),'utf8'));
+  assert.equal(variantsUpdate.version,'2026.08.16.1');assert.deepEqual(variantsUpdate.channelNames,['賭場公告']);
 });
 
 test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲大廳',()=>{

@@ -1,7 +1,13 @@
 const params=new URLSearchParams(location.search),session=params.get('session')||'';
 const $=selector=>document.querySelector(selector),format=value=>Number(value||0).toLocaleString('zh-TW');
 const state={data:null,selected:null,busy:false,loading:false,tool:'road',painting:false,paintCells:new Map()};
-const zoneArt={residential:'/assets/game/city-builder/residential.webp',commercial:'/assets/game/city-builder/commercial.webp',industrial:'/assets/game/city-builder/industrial.webp',power:'/assets/game/city-builder/power.webp',park:'/assets/game/city-builder/park.webp'};
+const zoneArt={
+  residential:['/assets/game/city-builder/residential.webp','/assets/game/city-builder/residential-townhouse.webp','/assets/game/city-builder/residential-waterfront.webp'],
+  commercial:['/assets/game/city-builder/commercial.webp','/assets/game/city-builder/commercial-casino.webp','/assets/game/city-builder/commercial-office.webp'],
+  industrial:['/assets/game/city-builder/industrial.webp','/assets/game/city-builder/industrial-logistics.webp'],
+  power:['/assets/game/city-builder/power.webp'],
+  park:['/assets/game/city-builder/park.webp','/assets/game/city-builder/park-waterfront.webp']
+};
 let toastTimer,tickTimer;
 function node(tag,className,text){const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;}
 function toast(message,error=false){const el=$('#toast');el.textContent=message;el.className=`toast show${error?' error':''}`;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.className='toast',3200);}
@@ -17,7 +23,7 @@ function phaseText(plot){
   return plot.phase||'等待資料';
 }
 function buildingVisual(plot){if(plot.phase==='locked')return node('div','lock-mark','🔒');if(!plot.building)return node('div','vacant-mark','＋');if(plot.phase==='building')return node('div','construction','🏗️');const wrap=node('div',`building ${plot.building.id}`);wrap.style.setProperty('--tower-color',plot.building.color);wrap.append(node('i','side'),node('i','front'),node('i','roof'));return wrap;}
-function tileArt(tile){return zoneArt[tile.type]||'';}
+function tileArt(tile){const variants=zoneArt[tile.type];if(!variants?.length)return '';const seed=Math.abs(tile.x*31+tile.y*17+(tile.level||0)*13);return variants[seed%variants.length];}
 function selectedTool(){return state.data?.city?.tools?.find(tool=>tool.id===state.tool)||null;}
 function updateSelection(){const tool=selectedTool(),count=state.paintCells.size;$('#selectedTool').textContent=tool?`${tool.icon} ${tool.name}｜${tool.description}`:'選擇工具後點擊或拖曳地圖';$('#selectionCost').textContent=tool?(count?`${count} 格 · ${format(tool.cost*count)} 金幣`:`每格 ${format(tool.cost)} 金幣`):'—';}
 function renderTools(city){const box=$('#toolbox');box.replaceChildren();for(const tool of city.tools){const button=node('button',`tool-button${tool.id===state.tool?' active':''}`);button.type='button';button.disabled=state.busy;button.dataset.tool=tool.id;button.append(node('span','',tool.icon),node('strong','',tool.name),node('small','',format(tool.cost)));button.onclick=()=>{state.tool=tool.id;state.paintCells.clear();renderTools(city);updateSelection();};box.append(button);}updateSelection();}
