@@ -219,7 +219,7 @@ test('網頁遊戲第一版拆分資料模組並提供安全玩家大廳',()=>{
   const css=readFileSync(new URL('../activity/public/game.css',import.meta.url),'utf8');
   const js=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
   assert.match(source,/from '\.\/game-data\/web-game\.js'/);
-  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.16\.2'/);
+  assert.match(webGameDataSource,/WEB_GAME_VERSION='2026\.08\.16\.3'/);
   for(const id of ['real-estate','appearance','transport','garage','vehicle-pvp','assets','achievements','mahjong','casino']) assert.match(webGameDataSource,new RegExp(`id:'${id}'`));
   assert.match(source,/kind:'game'.*exp:Date\.now\(\)\+30\*60\*1000/);
   assert.match(source,/function parseGameActivityToken\(token\)/);
@@ -305,7 +305,7 @@ test('城市建造使用十二張正式等角美術素材並穩定輪替建築�
     assert.ok(existsSync(path),`${name} 美術素材必須存在`);
     assert.ok(readFileSync(path).length<100_000,`${name} 網站素材必須低於 100 KB`);
   }
-  assert.match(html,/real-estate-art\.css\?v=20260816\.2/);
+  assert.match(html,/real-estate-art\.css\?v=20260816\.3/);
   assert.match(html,/city-hall\.webp/);
   for(const name of ['residential-townhouse','residential-waterfront','commercial-casino','commercial-office','industrial-logistics','park-waterfront']) assert.match(js,new RegExp(`${name}\\.webp`));
   assert.match(js,/const seed=Math\.abs\(tile\.x\*31\+tile\.y\*17\+\(tile\.level\|\|0\)\*13\)/);
@@ -316,9 +316,17 @@ test('城市建造使用十二張正式等角美術素材並穩定輪替建築�
   assert.equal(variantsUpdate.version,'2026.08.16.1');assert.deepEqual(variantsUpdate.channelNames,['賭場公告']);
   const backgroundPath=new URL('../assets/game/city-builder/map-background.webp',import.meta.url);
   assert.ok(existsSync(backgroundPath),'城市地圖背景必須存在');assert.ok(readFileSync(backgroundPath).length<180_000,'城市地圖背景必須低於 180 KB');
-  assert.match(css,/map-background\.webp/);
+  assert.match(css,/--map-image/);
   const backgroundUpdate=JSON.parse(readFileSync(new URL('../updates/2026-08-16-city-builder-map-background.json',import.meta.url),'utf8'));
   assert.equal(backgroundUpdate.version,'2026.08.16.2');assert.deepEqual(backgroundUpdate.channelNames,['賭場公告']);
+  for(const season of ['spring','summer','autumn','winter']) for(const period of ['day','night']) {
+    const seasonalPath=new URL(`../assets/game/city-builder/map-${season}-${period}.webp`,import.meta.url);
+    assert.ok(existsSync(seasonalPath),`${season}-${period} 地圖背景必須存在`);assert.ok(readFileSync(seasonalPath).length<180_000,`${season}-${period} 背景必須低於 180 KB`);
+  }
+  for(const required of ['function taipeiMapTheme','function updateMapTheme','Asia/Taipei','60_000']) assert.match(js,new RegExp(required));
+  for(const id of ['metroViewport','worldPhase']) assert.match(html,new RegExp(`id="${id}"`));
+  const seasonsUpdate=JSON.parse(readFileSync(new URL('../updates/2026-08-16-city-builder-seasons.json',import.meta.url),'utf8'));
+  assert.equal(seasonsUpdate.version,'2026.08.16.3');assert.deepEqual(seasonsUpdate.channelNames,['賭場公告']);
 });
 
 test('手機版賭場搶劫頁提供四階段互動流程與安全返回遊戲大廳',()=>{
