@@ -1106,6 +1106,17 @@ test('搶劫流程新增六張場景並於每次顯示時隨機輪替',()=>{
   assert.match(source,/embed\.setImage\(heistSceneUrl\(selectedScene\)\)/);
 });
 
+test('搶劫失敗新增四張場景並依逃跑路線顯示',()=>{
+  const variantBlock=source.match(/const heistSceneVariants=\{[\s\S]+?\n\};/)?.[0]||'';
+  assert.match(variantBlock,/arrested:\['arrested','arrested_v2'\]/);
+  assert.match(variantBlock,/surrounded:\['surrounded','surrounded_v2'\]/);
+  for(const file of ['arrested_v2.jpg','police_surrounded_v2.jpg','sewer_failure.jpg','helicopter_failure.jpg']) {
+    assert.ok(existsSync(new URL(`../assets/heist/${file}`,import.meta.url)),`缺少搶劫失敗場景 ${file}`);
+  }
+  assert.match(source,/const heistFailureScene=plan=>plan==='sewer'\?'sewer_failure':plan==='helicopter'\?'helicopter_failure':'surrounded'/);
+  assert.match(source,/escapeImage=escapeEvent\.scene\|\|\(escapeEvent\.forceFail\?'arrested':heistFailureScene\(heist\.plan\)\)/);
+});
+
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
   const block=source.match(/async function publishLatestHeistResult\(interaction,payload\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少搶劫最終結果發布函式');

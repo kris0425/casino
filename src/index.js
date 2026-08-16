@@ -191,9 +191,13 @@ const heistSceneImages={
   helicopter_v2:{path:assetPath('heist/helicopter_escape_v2.jpg'),name:'heist_helicopter_v2.jpg'},
   success:{path:assetPath('heist/escape_success.jpg'),name:'heist_escape_success.jpg'},
   arrested:{path:assetPath('heist/arrested.jpg'),name:'heist_arrested.jpg'},
+  arrested_v2:{path:assetPath('heist/arrested_v2.jpg'),name:'heist_arrested_v2.jpg'},
   chase:{path:assetPath('heist/police_chase_latest.jpg'),name:'heist_police_chase.jpg'},
   chase_v2:{path:assetPath('heist/police_chase_v2.jpg'),name:'heist_police_chase_v2.jpg'},
   surrounded:{path:assetPath('heist/police_surrounded_latest.jpg'),name:'heist_surrounded.jpg'},
+  surrounded_v2:{path:assetPath('heist/police_surrounded_v2.jpg'),name:'heist_surrounded_v2.jpg'},
+  sewer_failure:{path:assetPath('heist/sewer_failure.jpg'),name:'heist_sewer_failure.jpg'},
+  helicopter_failure:{path:assetPath('heist/helicopter_failure.jpg'),name:'heist_helicopter_failure.jpg'},
   vault_diamonds:{path:assetPath('heist/vault_diamonds.jpg'),name:'heist_vault_diamonds.jpg'},
   vault_cash:{path:assetPath('heist/vault_cash.jpg'),name:'heist_vault_cash.jpg'},
   vault_gold:{path:assetPath('heist/vault_gold.jpg'),name:'heist_vault_gold.jpg'},
@@ -220,12 +224,15 @@ const heistSceneVariants={
   assault:['assault','assault_v2'],
   sewer:['sewer','sewer_v2'],
   helicopter:['helicopter','helicopter_v2'],
-  chase:['chase','chase_v2']
+  chase:['chase','chase_v2'],
+  arrested:['arrested','arrested_v2'],
+  surrounded:['surrounded','surrounded_v2']
 };
 const randomHeistScene=scene=>{
   const variants=heistSceneVariants[scene]||[scene];
   return variants[Math.floor(Math.random()*variants.length)];
 };
+const heistFailureScene=plan=>plan==='sewer'?'sewer_failure':plan==='helicopter'?'helicopter_failure':'surrounded';
 const randomPoliceDogScene=()=>Math.random()<0.5?'police_dog_1':'police_dog_2';
 const museumSceneIds=['museum_1','museum_2','museum_3','museum_4','museum_5','museum_6','museum_7'];
 const randomMuseumScene=()=>museumSceneIds[Math.floor(Math.random()*museumSceneIds.length)];
@@ -9185,7 +9192,7 @@ async function handleInteraction(i) {
       if(escapeEvent.forceFail) {
         for(const memberId of heist.members) incrementAchievementProgress(i.guildId,memberId,'pomeranianVictim');
       }
-      escapeImage=escapeEvent.scene||(escapeEvent.forceFail?'arrested':'surrounded');
+      escapeImage=escapeEvent.scene||(escapeEvent.forceFail?'arrested':heistFailureScene(heist.plan));
       const jailDurationMs=Math.max(3*60_000,(heistBanks[heist.bankId].jailMinutes||8)*60_000-hideoutJailReductionMs(heist.guildId,heist.leaderId));
       const releaseAt=Date.now()+jailDurationMs;
       const jailMinutes=Math.floor(jailDurationMs/60_000),jailSeconds=Math.floor((jailDurationMs%60_000)/1000);
