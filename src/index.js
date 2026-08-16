@@ -33,8 +33,8 @@ const TEAM_HEIST_MEMBER_REWARD = Number(process.env.TEAM_HEIST_MEMBER_REWARD || 
 const TEAM_HEIST_TEAMMATE_BONUS = Number(process.env.TEAM_HEIST_TEAMMATE_BONUS || 5000);
 const TEAM_HEIST_POLICE_BASE_REWARD = Number(process.env.TEAM_HEIST_POLICE_BASE_REWARD || 30000);
 const TEAM_HEIST_POLICE_POOL_RATE = Number(process.env.TEAM_HEIST_POLICE_POOL_RATE || 0.30);
-const TEAM_HEIST_MEMBER_CHANCE_BONUS = Number(process.env.TEAM_HEIST_MEMBER_CHANCE_BONUS || 6);
-const TEAM_HEIST_SUCCESS_RATE_CAP = Number(process.env.TEAM_HEIST_SUCCESS_RATE_CAP || 48);
+const TEAM_HEIST_MEMBER_CHANCE_BONUS = Number(process.env.TEAM_HEIST_MEMBER_CHANCE_BONUS || 8);
+const TEAM_HEIST_SUCCESS_RATE_CAP = Number(process.env.TEAM_HEIST_SUCCESS_RATE_CAP || 55);
 const TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP = Number(process.env.TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP || 22);
 const TEAM_HEIST_POLICE_CONFRONT_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_CONFRONT_PRESSURE || 3);
 const TEAM_HEIST_POLICE_REINFORCE_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_REINFORCE_PRESSURE || 4);
@@ -538,7 +538,7 @@ db.exec(`
     PRIMARY KEY (guild_id, kind, slot)
   );
   CREATE TABLE IF NOT EXISTS solo_heist_settings (
-    guild_id TEXT PRIMARY KEY, base_chance INTEGER NOT NULL DEFAULT 20
+    guild_id TEXT PRIMARY KEY, base_chance INTEGER NOT NULL DEFAULT 25
   );
   CREATE TABLE IF NOT EXISTS player_profiles (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
@@ -5958,7 +5958,7 @@ function taipeiWeekday() {
 function todayBuff() { return dailyBuffs[taipeiWeekday()]; }
 const weeklyHeistBonus=()=>taipeiWeekday()===1?10:0;
 function soloHeistBaseChance(guildId) {
-  return db.prepare('SELECT base_chance FROM solo_heist_settings WHERE guild_id=?').get(guildId)?.base_chance??20;
+  return db.prepare('SELECT base_chance FROM solo_heist_settings WHERE guild_id=?').get(guildId)?.base_chance??25;
 }
 const weeklyWorkMultiplier=()=>taipeiWeekday()===2?2:1;
 const weeklyCasinoMultiplier=()=>taipeiWeekday()===4?1.2:1;
@@ -5974,10 +5974,10 @@ const heistBanks={
   crown:{name:'💠 皇冠國際銀行',baseChance:4,reward:150000},
   casino_vault:{name:'🎰 賭場中央寶庫（週日限定）',baseChance:2,reward:0,sundayOnly:true},
   central_museum:{name:'🏛️ 中央美術館',baseChance:5,reward:120000,museumTarget:true},
-  diamond_exchange:{name:'💎 帝王國際鑽石交易所',baseChance:3,reward:5000000,prepFee:250000,minMembers:2,staminaCost:35,successCap:36,policePressure:18,jailMinutes:12,highStake:true,hotEligible:false,description:'夜間珠寶交割中心，保全以生物辨識與裝甲運鈔隊守護未切割鑽石。'},
-  offshore_crypto_vault:{name:'🧊 離岸加密資產冷庫',baseChance:2,reward:12000000,prepFee:750000,minMembers:2,staminaCost:45,successCap:32,policePressure:20,jailMinutes:16,highStake:true,hotEligible:false,description:'斷網冷錢包與實體金鑰封存在離岸資料堡壘，撤離前必須突破多層電子封鎖。'},
-  sovereign_gold_reserve:{name:'🏛️ 皇家主權黃金儲備庫',baseChance:1,reward:30000000,prepFee:2000000,minMembers:2,staminaCost:60,successCap:28,policePressure:23,jailMinutes:20,highStake:true,hotEligible:false,description:'國家級地下金庫存放戰略黃金，重裝特勤與防爆閘門會全面封鎖撤退路線。'},
-  obsidian_clearing_house:{name:'🌑 黑曜地下清算中心',baseChance:1,reward:60000000,prepFee:5000000,minMembers:2,staminaCost:80,successCap:24,policePressure:26,jailMinutes:25,highStake:true,hotEligible:false,description:'地下金融網的最終清算節點，兩人即可嘗試挑戰，是目前最高風險的終局行動。'}
+  diamond_exchange:{name:'💎 帝王國際鑽石交易所',baseChance:12,reward:5000000,prepFee:250000,minMembers:2,staminaCost:35,successCap:45,policePressure:12,jailMinutes:12,highStake:true,hotEligible:false,description:'夜間珠寶交割中心，保全以生物辨識與裝甲運鈔隊守護未切割鑽石。'},
+  offshore_crypto_vault:{name:'🧊 離岸加密資產冷庫',baseChance:10,reward:12000000,prepFee:750000,minMembers:2,staminaCost:45,successCap:40,policePressure:14,jailMinutes:16,highStake:true,hotEligible:false,description:'斷網冷錢包與實體金鑰封存在離岸資料堡壘，撤離前必須突破多層電子封鎖。'},
+  sovereign_gold_reserve:{name:'🏛️ 皇家主權黃金儲備庫',baseChance:8,reward:30000000,prepFee:2000000,minMembers:2,staminaCost:60,successCap:36,policePressure:16,jailMinutes:20,highStake:true,hotEligible:false,description:'國家級地下金庫存放戰略黃金，重裝特勤與防爆閘門會全面封鎖撤退路線。'},
+  obsidian_clearing_house:{name:'🌑 黑曜地下清算中心',baseChance:6,reward:60000000,prepFee:5000000,minMembers:2,staminaCost:80,successCap:32,policePressure:18,jailMinutes:25,highStake:true,hotEligible:false,description:'地下金融網的最終清算節點，兩人即可嘗試挑戰，是目前最高風險的終局行動。'}
 };
 const heistMinimumMembers=bank=>bank?.minMembers||2;
 const heistPreparationFee=bank=>bank?.prepFee??TEAM_HEIST_PREP_FEE;
@@ -6445,9 +6445,9 @@ const heistPoliceVehicles={
 function heistNpcPolicePressure(heist) {
   const bank=heistBanks[heist.bankId];
   if(Number.isFinite(bank?.policePressure)) return bank.policePressure;
-  if(bank?.sundayOnly||bank?.museumTarget||(bank?.reward||0)>=100000) return 15;
-  if((bank?.reward||0)>=50000) return 11;
-  return 7;
+  if(bank?.sundayOnly||bank?.museumTarget||(bank?.reward||0)>=100000) return 12;
+  if((bank?.reward||0)>=50000) return 9;
+  return 5;
 }
 function heistPoliceTacticModifiers(heist) {
   const tacticPressures=[];
@@ -7573,11 +7573,11 @@ async function runCompetition(i,token,session) {
 const POLICE_DOG_TEXT = '🐕‍🦺 乎有龐然大物拔山倒樹而來——警犬「猛博美」從暗處飛撲而出！';
 function rollEscapeEvent(context='heist') {
   const roll=Math.random();
-  if(roll<0.18) return {id:'police_dog',title:'🐕‍🦺 警犬突襲',text:POLICE_DOG_TEXT,modifier:0,forceFail:true,scene:randomPoliceDogScene()};
-  if(roll<0.38) return {id:'roadblock',title:'🚧 臨時封鎖',text:'前方突然架起臨時路障，撤離速度大幅下降。',modifier:-5,forceFail:false};
-  if(roll<0.58) return {id:'shortcut',title:'🗺️ 神祕捷徑',text:'你發現一條情報中沒有標示的捷徑，成功拉開追兵距離。',modifier:5,forceFail:false};
-  if(roll<0.74) return {id:'decoy',title:'🎭 誘餌奏效',text:context==='jail'?'巡邏人員被遠處的聲響引開，你獲得短暫空檔。':'預先安排的誘餌車成功引開一部分警力。',modifier:4,forceFail:false};
-  if(roll<0.88) return {id:'wrong_turn',title:'↩️ 走錯方向',text:'慌亂中轉錯路口，只能繞路尋找出口。',modifier:-4,forceFail:false};
+  if(roll<0.08) return {id:'police_dog',title:'🐕‍🦺 警犬突襲',text:POLICE_DOG_TEXT,modifier:0,forceFail:true,scene:randomPoliceDogScene()};
+  if(roll<0.28) return {id:'roadblock',title:'🚧 臨時封鎖',text:'前方突然架起臨時路障，撤離速度大幅下降。',modifier:-5,forceFail:false};
+  if(roll<0.50) return {id:'shortcut',title:'🗺️ 神祕捷徑',text:'你發現一條情報中沒有標示的捷徑，成功拉開追兵距離。',modifier:5,forceFail:false};
+  if(roll<0.68) return {id:'decoy',title:'🎭 誘餌奏效',text:context==='jail'?'巡邏人員被遠處的聲響引開，你獲得短暫空檔。':'預先安排的誘餌車成功引開一部分警力。',modifier:4,forceFail:false};
+  if(roll<0.82) return {id:'wrong_turn',title:'↩️ 走錯方向',text:'慌亂中轉錯路口，只能繞路尋找出口。',modifier:-4,forceFail:false};
   return {id:'clear',title:'🌙 路線暢通',text:'撤離路線暫時沒有異狀，追兵仍在後方緊追。',modifier:0,forceFail:false};
 }
 const mahjongTiles=['🀇','🀈','🀉','🀊','🀋','🀌','🀍','🀎','🀏','🀙','🀚','🀛','🀜','🀝','🀞','🀟','🀠','🀡','🀐','🀑','🀒','🀓','🀔','🀕','🀖','🀗','🀘','🀀','🀁','🀂','🀃','🀄','🀅','🀆'];
