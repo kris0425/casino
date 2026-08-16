@@ -1088,6 +1088,24 @@ test('搶劫平衡調整降低警犬強制失敗並提高單人基礎率',()=>{
   assert.match(eventBlock,/if\(roll<0\.82\).*wrong_turn/);
 });
 
+test('搶劫流程新增六張場景並於每次顯示時隨機輪替',()=>{
+  const variantBlock=source.match(/const heistSceneVariants=\{[\s\S]+?\n\};/)?.[0]||'';
+  for(const [scene,file] of [
+    ['planning','planning_room_v2.jpg'],
+    ['approach','bank_approach_v2.jpg'],
+    ['assault','bank_assault_v2.jpg'],
+    ['sewer','sewer_escape_v2.jpg'],
+    ['helicopter','helicopter_escape_v2.jpg'],
+    ['chase','police_chase_v2.jpg']
+  ]) {
+    assert.match(variantBlock,new RegExp(`${scene}:\\['${scene}','${scene}_v2'\\]`));
+    assert.ok(existsSync(new URL(`../assets/heist/${file}`,import.meta.url)),`缺少搶劫場景 ${file}`);
+  }
+  assert.match(source,/const randomHeistScene=scene=>\{/);
+  assert.match(source,/const selectedScene=randomHeistScene\(scene\),image=heistSceneImages\[selectedScene\]/);
+  assert.match(source,/embed\.setImage\(heistSceneUrl\(selectedScene\)\)/);
+});
+
 test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>{
   const block=source.match(/async function publishLatestHeistResult\(interaction,payload\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.ok(block,'缺少搶劫最終結果發布函式');

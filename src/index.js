@@ -180,13 +180,19 @@ function jailRescuePayload(embed,method) {
 }
 const heistSceneImages={
   planning:{path:assetPath('heist/planning_room.jpg'),name:'heist_planning.jpg'},
+  planning_v2:{path:assetPath('heist/planning_room_v2.jpg'),name:'heist_planning_v2.jpg'},
   approach:{path:assetPath('heist/bank_approach.jpg'),name:'heist_approach.jpg'},
+  approach_v2:{path:assetPath('heist/bank_approach_v2.jpg'),name:'heist_approach_v2.jpg'},
   assault:{path:assetPath('heist/bank_assault.jpg'),name:'heist_assault.jpg'},
+  assault_v2:{path:assetPath('heist/bank_assault_v2.jpg'),name:'heist_assault_v2.jpg'},
   sewer:{path:assetPath('heist/sewer_escape.jpg'),name:'heist_sewer.jpg'},
+  sewer_v2:{path:assetPath('heist/sewer_escape_v2.jpg'),name:'heist_sewer_v2.jpg'},
   helicopter:{path:assetPath('heist/helicopter_escape.jpg'),name:'heist_helicopter.jpg'},
+  helicopter_v2:{path:assetPath('heist/helicopter_escape_v2.jpg'),name:'heist_helicopter_v2.jpg'},
   success:{path:assetPath('heist/escape_success.jpg'),name:'heist_escape_success.jpg'},
   arrested:{path:assetPath('heist/arrested.jpg'),name:'heist_arrested.jpg'},
   chase:{path:assetPath('heist/police_chase_latest.jpg'),name:'heist_police_chase.jpg'},
+  chase_v2:{path:assetPath('heist/police_chase_v2.jpg'),name:'heist_police_chase_v2.jpg'},
   surrounded:{path:assetPath('heist/police_surrounded_latest.jpg'),name:'heist_surrounded.jpg'},
   vault_diamonds:{path:assetPath('heist/vault_diamonds.jpg'),name:'heist_vault_diamonds.jpg'},
   vault_cash:{path:assetPath('heist/vault_cash.jpg'),name:'heist_vault_cash.jpg'},
@@ -208,13 +214,25 @@ const heistSceneImages={
   museum_loot_gold:{path:assetPath('heist/museum_loot_gold.jpg'),name:'heist_museum_loot_gold.jpg'}
 };
 const heistSceneUrl=scene=>`attachment://${heistSceneImages[scene].name}`;
+const heistSceneVariants={
+  planning:['planning','planning_v2'],
+  approach:['approach','approach_v2'],
+  assault:['assault','assault_v2'],
+  sewer:['sewer','sewer_v2'],
+  helicopter:['helicopter','helicopter_v2'],
+  chase:['chase','chase_v2']
+};
+const randomHeistScene=scene=>{
+  const variants=heistSceneVariants[scene]||[scene];
+  return variants[Math.floor(Math.random()*variants.length)];
+};
 const randomPoliceDogScene=()=>Math.random()<0.5?'police_dog_1':'police_dog_2';
 const museumSceneIds=['museum_1','museum_2','museum_3','museum_4','museum_5','museum_6','museum_7'];
 const randomMuseumScene=()=>museumSceneIds[Math.floor(Math.random()*museumSceneIds.length)];
 function heistScenePayload(embed,scene) {
-  const image=heistSceneImages[scene];
+  const selectedScene=randomHeistScene(scene),image=heistSceneImages[selectedScene];
   if(!image) return {embeds:[embed],attachments:[],files:[]};
-  embed.setImage(heistSceneUrl(scene));
+  embed.setImage(heistSceneUrl(selectedScene));
   return {
     embeds:[embed],
     attachments:[],
