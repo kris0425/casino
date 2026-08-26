@@ -2355,7 +2355,7 @@ luxuryPixelSupercarIds.forEach((assetId,index)=>{
     blindBoxPack:'supercar'
   };
 });
-const auctionLimitedVehicleDefinitions=[
+const legacyAuctionLimitedVehicleDefinitions=[
   {id:'auction_vehicle_crimson_comet',name:'🏎️ 緋紅彗星｜競標特仕版',category:'汽車',price:4200000,image:'blindbox/luxury_supercars/rare-pixel-supercar-01.png',rarity:'傳說',buff:'getaway',buffMultiplier:2.8,description:'以轉子戰魂為基底打造的限量競標特仕版，只有系統拍賣輪替才有機會收藏。'},
   {id:'auction_vehicle_obsidian_m7',name:'🏁 黑曜 M7｜競標特仕版',category:'汽車',price:5600000,image:'blindbox/luxury_supercars/rare-pixel-supercar-02.png',rarity:'傳說',buff:'getaway',buffMultiplier:2.5,description:'黑曜夜色與高性能豪華房車的限量聯名款，適合高端收藏家。'},
   {id:'auction_vehicle_sapphire_nismo',name:'💙 藍寶石 Nismo｜競標特仕版',category:'汽車',price:6800000,image:'blindbox/luxury_supercars/rare-pixel-supercar-03.png',rarity:'神話',buff:'getaway',buffMultiplier:3.1,description:'四輪驅動與賽道空力全面強化的限量性能座駕。'},
@@ -2377,9 +2377,18 @@ const auctionLimitedVehicleDefinitions=[
   {id:'auction_vehicle_shadow_hoverbike',name:'🚀 幽影噴射飛車｜競標特仕版',category:'機車',price:6400000,image:'motorcycles/shadow_hoverbike.png',rarity:'限定',buff:'getaway',buffMultiplier:3.6,description:'具備短距離懸浮能力的限量噴射座駕，競標得標後永久入庫。'},
   {id:'auction_vehicle_platinum_tourer',name:'🏍️ 白金陸上郵輪｜競標特仕版',category:'機車',price:4200000,image:'motorcycles/platinum_tourer.png',rarity:'神話',buff:'stamina',buffMultiplier:2.9,description:'大型風鏡、豪華後座與白金塗裝組成的限量旅行車。'}
 ];
+const auctionLimitedVehicleDefinitions=[
+  {id:'auction_2026_night_falcon_gt',name:'🌑 夜隼 GT｜霓虹邊境典藏',category:'汽車',price:6400000,image:'auction/neon_frontier/night_falcon_gt.png',rarity:'限定',buff:'getaway',buffMultiplier:3.2,auctionSeries:'霓虹邊境典藏',description:'黑曜車體、香檳金空力套件與青色底盤光構成的原創旗艦跑車；只在本期系統拍賣釋出。'},
+  {id:'auction_2026_aurora_sovereign',name:'🌌 極光 Sovereign｜霓虹邊境典藏',category:'汽車',price:8800000,image:'auction/neon_frontier/aurora_sovereign.png',rarity:'限定',buff:'work',buffMultiplier:3.0,auctionSeries:'霓虹邊境典藏',description:'珍珠白長軸電動旅行車搭配極光玻璃座艙，是兼具商務效率與典藏價值的原創座駕。'},
+  {id:'auction_2026_tidebreaker_coldchain',name:'🌊 破浪冷鏈王｜霓虹邊境典藏',category:'卡車',price:7800000,image:'auction/neon_frontier/tidebreaker_coldchain.png',rarity:'限定',buff:'freight',truckRevenueBonus:0.60,auctionSeries:'霓虹邊境典藏',description:'深海藍冷鏈重卡以高效恆溫貨艙守住高價貨物，可投入物流貨運並提升營運收益。'},
+  {id:'auction_2026_amber_titan',name:'🟧 琥珀泰坦｜霓虹邊境典藏',category:'卡車',price:12000000,image:'auction/neon_frontier/amber_titan.png',rarity:'限定',buff:'freight',truckRevenueBonus:0.72,auctionSeries:'霓虹邊境典藏',description:'八輪重裝運輸平台採用琥珀裝甲與模組化貨艙，是本期最高階的物流旗艦。'},
+  {id:'auction_2026_scarlet_meteor',name:'☄️ 緋紅流星｜霓虹邊境典藏',category:'機車',price:4200000,image:'auction/neon_frontier/scarlet_meteor.png',rarity:'神話',buff:'getaway',buffMultiplier:3.0,auctionSeries:'霓虹邊境典藏',description:'以渦輪核心與緋紅流線整流罩打造的原創性能機車，為高速行動提供可靠優勢。'},
+  {id:'auction_2026_moonshadow_voyager',name:'🌙 月影 Voyager｜霓虹邊境典藏',category:'機車',price:5800000,image:'auction/neon_frontier/moonshadow_voyager.png',rarity:'限定',buff:'stamina',buffMultiplier:3.1,auctionSeries:'霓虹邊境典藏',description:'珍珠銀豪華旅行機車配備月紫風鏡與舒適行李系統，專為長途續航與收藏設計。'}
+];
+const allAuctionLimitedVehicleDefinitions=[...legacyAuctionLimitedVehicleDefinitions,...auctionLimitedVehicleDefinitions];
 const auctionLimitedVehicleIds=auctionLimitedVehicleDefinitions.map(vehicle=>vehicle.id);
-const auctionLimitedTruckIds=auctionLimitedVehicleDefinitions.filter(vehicle=>vehicle.category==='卡車').map(vehicle=>vehicle.id);
-for(const vehicle of auctionLimitedVehicleDefinitions) {
+const auctionLimitedTruckIds=allAuctionLimitedVehicleDefinitions.filter(vehicle=>vehicle.category==='卡車').map(vehicle=>vehicle.id);
+for(const vehicle of allAuctionLimitedVehicleDefinitions) {
   assetCatalog[vehicle.id]={...vehicle,forSale:false,auctionOnly:true};
 }
 function assetIsForSale(asset,now=Date.now()) {
@@ -4531,13 +4540,13 @@ function retireLegacyAssetAuctions(now=Date.now()) {
   if(!legacyAuctions.length) return 0;
   db.exec('BEGIN IMMEDIATE');
   try {
-    const expire=db.prepare("UPDATE asset_auctions SET status='expired',settled_at=?,closed_announced_at=? WHERE id=? AND status='active'");
+    const expire=db.prepare("UPDATE asset_auctions SET status='expired',settled_at=?,closed_announced_at=?,superseded_at=? WHERE id=? AND status='active'");
     for(const auction of legacyAuctions) {
       if(auction.current_bidder_id&&auction.current_bid>0) {
         const assetName=assetCatalog[auction.asset_id]?.name||auction.asset_id;
-        changeBalanceUnlocked(auction.guild_id,auction.current_bidder_id,auction.current_bid,'auction_legacy_refund',null,`${assetName}｜舊版拍賣品下架，退回拍賣託管`);
+        changeBalanceUnlocked(auction.current_bidder_guild_id||auction.guild_id,auction.current_bidder_id,auction.current_bid,'auction_legacy_refund',null,`${assetName}｜舊批次暫停換新，退回拍賣託管`);
       }
-      expire.run(now,now,auction.id);
+      expire.run(now,now,now,auction.id);
     }
     db.exec('COMMIT');
     return legacyAuctions.length;
@@ -4603,7 +4612,7 @@ function assetAuctionEmbed(g,u,auction,notice='') {
   const current=auction.current_bid>0?`**${fmt(auction.current_bid)}**`:'尚無出價';
   const leader=auction.current_bidder_id?`<@${auction.current_bidder_id}>`:'尚無領先者';
   const walletText=u?`\n\n你的金庫：**${fmt(balance(g,u))}**`:'';
-  const limitedVehicleText=asset.auctionOnly?'\n🏁 **限量競標載具**｜本款僅透過系統拍賣輪替取得，得標後永久收藏。':'';
+  const limitedVehicleText=asset.auctionOnly?`\n🏁 **${asset.auctionSeries||'限量競標載具'}**｜本款僅透過系統拍賣輪替取得，得標後永久收藏。`:'';
   return new EmbedBuilder().setColor(0xFF6D00).setTitle(`🔥 限時資產拍賣｜${asset.name}`)
     .setDescription(`${notice?`${notice}\n\n`:''}${asset.description}${limitedVehicleText}\n\n稀有度：**${asset.rarity||'一般'}**\n起標價：**${fmt(auction.start_price)}**\n目前最高價：${current}\n目前領先：${leader}\n累計出價：**${auction.bid_count} 次**\n最低下一標：**${fmt(minimum)}**\n結束時間：<t:${Math.floor(auction.ends_at/1000)}:F>（<t:${Math.floor(auction.ends_at/1000)}:R>）${walletText}\n\n出價會立即託管；被超標時完整退款。得標款由系統回收，不會進入賭場寶庫。最後 5 分鐘出價會延長 5 分鐘。`)
     .setFooter({text:'全系統同時只有一場系統拍賣｜請只輸入能負擔的安全整數金額'});
@@ -4726,7 +4735,7 @@ async function processAssetAuctions() {
       const claim=db.prepare('UPDATE asset_auctions SET announced_at=? WHERE id=? AND status=\'active\' AND announced_at IS NULL').run(Date.now(),auction.id);
       if(Number(claim.changes)!==1) continue;
       try {
-        const published=await publishAssetAuctionAnnouncement(assetAuctionById(auction.id),'🔥 **全新系統拍賣已開始！**');
+        const published=await publishAssetAuctionAnnouncement(assetAuctionById(auction.id),'✨ **霓虹邊境典藏｜全新系統拍賣已開始！**');
         const announcedAt=Date.now();
         db.prepare("UPDATE asset_auctions SET announced_at=?,last_reminder_at=?,announcement_channel_id=?,announcement_message_id=? WHERE id=? AND status='active'").run(announcedAt,announcedAt,published.channelId,published.messageId,auction.id);
       } catch(error) {
