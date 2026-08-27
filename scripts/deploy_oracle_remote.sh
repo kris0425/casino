@@ -57,8 +57,8 @@ done < "$STAGE/delete-files.txt"
 cd "$PROJECT"
 requires_image_build_path() {
   case "$1" in
-    .dockerignore|Dockerfile|docker-compose.yml|package.json|package-lock.json|src/*) return 0 ;;
-    assets/*|activity/public/*|scripts/*|updates/*|tests/*|CHANGELOG.md|.gitattributes) return 1 ;;
+    .dockerignore|Dockerfile|docker-compose.yml|package.json|package-lock.json) return 0 ;;
+    src/*|assets/*|activity/public/*|scripts/*|updates/*|tests/*|CHANGELOG.md|.gitattributes) return 1 ;;
     *) return 0 ;;
   esac
 }

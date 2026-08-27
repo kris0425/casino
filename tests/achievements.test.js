@@ -1859,6 +1859,7 @@ test('Oracle 部署將大型素材改用掛載並支援跳過 Docker 重建',()=
   assert.match(compose,/\.\/updates:\/app\/updates:ro/);
   assert.match(remote,/IMAGE_BUILD_REQUIRED/);
   assert.match(remote,/IMAGE_BUILD_SKIPPED/);
+  assert.match(remote,/src\/\*\|assets\/\*\|activity\/public\/\*\|scripts\/\*\|updates\/\*\|tests\/\*\|CHANGELOG\.md\|\.gitattributes\) return 1/);
   assert.match(remote,/assets\/\*\|activity\/public\/\*\|scripts\/\*\|updates\/\*\|tests\/\*/);
   assert.match(remote,/--force-recreate/);
   assert.match(github,/ServerAliveInterval=30/);
