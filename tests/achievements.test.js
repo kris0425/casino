@@ -2091,6 +2091,9 @@ test('幸運輪盤採三日大獎、每日五次免費與二十五次上限',()=
   assert.match(source,/function luckyWheelGrandPrizeInfo\(now=new Date\(\)\)/);
   assert.match(source,/cycleMs=LUCKY_WHEEL_CYCLE_DAYS\*24\*60\*60\*1000/);
   assert.match(source,/function announceLuckyWheelGrandPrize\(\)/);
+  assert.match(source,/const configured=CASINO_ANNOUNCEMENT_CHANNEL_ID\?await client\.channels\.fetch/);
+  assert.match(source,/targets\.push\(\{guildId:configured\.guildId,channel:configured\}\)/);
+  assert.match(source,/for\(const \{guildId,channel\} of targets\)/);
   assert.match(source,/INSERT OR IGNORE INTO scheduled_announcements\(guild_id,kind,slot\)/);
   assert.match(source,/'lucky_wheel_grand_prize'/);
   assert.match(source,/setInterval\(\(\)=>announceLuckyWheelGrandPrize\(\)/);

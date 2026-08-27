@@ -11355,12 +11355,20 @@ async function announceSundayCasinoVault() {
 }
 async function announceLuckyWheelGrandPrize() {
   const slot=taipeiDay(),grandPrize=luckyWheelGrandPrizeInfo(),asset=grandPrize.asset;
-  for(const guildId of client.guilds.cache.keys()) {
+  const configured=CASINO_ANNOUNCEMENT_CHANNEL_ID?await client.channels.fetch(CASINO_ANNOUNCEMENT_CHANNEL_ID).catch(()=>null):null;
+  const targets=[];
+  if(configured&&[ChannelType.GuildText,ChannelType.GuildAnnouncement].includes(configured.type)&&typeof configured.send==='function') {
+    targets.push({guildId:configured.guildId,channel:configured});
+  } else {
+    for(const guildId of client.guilds.cache.keys()) {
+      const channel=await casinoAnnouncementChannel(guildId);
+      if(channel) targets.push({guildId,channel});
+    }
+  }
+  for(const {guildId,channel} of targets) {
     const claimed=db.prepare('INSERT OR IGNORE INTO scheduled_announcements(guild_id,kind,slot) VALUES(?,?,?)').run(guildId,'lucky_wheel_grand_prize',slot);
     if(!claimed.changes) continue;
     try {
-      const channel=await casinoAnnouncementChannel(guildId);
-      if(!channel) throw new Error(`找不到名稱包含「${CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD}」的文字頻道`);
       const extension=asset.image.split('.').pop(),imageName=`lucky-wheel-grand-prize.${extension}`;
       const message=await channel.send({
         embeds:[new EmbedBuilder().setColor(0xFFD700).setTitle('🎡 今日幸運輪盤｜本期傳說大獎')
@@ -11373,6 +11381,7 @@ async function announceLuckyWheelGrandPrize() {
         try { await message.crosspost(); }
         catch(error) { console.error(`幸運輪盤大獎公告發布失敗 guild=${guildId}: ${error.message}`); }
       }
+      console.log(`幸運輪盤大獎公告完成 guild=${guildId} channel=${channel.id} prize=${grandPrize.assetId} slot=${slot}`);
     } catch(error) {
       db.prepare('DELETE FROM scheduled_announcements WHERE guild_id=? AND kind=? AND slot=?').run(guildId,'lucky_wheel_grand_prize',slot);
       console.error(`幸運輪盤大獎公告傳送失敗 guild=${guildId}: ${error.message}`);
