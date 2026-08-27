@@ -2577,7 +2577,10 @@ const airlineRoutes={
   aegean_resort_hop:{name:'🏖️ 愛琴海度假短航',description:'串聯地中海度假島嶼與海岸城市的精品短途航線。',durationMs:45*60*1000,baseRevenue:270000,operatingCost:120000,stamina:24,minTier:2},
   polar_night_longhaul:{name:'🌌 極夜洲際長程航線',description:'跨越極圈與大洋的三小時長程航班，需要大型國際機場支援。',durationMs:3*60*60*1000,baseRevenue:1575000,operatingCost:780000,stamina:55,minTier:2},
   pacific_crown_longhaul:{name:'🌊 太平洋皇冠長途航線',description:'跨越大洋、串聯海灣金融城與西岸樞紐的旗艦長途航班。',durationMs:3*60*60*1000,baseRevenue:1850000,operatingCost:920000,stamina:60,minTier:2},
-  grand_world_odyssey:{name:'🌍 環球天際遠征航線',description:'歷時四小時、橫跨多個大洲的最高階遠征航線。',durationMs:4*60*60*1000,baseRevenue:2550000,operatingCost:1350000,stamina:70,minTier:3}
+  grand_world_odyssey:{name:'🌍 環球天際遠征航線',description:'歷時四小時、橫跨多個大洲的最高階遠征航線。',durationMs:4*60*60*1000,baseRevenue:2550000,operatingCost:1350000,stamina:70,minTier:3},
+  jade_archipelago_corridor:{name:'💚 翡翠群島商務線',description:'串聯霓虹灣都、翡翠群島與海上航空城的精品商務航線。',durationMs:35*60*1000,baseRevenue:230000,operatingCost:95000,stamina:20,minTier:1,image:'transport/maps/airline/jade_archipelago_corridor.png'},
+  crimson_desert_transcontinental:{name:'🏜️ 赤金沙漠跨洲線',description:'橫越紅岩峽谷、沙漠綠洲與海岸樞紐的高價跨洲航線。',durationMs:90*60*1000,baseRevenue:760000,operatingCost:340000,stamina:40,minTier:2,image:'transport/maps/airline/crimson_desert_transcontinental.png'},
+  orbital_aurora_gateway:{name:'🌌 星環極光天際線',description:'飛越極地山脈與極光海域、連接三座天際空港的最高階航線。',durationMs:5*60*60*1000,baseRevenue:3400000,operatingCost:1850000,stamina:78,minTier:3,image:'transport/maps/airline/orbital_aurora_gateway.png'}
 };
 const transportStationIds=[
   'grand_bay_high_speed_rail_terminal',
@@ -2607,6 +2610,9 @@ const transportRoutes={
   rail_alpine_scenic_express:{name:'🏔️ 雪嶺景觀特快',type:'rail',description:'穿越山谷與湖區的觀光特快，景觀座席帶來更高票價。',durationMs:45*60*1000,baseRevenue:410000,operatingCost:145000,stamina:24},
   rail_aurora_interregional:{name:'🌌 極光跨區長途線',type:'rail',description:'橫跨北境與多座樞紐城市的長途旗艦班次。',durationMs:90*60*1000,baseRevenue:900000,operatingCost:330000,stamina:38},
   rail_continental_sleeper:{name:'🛏️ 大陸橫貫臥鋪列車',type:'rail',description:'連結多座都會與夜間樞紐的超長程臥鋪班次。',durationMs:3*60*60*1000,baseRevenue:1750000,operatingCost:680000,stamina:52},
+  rail_sakura_river_express:{name:'🌸 櫻河谷景觀特快',type:'rail',description:'沿櫻花河谷、梯田與湖畔小鎮運行的精品景觀列車。',durationMs:25*60*1000,baseRevenue:210000,operatingCost:70000,stamina:14,image:'transport/maps/rail/sakura_river_express.png'},
+  rail_crimson_canyon_highland:{name:'🏜️ 赤岩峽谷高原線',type:'rail',description:'穿越赤岩峽谷、高原礦城與拱橋樞紐的長程山岳鐵路。',durationMs:70*60*1000,baseRevenue:720000,operatingCost:260000,stamina:34,image:'transport/maps/rail/crimson_canyon_highland.png'},
+  rail_obsidian_continental_maglev:{name:'🖤 黑曜大陸磁浮線',type:'rail',description:'以高速磁浮串聯黑曜都會、雪山隧道與跨海金融城。',durationMs:210*60*1000,baseRevenue:2250000,operatingCost:900000,stamina:58,image:'transport/maps/rail/obsidian_continental_maglev.png'},
   coach_city_shuttle:{name:'🏙️ 都會接駁客運',type:'coach',description:'往返市中心與觀光區的高頻短程班次。',durationMs:8*60*1000,baseRevenue:45000,operatingCost:14000,stamina:6},
   coach_intercity_line:{name:'🛣️ 城際豪華客運',type:'coach',description:'以豪華巴士連結鄰近城市與轉運中心。',durationMs:20*60*1000,baseRevenue:125000,operatingCost:40000,stamina:12},
   coach_resort_tour:{name:'🎡 海灣觀光專線',type:'coach',description:'承接大型旅行團與度假區包車需求。',durationMs:45*60*1000,baseRevenue:360000,operatingCost:120000,stamina:24},
@@ -2614,6 +2620,9 @@ const transportRoutes={
   coach_mountain_scenic_loop:{name:'🏔️ 山城觀光環線',type:'coach',description:'串聯山城景點與溫泉度假區的季節觀光環線。',durationMs:35*60*1000,baseRevenue:220000,operatingCost:70000,stamina:18},
   coach_night_vip_sleeper:{name:'🌙 夜航尊榮客運',type:'coach',description:'提供臥躺座椅與夜間接駁服務的高級長途客運。',durationMs:75*60*1000,baseRevenue:560000,operatingCost:190000,stamina:30},
   coach_grand_tour_longhaul:{name:'🌍 環線遠征長途客運',type:'coach',description:'跨越海岸、山城與國境商圈的旗艦長途巴士班次，需要高階客運車隊。',durationMs:150*60*1000,baseRevenue:1280000,operatingCost:460000,stamina:44},
+  coach_golden_coast_night_market:{name:'🏮 黃金海岸夜市環線',type:'coach',description:'串聯海岸夜市、霓虹商圈與城市轉運站的高頻觀光環線。',durationMs:18*60*1000,baseRevenue:105000,operatingCost:33000,stamina:9,image:'transport/maps/coach/golden_coast_night_market.png'},
+  coach_emerald_hot_spring:{name:'♨️ 翡翠森林溫泉線',type:'coach',description:'穿越翡翠森林與山間湖泊、直達高級溫泉度假區。',durationMs:55*60*1000,baseRevenue:380000,operatingCost:130000,stamina:24,image:'transport/maps/coach/emerald_hot_spring.png'},
+  coach_desert_star_crossborder:{name:'🌠 沙漠星河跨境線',type:'coach',description:'跨越沙漠星空公路、邊境關口與綠洲都會的旗艦客運。',durationMs:130*60*1000,baseRevenue:1050000,operatingCost:390000,stamina:40,image:'transport/maps/coach/desert_star_crossborder.png'},
   freight_city_distribution:{name:'📦 城市配送專案',type:'freight',description:'處理商圈、倉庫與門市間的快速配送。',durationMs:15*60*1000,baseRevenue:120000,operatingCost:38000,stamina:10},
   freight_port_logistics:{name:'🏗️ 港區貨櫃聯運',type:'freight',description:'整合貨櫃場、鐵路與卡車的港區物流任務。',durationMs:50*60*1000,baseRevenue:440000,operatingCost:150000,stamina:24},
   freight_continental_contract:{name:'🌐 跨境物流合約',type:'freight',description:'承攬高價值跨境貨物與長途供應鏈合約。',durationMs:2*60*60*1000,baseRevenue:1300000,operatingCost:500000,stamina:42},
@@ -2621,10 +2630,16 @@ const transportRoutes={
   freight_rail_intermodal:{name:'🚆 鐵公聯運幹線',type:'freight',description:'以鐵路長途幹線搭配卡車接駁的高容量貨運任務。',durationMs:75*60*1000,baseRevenue:780000,operatingCost:280000,stamina:32},
   freight_ocean_bridge_contract:{name:'🌊 海陸跨境合約',type:'freight',description:'承接港口、鐵路與公路聯運的高價值跨境供應鏈。',durationMs:3*60*60*1000,baseRevenue:1900000,operatingCost:760000,stamina:50},
   freight_transcontinental_corridor:{name:'🛰️ 跨洲長途運輸走廊',type:'freight',description:'串聯港口、自由貿易區與內陸貨運中心的最高階超長程合約。',durationMs:4*60*60*1000,baseRevenue:2750000,operatingCost:1120000,stamina:62},
+  freight_neon_ecommerce_grid:{name:'🌃 霓虹電商物流網',type:'freight',description:'串接都會倉儲、電商園區與智慧配送中心的即時物流網。',durationMs:20*60*1000,baseRevenue:175000,operatingCost:56000,stamina:12,image:'transport/maps/freight/neon_ecommerce_grid.png'},
+  freight_volcanic_mining_haul:{name:'🌋 火山礦區重載線',type:'freight',description:'往返火山礦場、黑曜煉製廠與深水散裝碼頭的重載合約。',durationMs:95*60*1000,baseRevenue:1050000,operatingCost:400000,stamina:38,image:'transport/maps/freight/volcanic_mining_haul.png'},
+  freight_polar_research_supply:{name:'🧊 極地科研補給廊道',type:'freight',description:'穿越冰棚與極光雪原，為科研基地和天文台運送高價物資。',durationMs:210*60*1000,baseRevenue:2350000,operatingCost:940000,stamina:58,image:'transport/maps/freight/polar_research_supply.png'},
   shipping_harbor_island_cruise:{name:'🛥️ 港灣海島巡航',type:'shipping',description:'往返港灣與度假島嶼的精品短程巡航，客流穩定。',durationMs:18*60*1000,baseRevenue:135000,operatingCost:44000,stamina:12},
   shipping_strait_ferry:{name:'⛴️ 海峽商務渡輪',type:'shipping',description:'串聯兩岸商業港口與免稅區的高頻渡輪航線。',durationMs:45*60*1000,baseRevenue:430000,operatingCost:155000,stamina:26},
   shipping_ocean_luxury_voyage:{name:'🛳️ 蔚藍奢華遠洋航程',type:'shipping',description:'提供頂級客艙、海上娛樂與島國停靠服務的長程郵輪航程。',durationMs:100*60*1000,baseRevenue:980000,operatingCost:380000,stamina:42},
-  shipping_deep_sea_expedition:{name:'🌌 深海星航遠征',type:'shipping',description:'深入外海與極光水域的旗艦航程，適合高階船運公司。',durationMs:3*60*60*1000,baseRevenue:2180000,operatingCost:920000,stamina:58}
+  shipping_deep_sea_expedition:{name:'🌌 深海星航遠征',type:'shipping',description:'深入外海與極光水域的旗艦航程，適合高階船運公司。',durationMs:3*60*60*1000,baseRevenue:2180000,operatingCost:920000,stamina:58},
+  shipping_jade_delta_trade:{name:'🐉 翡翠三角洲商貿線',type:'shipping',description:'穿梭翡翠河口、濕地商港與海岸自由港的精品商貿航線。',durationMs:30*60*1000,baseRevenue:260000,operatingCost:90000,stamina:18,image:'transport/maps/shipping/jade_delta_trade.png'},
+  shipping_crimson_volcano_archipelago:{name:'🌋 緋紅火山群島航路',type:'shipping',description:'迂迴火山群島、黑沙碼頭與奢華海港的高價遠洋航路。',durationMs:85*60*1000,baseRevenue:820000,operatingCost:310000,stamina:36,image:'transport/maps/shipping/crimson_volcano_archipelago.png'},
+  shipping_polar_aurora_ice_sea:{name:'🧊 極光冰海遠征線',type:'shipping',description:'由破冰船穿越極光冰海、研究港與極地深水城的最高階遠征。',durationMs:240*60*1000,baseRevenue:2850000,operatingCost:1200000,stamina:66,image:'transport/maps/shipping/polar_aurora_ice_sea.png'}
 };
 const TRAIN_BLIND_BOX_SINGLE_PRICE=50000;
 const TRAIN_STARTER_ASSET_ID='train_starter_service_commuter';
@@ -3220,6 +3235,15 @@ function registerAirlineCompany(g,u,name) {
 function airlineSelectionName(id,fallback='尚未選擇') {
   return assetCatalog[id]?.name||airlineRoutes[id]?.name||fallback;
 }
+function routeDashboardMediaPayload(embed,routeId,routes,prefix) {
+  const image=routes[routeId]?.image;
+  const path=image?assetPath(image):'';
+  if(!image||!existsSync(path)) return {embeds:[embed],attachments:[]};
+  const name=`${prefix}_${routeId}${extname(image)||'.png'}`;
+  embed.setImage(`attachment://${name}`);
+  return {embeds:[embed],files:[new AttachmentBuilder(path,{name})],attachments:[]};
+}
+
 function airlineDashboardEmbed(g,u,notice='') {
   const airports=ownedAirports(g,u),airliners=ownedPassengerAirliners(g,u),company=airlineCompany(g,u);
   if(!airports.length) {
@@ -3251,6 +3275,9 @@ function airlineDashboardEmbed(g,u,notice='') {
   const nextUpgrade=nextEnterpriseUpgrade(company);
   const upgradeText=nextUpgrade?`下一級：**${fmt(nextUpgrade.cost)}**`:'已升至最高等級';
   return new EmbedBuilder().setColor(flights.some(flight=>Date.now()>=flight.completes_at)?0x35C46A:0x0288D1).setTitle(`✈️ ${company.company_name}`).setDescription(`${notice?`${notice}\n\n`:''}**企業等級**\nLv.**${companyLevel}**｜營收加成 **+${Math.round((companyMultiplier-1)*100)}%**｜${upgradeText}\n\n**維修・保險・牌照**\n${upkeepText}\n今日已派遣：**${dailyRuns} 趟**｜下一趟收益：**×${nextDailyMultiplier.toFixed(2)}**\n\n**營運配置**\n機場：${airlineSelectionName(company.airport_id)}\n客機：${airlineSelectionName(company.aircraft_id)}\n航線：${airlineSelectionName(company.route_id)}\n\n**航班與機位（${flights.length}/${slots}）**\n${flightText}${routeEstimate}\n\n持有客機種類：**${airliners.length} 種**｜${slotText}\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+}
+function airlineDashboardPayload(g,u,notice='') {
+  return routeDashboardMediaPayload(airlineDashboardEmbed(g,u,notice),airlineCompany(g,u)?.route_id,airlineRoutes,'airline_map');
 }
 function airlineDashboardComponents(g,u) {
   const airports=ownedAirports(g,u),company=airlineCompany(g,u);
@@ -3747,6 +3774,9 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
     .setTitle(`${type.emoji} ${company.company_name}`)
     .setAuthor({name:`${type.name.toUpperCase()} // LIVE DISPATCH`})
     .setDescription(`${notice?`${notice}\n\n`:''}**企業等級**\nLv.**${companyLevel}**｜營收加成 **+${Math.round((companyMultiplier-1)*100)}%**｜${upgradeText}\n\n**維修・保險・牌照**\n${upkeepText}\n今日已營運：**${dailyRuns} 趟**｜下一趟收益：**×${nextDailyMultiplier.toFixed(2)}**\n\n**${type.name}營運配置**\n公司行號：**${company.company_name}**\n營運場站：${transportSelectionName(company.station_id)}\n營運路線：${transportSelectionName(company.route_id)}\n\n**營運狀態**\n${operationText}${routeEstimate}${garageText}${berthText}\n\n金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+}
+function transportBusinessDashboardPayload(g,u,businessType,notice='') {
+  return routeDashboardMediaPayload(transportBusinessDashboardEmbed(g,u,businessType,notice),businessTransportCompany(g,u,businessType)?.route_id,transportRoutes,`${businessType}_map`);
 }
 function transportBusinessDashboardComponents(g,u,businessType) {
   requireTransportBusinessType(businessType);
@@ -9497,7 +9527,7 @@ async function handleInteraction(i) {
     const [kind,ownerId]=i.customId.split(':');
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有事業擁有者可以操作這個交通事業面板。',ephemeral:true});
     if(kind==='transport_hub_airline') {
-      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId)],components:airlineDashboardComponents(i.guildId,ownerId),attachments:[]});
+      return i.update({...airlineDashboardPayload(i.guildId,ownerId),components:airlineDashboardComponents(i.guildId,ownerId)});
     }
     if(kind==='transport_hub_ground') {
       return i.update({embeds:[transportGroundOverviewEmbed(i.guildId,ownerId)],components:transportGroundOverviewComponents(ownerId),attachments:[]});
@@ -9517,7 +9547,7 @@ async function handleInteraction(i) {
     const [,ownerId,businessType]=i.customId.split(':');
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有事業擁有者可以操作這個交通事業面板。',ephemeral:true});
     try {
-      return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType),attachments:[]});
+      return i.update({...transportBusinessDashboardPayload(i.guildId,ownerId,businessType),components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
     } catch(error) {
       return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
     }
@@ -9585,8 +9615,8 @@ async function handleInteraction(i) {
     try {
       const result=upgradeEnterprise(i.guildId,ownerId,businessType);
       const notice=`🏢 **企業升級完成！**\n已支付：**${fmt(result.cost)}**｜目前等級：**Lv.${result.level}**｜營收加成：**+${Math.round((result.multiplier-1)*100)}%**\n目前金庫：**${fmt(result.next)}**`;
-      if(businessType==='airline') return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId),attachments:[]});
-      return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,notice)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType),attachments:[]});
+      if(businessType==='airline') return i.update({...airlineDashboardPayload(i.guildId,ownerId,notice),components:airlineDashboardComponents(i.guildId,ownerId)});
+      return i.update({...transportBusinessDashboardPayload(i.guildId,ownerId,businessType,notice),components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
     } catch(error) {
       return i.reply({content:`⚠️ 企業升級失敗：${error.message}`,ephemeral:true});
     }
@@ -9604,7 +9634,7 @@ async function handleInteraction(i) {
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有機場擁有者可以註冊航空公司。',ephemeral:true});
     try {
       const company=registerAirlineCompany(i.guildId,ownerId,i.fields.getTextInputValue('company_name'));
-      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,`✅ **${company.company_name}** 註冊完成，已支付 **${fmt(AIRLINE_REGISTRATION_FEE)}** 手續費。請選擇機場、客機與航線。`)],components:airlineDashboardComponents(i.guildId,ownerId)});
+      return i.update({...airlineDashboardPayload(i.guildId,ownerId,`✅ **${company.company_name}** 註冊完成，已支付 **${fmt(AIRLINE_REGISTRATION_FEE)}** 手續費。請選擇機場、客機與航線。`),components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 註冊失敗：${error.message}`,ephemeral:true});
     }
@@ -9615,7 +9645,7 @@ async function handleInteraction(i) {
     const columns={airline_airport:'airport_id',airline_aircraft:'aircraft_id',airline_route:'route_id'};
     try {
       updateAirlineSelection(i.guildId,ownerId,columns[kind],i.values[0]);
-      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,'✅ 營運配置已更新；開始航線前不會扣款。')],components:airlineDashboardComponents(i.guildId,ownerId)});
+      return i.update({...airlineDashboardPayload(i.guildId,ownerId,'✅ 營運配置已更新；開始航線前不會扣款。'),components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
     }
@@ -9631,7 +9661,7 @@ async function handleInteraction(i) {
       if(result.requiresStrikeResolution) return i.update({embeds:[transportStrikeEmbed(i.guildId,ownerId,businessType,result.incident)],components:transportStrikeComponents(ownerId,businessType,result.incident)});
       const notice=`🤝 **員工罷工已協調完成！** 已支付 **${fmt(resolved.incident.resolution_fee||resolved.incident.resolutionFee)}** 協調費。\n\n${transportOperationStartedNotice(result,businessType)}`;
       return i.update({
-        embeds:[businessType==='airline'?airlineDashboardEmbed(i.guildId,ownerId,notice):transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,notice)],
+        ...(businessType==='airline'?airlineDashboardPayload(i.guildId,ownerId,notice):transportBusinessDashboardPayload(i.guildId,ownerId,businessType,notice)),
         components:businessType==='airline'?airlineDashboardComponents(i.guildId,ownerId):transportBusinessDashboardComponents(i.guildId,ownerId,businessType)
       });
     } catch(error) {
@@ -9645,7 +9675,7 @@ async function handleInteraction(i) {
       const result=startAirlineFlight(i.guildId,ownerId);
       if(result.requiresStrikeResolution) return i.update({embeds:[transportStrikeEmbed(i.guildId,ownerId,'airline',result.incident)],components:transportStrikeComponents(ownerId,'airline',result.incident)});
       const notice=transportOperationStartedNotice(result,'airline');
-      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
+      return i.update({...airlineDashboardPayload(i.guildId,ownerId,notice),components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法開啟航線：${error.message}`,ephemeral:true});
     }
@@ -9656,7 +9686,7 @@ async function handleInteraction(i) {
     try {
       const result=buyAdditionalAirlineSlot(i.guildId,ownerId);
       const notice=`➕ **額外機位購買完成！**\n已支付：**${fmt(result.cost)}**｜目前機位：**${result.slots}/${AIRLINE_MAX_FLIGHT_SLOTS}**\n目前金庫：**${fmt(result.next)}**`;
-      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
+      return i.update({...airlineDashboardPayload(i.guildId,ownerId,notice),components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法購買機位：${error.message}`,ephemeral:true});
     }
@@ -9668,7 +9698,7 @@ async function handleInteraction(i) {
       const flightId=Number(i.values[0]);
       const result=claimAirlineRevenue(i.guildId,ownerId,flightId);
       const notice=`💰 **機位 #${result.flight.flight_slot} 航線營收已入帳！**\n營收：**${fmt(result.flight.gross_revenue)}**｜本航班淨收益：**${fmt(result.profit)}**\n目前金庫：**${fmt(result.next)}**`;
-      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
+      return i.update({...airlineDashboardPayload(i.guildId,ownerId,notice),components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法領取營收：${error.message}`,ephemeral:true});
     }
@@ -9680,7 +9710,7 @@ async function handleInteraction(i) {
       const flight=firstCompletedAirlineFlight(i.guildId,ownerId);
       const result=claimAirlineRevenue(i.guildId,ownerId,flight?.id);
       const notice=`💰 **機位 #${result.flight.flight_slot} 航線營收已入帳！**\n營收：**${fmt(result.flight.gross_revenue)}**｜本航班淨收益：**${fmt(result.profit)}**\n目前金庫：**${fmt(result.next)}**`;
-      return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId,notice)],components:airlineDashboardComponents(i.guildId,ownerId)});
+      return i.update({...airlineDashboardPayload(i.guildId,ownerId,notice),components:airlineDashboardComponents(i.guildId,ownerId)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法領取營收：${error.message}`,ephemeral:true});
     }
@@ -9688,7 +9718,7 @@ async function handleInteraction(i) {
   if(i.isButton()&&i.customId.startsWith('airline_refresh:')&&i.guildId) {
     const ownerId=i.customId.split(':')[1];
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有航空公司擁有者可以操作。',ephemeral:true});
-    return i.update({embeds:[airlineDashboardEmbed(i.guildId,ownerId)],components:airlineDashboardComponents(i.guildId,ownerId)});
+    return i.update({...airlineDashboardPayload(i.guildId,ownerId),components:airlineDashboardComponents(i.guildId,ownerId)});
   }
   if(i.isButton()&&i.customId.startsWith('transport_register:')&&i.guildId) {
     const [,ownerId,businessType]=i.customId.split(':');
@@ -9705,7 +9735,7 @@ async function handleInteraction(i) {
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有交通場站擁有者可以註冊公司行號。',ephemeral:true});
     try {
       const company=registerTransportBusinessCompany(i.guildId,ownerId,businessType,i.fields.getTextInputValue('company_name'));
-      return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,`✅ **${company.company_name}** 註冊完成，已支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}** 手續費。此公司與其他交通事業分開運行。`)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
+      return i.update({...transportBusinessDashboardPayload(i.guildId,ownerId,businessType,`✅ **${company.company_name}** 註冊完成，已支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}** 手續費。此公司與其他交通事業分開運行。`),components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
     } catch(error) {
       return i.reply({content:`⚠️ 註冊失敗：${error.message}`,ephemeral:true});
     }
@@ -9717,7 +9747,7 @@ async function handleInteraction(i) {
     try {
       updateTransportBusinessSelection(i.guildId,ownerId,businessType,columns[kind],i.values[0]);
       const notice=kind==='transport_station'?'✅ 營運場站已更新；請選擇相符路線。':kind==='transport_vehicle'?'✅ 事業載具已更新；開始營運前不會扣款。':'✅ 營運路線已更新；開始營運前不會扣款。';
-      return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,notice)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
+      return i.update({...transportBusinessDashboardPayload(i.guildId,ownerId,businessType,notice),components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
     } catch(error) {
       return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
     }
@@ -9729,7 +9759,7 @@ async function handleInteraction(i) {
       const result=startTransportBusinessOperation(i.guildId,ownerId,businessType);
       if(result.requiresStrikeResolution) return i.update({embeds:[transportStrikeEmbed(i.guildId,ownerId,businessType,result.incident)],components:transportStrikeComponents(ownerId,businessType,result.incident)});
       const notice=transportOperationStartedNotice(result,businessType);
-      return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,notice)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
+      return i.update({...transportBusinessDashboardPayload(i.guildId,ownerId,businessType,notice),components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法開始營運：${error.message}`,ephemeral:true});
     }
@@ -9740,7 +9770,7 @@ async function handleInteraction(i) {
     try {
       const result=claimTransportBusinessRevenue(i.guildId,ownerId,businessType);
       const notice=`💰 **${transportBusinessTypes[businessType].name}營收已入帳！**\n營收：**${fmt(result.operation.gross_revenue)}**｜本次淨收益：**${fmt(result.profit)}**\n目前金庫：**${fmt(result.next)}**`;
-      return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType,notice)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
+      return i.update({...transportBusinessDashboardPayload(i.guildId,ownerId,businessType,notice),components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
     } catch(error) {
       return i.reply({content:`⚠️ 無法領取營收：${error.message}`,ephemeral:true});
     }
@@ -9748,7 +9778,7 @@ async function handleInteraction(i) {
   if(i.isButton()&&i.customId.startsWith('transport_refresh:')&&i.guildId) {
     const [,ownerId,businessType]=i.customId.split(':');
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 只有公司行號擁有者可以操作。',ephemeral:true});
-    return i.update({embeds:[transportBusinessDashboardEmbed(i.guildId,ownerId,businessType)],components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
+    return i.update({...transportBusinessDashboardPayload(i.guildId,ownerId,businessType),components:transportBusinessDashboardComponents(i.guildId,ownerId,businessType)});
   }
   if(i.isButton()&&(i.customId.startsWith('pvp_race_accept:')||i.customId.startsWith('pvp_race_reject:'))&&i.guildId) {
     const token=i.customId.split(':')[1],session=pvpRaceSessions.get(token);
@@ -10268,7 +10298,7 @@ async function handleInteraction(i) {
       return i.reply({embeds:[hideoutEmbed(g,u)],components:hideoutComponents(g,u)});
     }
     if(i.commandName==='機場') {
-      return i.reply({embeds:[airlineDashboardEmbed(g,u,'ℹ️ 機場系統已整合至 `/交通事業`；此指令保留為航空運輸捷徑。')],components:airlineDashboardComponents(g,u),ephemeral:true});
+      return i.reply({...airlineDashboardPayload(g,u,'ℹ️ 機場系統已整合至 `/交通事業`；此指令保留為航空運輸捷徑。'),components:airlineDashboardComponents(g,u),ephemeral:true});
     }
     if(i.commandName==='交通事業') {
       return replyTransportPanel(i,{embeds:[transportHubEmbed(g,u)],components:transportHubComponents(g,u)});

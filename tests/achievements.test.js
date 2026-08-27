@@ -755,12 +755,15 @@ test('航空航線基礎營收下修 25% 且不影響其他交通事業',()=>{
     aegean_resort_hop:270000,
     polar_night_longhaul:1575000,
     pacific_crown_longhaul:1850000,
-    grand_world_odyssey:2550000
+    grand_world_odyssey:2550000,
+    jade_archipelago_corridor:230000,
+    crimson_desert_transcontinental:760000,
+    orbital_aurora_gateway:3400000
   };
   for(const [routeId,revenue] of Object.entries(expectedRevenue)) {
     assert.match(airlineBlock,new RegExp(`${routeId}:\\{[^\\n]+baseRevenue:${revenue}(?:,|\\})`),`${routeId} 基礎營收不正確`);
   }
-  assert.equal((airlineBlock.match(/baseRevenue:/g)||[]).length,10,'航空航線數量或營收設定異常');
+  assert.equal((airlineBlock.match(/baseRevenue:/g)||[]).length,13,'航空航線數量或營收設定異常');
   assert.match(source,/INSERT INTO airline_flights\([^\n]+gross_revenue[^\n]+\)[\s\S]+?\.run\([^\n]+grossRevenue/,'起飛時必須保存當次營收，避免調整已起飛航班');
 
   const groundBlock=source.match(/const transportRoutes=\{[\s\S]+?\n\};/)?.[0]||'';
@@ -1883,10 +1886,54 @@ test('鐵路、客運與貨運各新增三條可運行路線',()=>{
     assert.equal(route.operatingCost,operatingCost,`${routeId} 營運成本不正確`);
     assert.equal(route.stamina,stamina,`${routeId} 體力不正確`);
   }
-  assert.equal(Object.values(routes).filter(route=>route.type==='rail').length,7,'鐵路路線數量不正確');
-  assert.equal(Object.values(routes).filter(route=>route.type==='coach').length,7,'客運路線數量不正確');
-  assert.equal(Object.values(routes).filter(route=>route.type==='freight').length,7,'貨運路線數量不正確');
+  assert.equal(Object.values(routes).filter(route=>route.type==='rail').length,10,'鐵路路線數量不正確');
+  assert.equal(Object.values(routes).filter(route=>route.type==='coach').length,10,'客運路線數量不正確');
+  assert.equal(Object.values(routes).filter(route=>route.type==='freight').length,10,'貨運路線數量不正確');
+  assert.equal(Object.values(routes).filter(route=>route.type==='shipping').length,7,'船運路線數量不正確');
   assert.match(source,/Object\.entries\(transportRoutes\)\.filter\(\(\[,route\]\)=>route\.type===businessType\)/,'路線選單應自動包含新增路線');
+});
+
+test('五種交通事業新增十五張可顯示的原創路線地圖',()=>{
+  const airlineSource=source.match(/const airlineRoutes=(\{[\s\S]+?\n\});/)?.[1];
+  const routeSource=source.match(/const transportRoutes=(\{[\s\S]+?\n\});/)?.[1];
+  assert.ok(airlineSource&&routeSource,'缺少交通路線表');
+  const airlines=new Function(`return ${airlineSource}`)();
+  const routes=new Function(`return ${routeSource}`)();
+  const expected={
+    airline:['jade_archipelago_corridor','crimson_desert_transcontinental','orbital_aurora_gateway'],
+    rail:['rail_sakura_river_express','rail_crimson_canyon_highland','rail_obsidian_continental_maglev'],
+    coach:['coach_golden_coast_night_market','coach_emerald_hot_spring','coach_desert_star_crossborder'],
+    freight:['freight_neon_ecommerce_grid','freight_volcanic_mining_haul','freight_polar_research_supply'],
+    shipping:['shipping_jade_delta_trade','shipping_crimson_volcano_archipelago','shipping_polar_aurora_ice_sea']
+  };
+  let imageCount=0;
+  for(const [businessType,routeIds] of Object.entries(expected)) {
+    for(const routeId of routeIds) {
+      const route=businessType==='airline'?airlines[routeId]:routes[routeId];
+      assert.ok(route,`${businessType} 缺少路線 ${routeId}`);
+      if(businessType!=='airline') assert.equal(route.type,businessType,`${routeId} 事業類型不正確`);
+      assert.match(route.image,new RegExp(`^transport/maps/${businessType}/.+\\.png$`));
+      const imageUrl=new URL(`../assets/${route.image}`,import.meta.url);
+      assert.ok(existsSync(imageUrl),`${routeId} 缺少圖片 ${route.image}`);
+      const image=readFileSync(imageUrl);
+      assert.equal(image.subarray(1,4).toString(),'PNG',`${routeId} 必須是 PNG 圖片`);
+      const width=image.readUInt32BE(16),height=image.readUInt32BE(20);
+      assert.ok(width>=1500&&height>=800&&width>height,`${routeId} 圖片規格錯誤：${width}x${height}`);
+      imageCount+=1;
+    }
+  }
+  assert.equal(imageCount,15);
+  assert.match(source,/function routeDashboardMediaPayload\(embed,routeId,routes,prefix\)/);
+  assert.match(source,/embed\.setImage\(`attachment:\/\/\${name}`\)/);
+  assert.match(source,/function airlineDashboardPayload\(g,u,notice=''\)/);
+  assert.match(source,/function transportBusinessDashboardPayload\(g,u,businessType,notice=''\)/);
+  assert.match(source,/\.\.\.airlineDashboardPayload\(i\.guildId,ownerId/);
+  assert.match(source,/\.\.\.transportBusinessDashboardPayload\(i\.guildId,ownerId,businessType/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-27-transport-route-maps.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-27-transport-route-maps');
+  assert.equal(update.version,'2026.08.27.3');
+  assert.match(update.changes.join('\n'),/15 張/);
+  assert.match(update.changes.join('\n'),/航空、鐵路、客運、貨運與船運/);
 });
 
 test('移除未接線的舊版造型、交通與下注輔助碼',()=>{
