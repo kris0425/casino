@@ -2476,18 +2476,25 @@ function drawBlindBoxAssetId(packId='standard') {
   if(roll<blindBoxHiddenRates.toyota_supra_mk4+blindBoxHiddenRates.blind_totoro_catbus+blindBoxHiddenRates.blind_corolla) return 'blind_corolla';
   return blindBoxRegularIds[Math.floor(Math.random()*blindBoxRegularIds.length)];
 }
-const weeklyMysteryNames=[
+const LUCKY_WHEEL_FREE_SPINS=5;
+const LUCKY_WHEEL_MAX_SPINS=25;
+const LUCKY_WHEEL_PAID_SPIN_PRICE=100000;
+const LUCKY_WHEEL_JACKPOT_RATE=8;
+const LUCKY_WHEEL_TOTAL_WIN_RATE=75;
+const LUCKY_WHEEL_CYCLE_DAYS=3;
+const LUCKY_WHEEL_CYCLE_EPOCH='2026-08-27';
+const wheelGrandPrizeNames=[
   '紅牛 F1 斯帕戰駒','Mercedes-AMG GT 夜行版','Mercedes-AMG ONE 星艦','Aston Martin DB10 特務座駕',
   'Porsche 911 Dakar 沙漠征服者','Toyota Wish 都會巡航','BMW F40 M 夜戰版','Audi RS3 霓虹猛獸',
   ...Array.from({length:23},(_,index)=>`神秘車庫典藏 #${String(index+9).padStart(2,'0')}`),
   ...Array.from({length:10},(_,index)=>`像素超跑典藏 #${String(10-index).padStart(2,'0')}`)
 ];
-const weeklyMysteryIds=weeklyMysteryNames.map((name,index)=>{
+const wheelGrandPrizeIds=wheelGrandPrizeNames.map((name,index)=>{
   const number=String(index+1).padStart(2,'0'),id=`weekly_mystery_${number}`;
   assetCatalog[id]={
     name:`🎁 ${name}`,category:'汽車',price:3000000+index*50000,
-    description:'幸運輪盤每週日輪替的隱藏車輛，只能透過最大獎取得，永久增益為商城車輛的 2 倍。',
-    image:`wheel_pool/wheel_${number}.png`,rarity:'每週隱藏',
+    description:'幸運輪盤每 3 天輪替的隱藏車輛，只能透過最大獎取得，永久增益為商城車輛的 2 倍。',
+    image:`wheel_pool/wheel_${number}.png`,rarity:'三日隱藏',
     buff:['getaway','casino','stamina','work','discount'][index%5],forSale:false,wheelPrize:true
   };
   return id;
@@ -5552,8 +5559,28 @@ function usePetItem(g,u,itemId) {
   } catch(e) { db.exec('ROLLBACK'); throw e; }
   return {...active,happiness,item};
 }
-function claimFreeWheelSpin(g,u) {
+function luckyWheelGrandPrizeInfo(now=new Date()) {
+  const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
+  const dayMs=Date.parse(`${day}T00:00:00Z`),epochMs=Date.parse(`${LUCKY_WHEEL_CYCLE_EPOCH}T00:00:00Z`),cycleMs=LUCKY_WHEEL_CYCLE_DAYS*24*60*60*1000;
+  const cycle=Math.floor((dayMs-epochMs)/cycleMs),startMs=epochMs+cycle*cycleMs,endMs=startMs+cycleMs;
+  const startsOn=new Date(startMs).toISOString().slice(0,10),endsOn=new Date(endMs).toISOString().slice(0,10);
+  const index=((cycle%wheelGrandPrizeIds.length)+wheelGrandPrizeIds.length)%wheelGrandPrizeIds.length;
+  const assetId=wheelGrandPrizeIds[index];
+  return {cycle,index,startsOn,endsOn,endsAt:Date.parse(`${endsOn}T00:00:00+08:00`),assetId,asset:assetCatalog[assetId]};
+}
+function luckyWheelOutcome(random=Math.random) {
+  const roll=Math.min(99.99999999999999,Math.max(0,Number(random())||0)*100);
+  if(roll<LUCKY_WHEEL_JACKPOT_RATE) return {jackpot:true,reward:0,wheelResult:'car'};
+  if(roll<10) return {jackpot:false,reward:50000,wheelResult:'diamond'};
+  if(roll<16) return {jackpot:false,reward:20000,wheelResult:'diamond'};
+  if(roll<28) return {jackpot:false,reward:10000,wheelResult:'gold'};
+  if(roll<50) return {jackpot:false,reward:5000,wheelResult:'gold'};
+  if(roll<LUCKY_WHEEL_TOTAL_WIN_RATE) return {jackpot:false,reward:2000,wheelResult:'gold'};
+  return {jackpot:false,reward:0,wheelResult:'blank'};
+}
+function spinLuckyWheel(g,u,random=Math.random) {
   const today=taipeiDay();
+  const grandPrize=luckyWheelGrandPrizeInfo(),outcome=luckyWheelOutcome(random);
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare('INSERT OR IGNORE INTO lucky_wheel_daily(guild_id,user_id,spin_day,spins) VALUES(?,?,?,0)').run(g,u,today);
@@ -5562,22 +5589,24 @@ function claimFreeWheelSpin(g,u) {
       db.prepare('UPDATE lucky_wheel_daily SET spin_day=?,spins=0 WHERE guild_id=? AND user_id=?').run(today,g,u);
       row={spin_day:today,spins:0};
     }
-    if(row.spins>=3) throw new Error('今日 3 次免費幸運輪盤已用完，請於明日 00:00 後再來');
+    if(row.spins>=LUCKY_WHEEL_MAX_SPINS) throw new Error(`今日幸運輪盤已達 ${LUCKY_WHEEL_MAX_SPINS} 次上限，請於明日 00:00 後再來`);
     const used=row.spins+1;
+    const cost=used>LUCKY_WHEEL_FREE_SPINS?LUCKY_WHEEL_PAID_SPIN_PRICE:0;
+    if(cost) changeBalanceUnlocked(g,u,-cost,'lucky_wheel_spin',u,`幸運輪盤第 ${used} 次｜金幣直接銷毀`);
+    let buffId=null,credited=0;
+    if(outcome.jackpot) {
+      addAssetQuantity(g,u,grandPrize.assetId,1);
+      buffId=ensureAssetBuff(g,u,grandPrize.assetId);
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+        .run(g,u,0,balance(g,u),'asset_prize',u,`幸運輪盤最大獎：${grandPrize.asset.name} x1`);
+    } else if(outcome.reward) {
+      const before=balance(g,u),after=changeBalanceUnlocked(g,u,outcome.reward,'payout',u,'幸運輪盤獎金');
+      credited=after-before;
+    }
     db.prepare('UPDATE lucky_wheel_daily SET spins=? WHERE guild_id=? AND user_id=?').run(used,g,u);
     db.exec('COMMIT');
-    return {used,remaining:3-used};
+    return {...outcome,grandPrize,buffId,credited,cost,used,freeRemaining:Math.max(0,LUCKY_WHEEL_FREE_SPINS-used),remaining:LUCKY_WHEEL_MAX_SPINS-used,balance:balance(g,u)};
   } catch(e) { db.exec('ROLLBACK'); throw e; }
-}
-function weeklyMysteryInfo() {
-  const localDate=new Date(`${taipeiDay()}T00:00:00Z`);
-  localDate.setUTCDate(localDate.getUTCDate()-localDate.getUTCDay());
-  const sunday=localDate.toISOString().slice(0,10);
-  const epoch=new Date('2026-01-04T00:00:00Z');
-  const week=Math.floor((localDate-epoch)/(7*24*60*60*1000));
-  const index=((week%weeklyMysteryIds.length)+weeklyMysteryIds.length)%weeklyMysteryIds.length;
-  const assetId=weeklyMysteryIds[index];
-  return {sunday,index,assetId,asset:assetCatalog[assetId]};
 }
 const dailyBuffs=[
   {day:'週日',icon:'🎁',name:'雙倍每日獎勵',text:'每日獎勵增加為 1,000 金幣'},
@@ -6746,7 +6775,7 @@ const miniGameCatalog=[
   {id:'liar_dice',command:'骰盅吹牛',label:'骰盅吹牛 PVP',emoji:'🎲',description:'秘密看骰、喊骰與抓吹牛',setup:'pvp'},
   {id:'big2',command:'大老二',label:'大老二',emoji:'🃏',description:'從 13 張牌挑戰最高五張牌型',setup:'bet'},
   {id:'slots',command:'角子機',label:'角子機',emoji:'🎰',description:'轉動三軸圖案取得倍數派彩',setup:'bet'},
-  {id:'wheel',command:'幸運輪盤',label:'幸運輪盤',emoji:'🎡',description:'每日三次免費抽現金或隱藏車',setup:'direct'},
+  {id:'wheel',command:'幸運輪盤',label:'幸運輪盤',emoji:'🎡',description:'每日 5 次免費，最多轉 25 次',setup:'direct'},
   {id:'lottery',command:'大樂透',label:'大樂透',emoji:'🎱',description:'選擇 1～49 的幸運號碼',setup:'lottery'},
   {id:'bingo',command:'賓果',label:'賓果',emoji:'🔢',description:'自選九宮格號碼進行開獎',setup:'bingo'},
   {id:'scratch',command:'刮刮樂',label:'刮刮樂',emoji:'🪙',description:'親手刮開三個圖案試手氣',setup:'bet'},
@@ -7779,7 +7808,7 @@ function riotRow(token,disabled=false) {
   );
 }
 const gameHelpDetails={
-  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/日常 領取\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🕹️ 互動機台｜夾娃娃機可操作落爪，夾取車輛、房產、槍枝與彈藥\n🎯 靶場訓練｜打靶前可選擇自己的槍枝，精準槍枝提高命中率\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 3 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n所有 19 款遊戲統一由 \`/小遊戲\` 進入；夾娃娃機每局 **25,000 金幣／5 體力**。打靶每次消耗 **8 體力**、冷卻 10 分鐘且不消耗彈藥。一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限，也可以輸入「歐印」。`},
+  overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/日常 領取\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🕹️ 互動機台｜夾娃娃機可操作落爪，夾取車輛、房產、槍枝與彈藥\n🎯 靶場訓練｜打靶前可選擇自己的槍枝，精準槍枝提高命中率\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 5 次，之後每次 100,000，單日最多 25 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n所有 19 款遊戲統一由 \`/小遊戲\` 進入；夾娃娃機每局 **25,000 金幣／5 體力**。打靶每次消耗 **8 體力**、冷卻 10 分鐘且不消耗彈藥。一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限，也可以輸入「歐印」。`},
   highlow:{label:'比大小',emoji:'🃏',hint:'與莊家各抽一張牌',title:'🃏 比大小',body:'你與莊家各抽一張牌，點數與花色較大者獲勝。勝利獲得下注額 **2 倍**，平手退回下注，落敗則失去下注。'},
   dragon:{label:'射龍門',emoji:'🚪',hint:'判斷第三張牌是否落在門牌中間',title:'🚪 射龍門',body:'先開出兩張門牌，再選擇射牌或不射。第三張牌嚴格落在兩張門牌之間即獲得 **2 倍**；撞柱或射偏會失去下注，不射則退回下注。'},
   horse:{label:'賽馬',emoji:'🏇',hint:'選擇一匹馬觀看即時競賽',title:'🏇 賽馬',body:'從 1～4 號馬選擇一匹下注，畫面會即時更新到衝線。猜中冠軍獲得下注額 **4 倍**。'},
@@ -7794,7 +7823,7 @@ const gameHelpDetails={
   lottery:{label:'大樂透',emoji:'🎱',hint:'從 1～49 選擇幸運號碼',title:'🎱 大樂透',body:'選擇 1～49 的一個幸運號碼，完全命中系統開出的號碼即可獲得下注額 **40 倍**。'},
   bingo:{label:'賓果',emoji:'🔢',hint:'自選九宮格號碼連線',title:'🔢 賓果',body:'自選 9 個不重複的 1～25 數字組成九宮格。橫、直或斜線完成連線即可獲得下注額 **4 倍**。'},
   scratch:{label:'刮刮樂',emoji:'🪙',hint:'在實體卡面刮開三個圖案',title:'🪙 互動式刮刮樂',body:'購買後按下「開啟實體刮刮卡」，在專屬網頁用手指或滑鼠刮除銀色塗層。刮開達 **45%** 後會自動驗證並派彩。三個相同獲得 **10 倍**，兩個相同獲得 **2 倍**。獎項於下注時由伺服器封存，重新整理不會重抽或重複派彩。'},
-  wheel:{label:'幸運輪盤',emoji:'🎡',hint:'每天三次免費抽獎',title:'🎡 幸運輪盤',body:'每天可免費轉動 **3 次**，台北時間 00:00 重置。可抽中金幣，最大獎為每週日更新的隱藏車輛。'},
+  wheel:{label:'幸運輪盤',emoji:'🎡',hint:'每天 5 次免費｜最多 25 次',title:'🎡 幸運輪盤',body:'每天前 **5 次免費**，第 6～25 次每次 **100,000 金幣**，台北時間 00:00 重置。整體中獎率 **75%**、隱藏車大獎率 **8%**；當期大獎每 **3 天**更新一次。'},
   mahjong:{label:'麻將',emoji:'🀄',hint:'台式 16 張｜吃、碰、槓、胡與補花',title:'🀄 台式 16 張麻將',body:'採用四家台式 16 張核心規則：莊家 17 張先出，其他家 16 張摸 1 打 1；花牌會自動補花。輪到自己時從下拉選單選擇出牌；他家打出牌後可依規則選擇吃、碰、槓或胡。單人不足座位由三名電腦補齊，多人桌不足四位也會補電腦。胡牌依 **五組面子加一對將** 判定；流局會退回真人玩家本金。單人胡牌基本派彩 **4 倍**，多人胡牌取得真人玩家獎池；週六獎金 ×1.5。'},
   duel:{label:'PvP 輪盤決鬥',emoji:'⚔️',hint:'指定玩家進行虛構槍械決鬥',title:'⚔️ PvP 輪盤決鬥',body:'指定另一名玩家並下注，選擇左輪或霰彈槍模式。對方接受後輪流行動，勝者取得雙方獎池。'},
   heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/購買資產\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
@@ -11092,41 +11121,31 @@ async function handleInteraction(i) {
       return;
     }
     if(i.commandName==='幸運輪盤') {
-      const spin=claimFreeWheelSpin(g,u),weekly=weeklyMysteryInfo(),mysteryId=weekly.assetId,mystery=weekly.asset;
-      const roll=Math.random()*100;
-      let reward=0,jackpot=false;
-      if(roll<5) jackpot=true;
-      else if(roll<6) reward=50000;
-      else if(roll<10.5) reward=20000;
-      else if(roll<20.5) reward=10000;
-      else if(roll<40.5) reward=5000;
-      else if(roll<64.5) reward=2000;
-      const wheelResult=jackpot?'car':reward>=20000?'diamond':reward?'gold':'blank';
-      const extension=mystery.image.split('.').pop(),imageName=`weekly-mystery.${extension}`;
+      const spin=spinLuckyWheel(g,u),mysteryId=spin.grandPrize.assetId,mystery=spin.grandPrize.asset;
+      const {reward,jackpot,wheelResult}=spin;
+      const extension=mystery.image.split('.').pop(),imageName=`wheel-grand-prize.${extension}`;
       const attachment=new AttachmentBuilder(assetPath(mystery.image),{name:imageName});
       const mysteryImage=`attachment://${imageName}`;
       const wheelAnimationName=`lucky-wheel-${wheelResult}.gif`;
       const wheelAnimation=new AttachmentBuilder(luckyWheelSpinGifs[wheelResult],{name:wheelAnimationName});
       await i.reply({
-        embeds:[new EmbedBuilder().setColor(0x9C27B0).setTitle('🎡 免費幸運輪盤轉動中…')
-          .setDescription(`本次：**免費**｜不消耗體力\n今日剩餘：**${spin.remaining}／3 次**\n本週最大獎：**🎁 隱藏車輛**\n\n✨ 輪盤正在加速、追光並逐步減速……`)
+        embeds:[new EmbedBuilder().setColor(0x9C27B0).setTitle(`🎡 ${spin.cost?'付費':'免費'}幸運輪盤轉動中…`)
+          .setDescription(`本次：**${spin.cost?`${fmt(spin.cost)} 金幣`:'免費'}**｜不消耗體力\n今日進度：**${spin.used}／${LUCKY_WHEEL_MAX_SPINS} 次**｜免費剩餘：**${spin.freeRemaining} 次**\n本期最大獎：**${mystery.name}**\n\n✨ 輪盤正在加速、追光並逐步減速……`)
           .setImage(`attachment://${wheelAnimationName}`)],
         files:[attachment,wheelAnimation]
       });
       await sleep(5700);
       let resultText;
       if(jackpot) {
-        const prize=grantAssetPrize(g,u,mysteryId,1,'幸運輪盤最大獎');
-        resultText=`🎊 **最大獎！本週隱藏車輛正式揭曉！**\n\n${mystery.name} 已直接停入你的 \`/車庫\`。\n固定增益：**${assetBuffLabel(mysteryId,prize.buffId)}**\n${assetBuffDescription(mysteryId,prize.buffId)}`;
+        resultText=`🎊 **最大獎！本期隱藏車輛正式揭曉！**\n\n${mystery.name} 已直接停入你的 \`/車庫\`。\n固定增益：**${assetBuffLabel(mysteryId,spin.buffId)}**\n${assetBuffDescription(mysteryId,spin.buffId)}`;
       } else {
         if(reward) {
-          const before=balance(g,u),after=changeBalance(g,u,reward,'payout',u,'幸運輪盤獎金'),credited=after-before;
           resultText=wheelResult==='diamond'
-            ?`💎 輪盤停在鑽石大獎格！\n獲得：**${fmt(credited)} 金幣**`
-            :`🪙 輪盤停在金條獎格！\n獲得：**${fmt(credited)} 金幣**`;
+            ?`💎 輪盤停在鑽石大獎格！\n獲得：**${fmt(spin.credited)} 金幣**`
+            :`🪙 輪盤停在金條獎格！\n獲得：**${fmt(spin.credited)} 金幣**`;
         } else resultText='💨 輪盤停在空獎格，這次沒有獲得獎品。';
       }
-      const embed=new EmbedBuilder().setColor(jackpot?0xFFD700:wheelResult==='diamond'?0x4FC3F7:reward?0xF5B942:0x607D8B).setTitle(jackpot?'🏆 幸運輪盤｜傳說大獎':'🎡 幸運輪盤｜開獎結果').setDescription(`${resultText}\n\n今日剩餘：**${spin.remaining}／3 次**\n金庫：**${fmt(balance(g,u))}**\n隱藏車機率：**5%**\n車池於每週日 00:00 更新`).setImage(jackpot?mysteryImage:`attachment://${wheelAnimationName}`);
+      const embed=new EmbedBuilder().setColor(jackpot?0xFFD700:wheelResult==='diamond'?0x4FC3F7:reward?0xF5B942:0x607D8B).setTitle(jackpot?'🏆 幸運輪盤｜傳說大獎':'🎡 幸運輪盤｜開獎結果').setDescription(`${resultText}\n\n今日進度：**${spin.used}／${LUCKY_WHEEL_MAX_SPINS} 次**｜今日剩餘：**${spin.remaining} 次**\n免費剩餘：**${spin.freeRemaining} 次**｜第 6 次起每次：**${fmt(LUCKY_WHEEL_PAID_SPIN_PRICE)}**\n金庫：**${fmt(spin.balance)}**\n整體中獎率：**${LUCKY_WHEEL_TOTAL_WIN_RATE}%**｜隱藏車機率：**${LUCKY_WHEEL_JACKPOT_RATE}%**\n本期至 <t:${Math.floor(spin.grandPrize.endsAt/1000)}:R>，每 ${LUCKY_WHEEL_CYCLE_DAYS} 天更新`).setImage(jackpot?mysteryImage:`attachment://${wheelAnimationName}`);
       return i.editReply({embeds:[embed]});
     }
     let bingoSelection=null;
@@ -11334,10 +11353,37 @@ async function announceSundayCasinoVault() {
     }
   }
 }
+async function announceLuckyWheelGrandPrize() {
+  const slot=taipeiDay(),grandPrize=luckyWheelGrandPrizeInfo(),asset=grandPrize.asset;
+  for(const guildId of client.guilds.cache.keys()) {
+    const claimed=db.prepare('INSERT OR IGNORE INTO scheduled_announcements(guild_id,kind,slot) VALUES(?,?,?)').run(guildId,'lucky_wheel_grand_prize',slot);
+    if(!claimed.changes) continue;
+    try {
+      const channel=await casinoAnnouncementChannel(guildId);
+      if(!channel) throw new Error(`找不到名稱包含「${CASINO_ANNOUNCEMENT_CHANNEL_KEYWORD}」的文字頻道`);
+      const extension=asset.image.split('.').pop(),imageName=`lucky-wheel-grand-prize.${extension}`;
+      const message=await channel.send({
+        embeds:[new EmbedBuilder().setColor(0xFFD700).setTitle('🎡 今日幸運輪盤｜本期傳說大獎')
+          .setDescription(`**${asset.name}**\n${asset.description}\n\n🏆 隱藏車大獎率：**${LUCKY_WHEEL_JACKPOT_RATE}%**\n✨ 整體中獎率：**${LUCKY_WHEEL_TOTAL_WIN_RATE}%**\n🎟️ 每日前 ${LUCKY_WHEEL_FREE_SPINS} 次免費，第 ${LUCKY_WHEEL_FREE_SPINS+1}～${LUCKY_WHEEL_MAX_SPINS} 次每次 **${fmt(LUCKY_WHEEL_PAID_SPIN_PRICE)} 金幣**\n🔄 本期開始：**${grandPrize.startsOn}**｜<t:${Math.floor(grandPrize.endsAt/1000)}:F> 更新（<t:${Math.floor(grandPrize.endsAt/1000)}:R>）`)
+          .setImage(`attachment://${imageName}`).setFooter({text:'幸運輪盤大獎每日推送｜獎池每 3 天更新'}).setTimestamp()],
+        files:[new AttachmentBuilder(assetPath(asset.image),{name:imageName})],
+        allowedMentions:{parse:[]}
+      });
+      if(channel.type===ChannelType.GuildAnnouncement) {
+        try { await message.crosspost(); }
+        catch(error) { console.error(`幸運輪盤大獎公告發布失敗 guild=${guildId}: ${error.message}`); }
+      }
+    } catch(error) {
+      db.prepare('DELETE FROM scheduled_announcements WHERE guild_id=? AND kind=? AND slot=?').run(guildId,'lucky_wheel_grand_prize',slot);
+      console.error(`幸運輪盤大獎公告傳送失敗 guild=${guildId}: ${error.message}`);
+    }
+  }
+}
 client.once('clientReady',()=>{
   console.log(`已登入：${client.user.tag}`);
   setInterval(announceTomorrowBank,60000);
   setInterval(announceSundayCasinoVault,60000);
+  setInterval(()=>announceLuckyWheelGrandPrize().catch(error=>console.error(`幸運輪盤每日大獎排程失敗：${error.message}`)),60000);
   setInterval(notifyCompletedAirlineFlights,60000);
   setInterval(notifyCompletedTransportOperations,60000);
   setInterval(notifyPendingAllInHeroUnlocks,60000);
@@ -11346,6 +11392,7 @@ client.once('clientReady',()=>{
   setInterval(()=>processAssetAuctions().catch(error=>console.error(`限時資產拍賣排程失敗：${error.message}`)),60000);
   announceTomorrowBank();
   announceSundayCasinoVault();
+  announceLuckyWheelGrandPrize().catch(error=>console.error(`啟動幸運輪盤大獎公告失敗：${error.message}`));
   notifyCompletedAirlineFlights();
   notifyCompletedTransportOperations();
   notifyPendingAllInHeroUnlocks();

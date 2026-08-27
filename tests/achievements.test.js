@@ -2075,3 +2075,28 @@ test('賭城生涯提供每日每週合約、資產配置與五區聲望',()=>{
   assert.match(update.changes.join('\n'),/每週 1 份/);
   assert.match(update.changes.join('\n'),/\/玩家 生涯/);
 });
+
+test('幸運輪盤採三日大獎、每日五次免費與二十五次上限',()=>{
+  for(const [constant,value] of [
+    ['LUCKY_WHEEL_FREE_SPINS',5],['LUCKY_WHEEL_MAX_SPINS',25],['LUCKY_WHEEL_PAID_SPIN_PRICE',100000],
+    ['LUCKY_WHEEL_JACKPOT_RATE',8],['LUCKY_WHEEL_TOTAL_WIN_RATE',75],['LUCKY_WHEEL_CYCLE_DAYS',3]
+  ]) assert.match(source,new RegExp(`const ${constant}=${value}`));
+  const spin=source.match(/function spinLuckyWheel\(g,u,random=Math\.random\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(spin,/BEGIN IMMEDIATE/);
+  assert.match(spin,/row\.spins>=LUCKY_WHEEL_MAX_SPINS/);
+  assert.match(spin,/used>LUCKY_WHEEL_FREE_SPINS\?LUCKY_WHEEL_PAID_SPIN_PRICE:0/);
+  assert.match(spin,/changeBalanceUnlocked\(g,u,-cost,'lucky_wheel_spin'/);
+  assert.match(spin,/COMMIT/);
+  assert.match(spin,/ROLLBACK/);
+  assert.match(source,/function luckyWheelGrandPrizeInfo\(now=new Date\(\)\)/);
+  assert.match(source,/cycleMs=LUCKY_WHEEL_CYCLE_DAYS\*24\*60\*60\*1000/);
+  assert.match(source,/function announceLuckyWheelGrandPrize\(\)/);
+  assert.match(source,/INSERT OR IGNORE INTO scheduled_announcements\(guild_id,kind,slot\)/);
+  assert.match(source,/'lucky_wheel_grand_prize'/);
+  assert.match(source,/setInterval\(\(\)=>announceLuckyWheelGrandPrize\(\)/);
+  const wheelUpdate=JSON.parse(readFileSync(new URL('../updates/2026-08-27-lucky-wheel-three-day-jackpot.json',import.meta.url),'utf8'));
+  assert.equal(wheelUpdate.version,'2026.08.27.2');
+  assert.match(wheelUpdate.changes.join('\n'),/前 5 次免費/);
+  assert.match(wheelUpdate.changes.join('\n'),/最多轉動 25 次/);
+  assert.match(wheelUpdate.changes.join('\n'),/每天自動推送一次/);
+});
