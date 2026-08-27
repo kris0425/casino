@@ -28,8 +28,8 @@ chmod 600 "$TEMP_KEY"
 printf '%s\n' "$ORACLE_KNOWN_HOSTS" > "$KNOWN_HOSTS"
 chmod 600 "$KNOWN_HOSTS"
 
-SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" -i "$TEMP_KEY")
-SCP_OPTS=(-q -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" -i "$TEMP_KEY")
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" -i "$TEMP_KEY")
+SCP_OPTS=(-q -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" -i "$TEMP_KEY")
 ssh_remote() { ssh "${SSH_OPTS[@]}" "$ORACLE_HOST" "$1"; }
 
 is_deploy_path() {

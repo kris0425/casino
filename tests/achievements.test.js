@@ -1851,6 +1851,7 @@ test('Oracle 部署將大型素材改用掛載並支援跳過 Docker 重建',()=
   const dockerfile=readFileSync(new URL('../Dockerfile',import.meta.url),'utf8');
   const compose=readFileSync(new URL('../docker-compose.yml',import.meta.url),'utf8');
   const remote=readFileSync(new URL('../scripts/deploy_oracle_remote.sh',import.meta.url),'utf8');
+  const github=readFileSync(new URL('../scripts/deploy_oracle_github.sh',import.meta.url),'utf8');
   assert.doesNotMatch(dockerignore,/!assets\//,'assets 不應重新加入 Docker build context');
   assert.doesNotMatch(dockerfile,/COPY assets \.\/assets/,'Dockerfile 不應打包整個 assets');
   assert.match(compose,/\.\/assets:\/app\/assets:ro/);
@@ -1860,6 +1861,9 @@ test('Oracle 部署將大型素材改用掛載並支援跳過 Docker 重建',()=
   assert.match(remote,/IMAGE_BUILD_SKIPPED/);
   assert.match(remote,/assets\/\*\|activity\/public\/\*\|scripts\/\*\|updates\/\*\|tests\/\*/);
   assert.match(remote,/--force-recreate/);
+  assert.match(github,/ServerAliveInterval=30/);
+  assert.match(github,/ServerAliveCountMax=20/);
+  assert.match(github,/ConnectTimeout=20/);
 });
 
 test('鐵路、客運與貨運各新增三條可運行路線',()=>{
