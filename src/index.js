@@ -8628,14 +8628,15 @@ async function handleInteraction(i) {
     const fields=i.customId.split(':'),auctionIdText=fields.length===2?fields[1]:fields[2];
     const amount=Number(i.fields.getTextInputValue('amount').replace(/[,\s]/g,''));
     try {
+      await i.deferReply({ephemeral:true});
       const result=placeAssetAuctionBid(i.guildId,i.user.id,Number(auctionIdText),amount);
       const notice=`💰 **出價成功！**\n本次最高出價：**${fmt(result.amount)}**｜新增託管：**${fmt(result.escrowNeeded)}**${result.extended?'\n⏱️ 因最後 5 分鐘出價，結束時間已延長 5 分鐘。':''}`;
-      await i.reply({content:notice,ephemeral:true});
+      await i.editReply({content:notice});
       await publishAssetAuctionAnnouncement(result.auction,'🔨 **有人成功出價！** 公開面板已更新目前最高價。');
       void notifyAssetAuctionOutbid(result);
       return;
     } catch(error) {
-      return i.reply({content:`⚠️ 出價失敗：${error.message}`,ephemeral:true});
+      return i.editReply({content:`⚠️ 出價失敗：${error.message}`});
     }
   }
   if(i.isButton()&&i.customId.startsWith('asset_auction_refresh:')&&i.guildId) {

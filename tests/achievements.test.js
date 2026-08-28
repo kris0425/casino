@@ -911,6 +911,9 @@ test('限時資產拍賣全系統同時只保留一場並安全整併重複場�
 
 test('限時資產拍賣公告可由所有玩家直接公開出價',()=>{
   const bidBlock=source.match(/function placeAssetAuctionBid\([\s\S]+?\n\}/)?.[0]||'';
+  const bidModal=source.match(/if\(i\.isModalSubmit\(\)&&i\.customId\.startsWith\('asset_auction_bid_modal:'\)[\s\S]+?\n  \}/)?.[0]||'';
+  assert.match(bidModal,/await i\.deferReply\(\{ephemeral:true\}\)/,'拍賣出價表單必須立即確認互動');
+  assert.match(bidModal,/await i\.editReply\(\{content:notice\}\)/,'確認後必須以 editReply 回覆出價結果');
   assert.match(source,/current_bidder_guild_id TEXT/);
   assert.match(source,/ALTER TABLE asset_auctions ADD COLUMN current_bidder_guild_id/);
   assert.match(bidBlock,/WHERE id=\? AND status='active'/);
