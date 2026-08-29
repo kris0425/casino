@@ -2100,6 +2100,29 @@ test('賭場地獄系列三隻神話寵物附橫向圖片、代價與雙重能�
   for(const name of ['冥獄三頭犬','熔岩獄貓','冥焰不死鳥']) assert.match(update.changes.join('\n'),new RegExp(name));
 });
 
+test('異界限定特殊寵物各自具備不同主題與橫向形象圖',()=>{
+  const pets=[
+    ['aurora_samoyed','極光雪原犬｜北辰','dog',5550000,'pets/aurora_samoyed_northstar.png','heist:6,stamina:12','極光'],
+    ['neon_hacker_cat','霓虹駭客貓｜零號','cat',6660000,'pets/neon_hacker_cat_zero.png','casino:0.07,work:0.06','霓虹賭城'],
+    ['abyssal_glass_macaw','琉璃深海鸚｜潮汐','bird',7770000,'pets/abyssal_glass_macaw_tide.png','stamina:18,discount:0.08','深海']
+  ];
+  for(const [petId,name,petType,price,imagePath,bonuses,theme] of pets) {
+    const block=source.match(new RegExp(`${petId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(block,new RegExp(`name:'${name}'`));
+    assert.match(block,new RegExp(`price:${price}`));
+    assert.match(block,new RegExp(`petType:'${petType}'`));
+    assert.match(block,/rarity:'異界限定'/);
+    assert.match(block,new RegExp(`bonuses:\\{${bonuses.replace(/[.]/g,'\\.')}\\}`));
+    assert.match(block,new RegExp(`image:'${imagePath.replace(/[/.]/g,'\\$&')}'`));
+    assert.match(block,new RegExp(theme));
+    const image=readFileSync(new URL(`../assets/${imagePath}`,import.meta.url));
+    assert.equal(image.subarray(1,4).toString(),'PNG',`${petId} 缺少 PNG 形象圖`);
+    assert.ok(image.readUInt32BE(16)>image.readUInt32BE(20),`${petId} 形象圖必須為橫向`);
+  }
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-29-special-theme-pets.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-29-special-theme-pets');
+  for(const name of ['極光雪原犬','霓虹駭客貓','琉璃深海鸚']) assert.match(update.changes.join('\n'),new RegExp(name));
+});
 test('賭城生涯提供每日每週合約、資產配置與五區聲望',()=>{
   for(const table of ['casino_career_profiles','casino_district_reputation','casino_career_contracts']) {
     assert.match(source,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
