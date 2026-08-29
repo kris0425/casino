@@ -568,6 +568,18 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS solo_heist_settings (
     guild_id TEXT PRIMARY KEY, base_chance INTEGER NOT NULL DEFAULT 25
   );
+  CREATE TABLE IF NOT EXISTS heist_campaign_days (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, day_key TEXT NOT NULL, week_key TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('solo','team')), outcome TEXT NOT NULL CHECK (outcome IN ('success','failed')),
+    completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id,day_key)
+  );
+  CREATE TABLE IF NOT EXISTS heist_campaign_weeks (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL, week_key TEXT NOT NULL,
+    active_days INTEGER NOT NULL DEFAULT 0, successful_days INTEGER NOT NULL DEFAULT 0, milestone_mask INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id,week_key)
+  );
   CREATE TABLE IF NOT EXISTS player_profiles (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -6053,6 +6065,61 @@ function taipeiWeekday() {
 }
 function todayBuff() { return dailyBuffs[taipeiWeekday()]; }
 const weeklyHeistBonus=()=>taipeiWeekday()===1?10:0;
+const heistCampaignMilestones=[
+  {days:1,reward:2500},{days:3,reward:7500},{days:5,reward:20000}
+];
+function heistCampaignStatus(g,u) {
+  const weekKey=careerWeekKey();
+  const week=db.prepare('SELECT active_days,successful_days,milestone_mask FROM heist_campaign_weeks WHERE guild_id=? AND user_id=? AND week_key=?').get(g,u,weekKey)||{active_days:0,successful_days:0,milestone_mask:0};
+  const today=db.prepare('SELECT mode,outcome FROM heist_campaign_days WHERE guild_id=? AND user_id=? AND day_key=?').get(g,u,taipeiDay())||null;
+  return {weekKey,activeDays:Number(week.active_days)||0,successfulDays:Number(week.successful_days)||0,milestoneMask:Number(week.milestone_mask)||0,today};
+}
+function recordHeistCampaign(g,u,mode,outcome) {
+  if(!['solo','team'].includes(mode)||!['success','failed'].includes(outcome)) throw new Error('搶劫委託資料無效');
+  const dayKey=taipeiDay(),weekKey=careerWeekKey();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('INSERT OR IGNORE INTO heist_campaign_weeks(guild_id,user_id,week_key) VALUES(?,?,?)').run(g,u,weekKey);
+    const inserted=db.prepare('INSERT OR IGNORE INTO heist_campaign_days(guild_id,user_id,day_key,week_key,mode,outcome) VALUES(?,?,?,?,?,?)').run(g,u,dayKey,weekKey,mode,outcome);
+    const current=db.prepare('SELECT active_days,successful_days,milestone_mask FROM heist_campaign_weeks WHERE guild_id=? AND user_id=? AND week_key=?').get(g,u,weekKey);
+    if(!inserted.changes) {
+      const after=balance(g,u);
+      db.exec('COMMIT');
+      return {firstToday:false,reward:0,activeDays:Number(current.active_days)||0,successfulDays:Number(current.successful_days)||0,balanceAfter:after};
+    }
+    const activeDays=Number(current.active_days)+1,successfulDays=Number(current.successful_days)+(outcome==='success'?1:0);
+    const milestone=heistCampaignMilestones.find(item=>item.days===activeDays)||null;
+    const milestoneMask=Number(current.milestone_mask)||0;
+    const nextMask=milestone?milestoneMask|(1<<heistCampaignMilestones.indexOf(milestone)):milestoneMask;
+    db.prepare('UPDATE heist_campaign_weeks SET active_days=?,successful_days=?,milestone_mask=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=? AND week_key=?').run(activeDays,successfulDays,nextMask,g,u,weekKey);
+    const reward=milestone?.reward||0;
+    const after=reward?changeBalanceUnlocked(g,u,reward,'heist_campaign_reward',u,'搶劫行動委託｜第 '+activeDays+' 個行動日'):balance(g,u);
+    db.exec('COMMIT');
+    return {firstToday:true,reward,activeDays,successfulDays,balanceAfter:after};
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function heistCampaignResultText(result) {
+  const base='\n\n🗂️ **週行動委託**：本週 '+Math.min(5,result.activeDays)+'/5 個行動日｜成功 '+result.successfulDays+' 次。';
+  if(!result.firstToday) return base+'\n今天已完成委託，重複行動不會重複累積。';
+  if(result.reward) return base+'\n🎁 第 '+result.activeDays+' 個行動日獎勵：**'+fmt(result.reward)+'** 已自動入帳。';
+  return base+'\n再完成 '+Math.max(0,5-result.activeDays)+' 個不同日期的行動即可完成本週委託。';
+}
+function heistCampaignTeamText(rows) {
+  return rows.map(row=>'<@'+row.memberId+'>｜'+Math.min(5,row.result.activeDays)+'/5 日'+(row.result.reward?'｜+'+fmt(row.result.reward):row.result.firstToday?'｜已記錄':'｜今日已記錄')).join('\n');
+}
+function heistCampaignEmbed(g,u) {
+  const status=heistCampaignStatus(g,u);
+  const milestones=heistCampaignMilestones.map(item=>(status.activeDays>=item.days?'✅':'⬜')+' 第 '+item.days+' 日｜'+fmt(item.reward)).join('\n');
+  const today=status.today?'✅ 今日已以'+(status.today.mode==='team'?'團隊':'單人')+'搶劫'+(status.today.outcome==='success'?'成功':'完成')+'記錄':'⬜ 今日尚未完成搶劫行動';
+  return new EmbedBuilder().setColor(0x4A148C).setTitle('🗂️ 搶劫每週行動委託').setDescription('每週任意 **5 天**首次完成單人或團隊搶劫都算一個行動日；**不必連續，失敗也會保留進度**。每個里程碑會自動入帳，不需額外點擊或支付費用。').addFields(
+    {name:'本週進度',value:Math.min(5,status.activeDays)+'/5 個行動日｜成功 '+status.successfulDays+' 次',inline:true},
+    {name:'今日狀態',value:today,inline:false},
+    {name:'自動階段獎勵',value:milestones,inline:false}
+  ).setFooter({text:'使用 /賺錢 工作:搶銀行 或 /團隊搶銀行 完成當日行動'});
+}
 function soloHeistBaseChance(guildId) {
   return db.prepare('SELECT base_chance FROM solo_heist_settings WHERE guild_id=?').get(guildId)?.base_chance??25;
 }
@@ -8006,6 +8073,7 @@ const commands = [
     .addSubcommand(s=>s.setName('成就').setDescription('查看自己或其他玩家的成就進度').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')))
     .addSubcommand(s=>s.setName('造型').setDescription('選擇角色與管理員發布的完整造型'))
     .addSubcommand(s=>s.setName('遊戲').setDescription('開啟網頁遊戲大廳與個人經營總覽'))
+    .addSubcommand(s=>s.setName('搶劫').setDescription('查看每週行動委託、當日完成狀態與階段獎勵'))
     .addSubcommand(s=>s.setName('稱號').setDescription('裝備由成就解鎖的個人稱號').addStringOption(o=>o.setName('選擇').setDescription('選擇已解鎖的稱號').setRequired(true).addChoices(...playerTitleChoices))),
   new SlashCommandBuilder().setName('轉帳').setDescription('轉帳金幣給其他玩家（收取 2% 手續費）')
     .addUserOption(o=>o.setName('收款人').setDescription('選擇要收款的玩家').setRequired(true))
@@ -8108,7 +8176,7 @@ const commands = [
       {name:'🏚️ 闖空門（可指定玩家）',value:'burglary'},
       {name:'🏗️ 偷鋼筋去賣（30% 成功；失敗罰款 2,000）',value:'rebar'},
       {name:'⚡ 剪電線去賣（30% 成功；失敗罰款 2,000）',value:'wire'},
-      {name:'🏦 搶銀行（5% 成功，失敗關 8 分鐘）',value:'robbery'}))
+      {name:'🏦 搶銀行（基礎成功率依伺服器設定，失敗關 8 分鐘）',value:'robbery'}))
     .addUserOption(o=>o.setName('目標').setDescription('闖空門時可指定玩家；未指定則直接尋找無人住宅').setRequired(false)),
   new SlashCommandBuilder().setName('稱號設定').setDescription('管理員設定玩家資料卡稱號').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption(o=>o.setName('玩家').setDescription('目標玩家').setRequired(true))
@@ -9275,6 +9343,7 @@ async function handleInteraction(i) {
         db.prepare('DELETE FROM jail_training WHERE guild_id=? AND user_id=?').run(i.guildId,memberId);
         db.prepare('DELETE FROM jail_escape WHERE guild_id=? AND user_id=?').run(i.guildId,memberId);
       }
+      const campaignResults=heist.members.map(memberId=>({memberId,result:recordHeistCampaign(i.guildId,memberId,'team','failed')}));
       const failedBank=heistBanks[heist.bankId];
       const hot=heistIsHot(heist.bankId);
       const policePool=failedBank.sundayOnly
@@ -9295,6 +9364,7 @@ async function handleInteraction(i) {
         ? `共有 **${heist.informants.size} 名**秘密線人提供情報；每人獲得警方獎勵 **${fmt(TEAM_HEIST_INFORMANT_REWARD)}**，合計 **${fmt(informantTotal)}** 已入帳（身分保密）。`
         : '本次沒有線人。';
       const payload={...heistStagePayload(new EmbedBuilder().setColor(0xD94A4A).setTitle('🚔 警方成功阻止搶劫！').setDescription(`${policeReinforcements?'🚨 反擊驚動特勤隊，大批警力從四面包圍！':escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美死死咬住隊員的褲管並將人撲倒，整隊當場被逮捕。`:'警方掌握線報並封鎖所有出口，隊伍在最後關頭遭到包圍。'}\n${arrestText}\n\n金庫：${vault.name}（${heistVaultRewardLabel(vault)}）\n地圖：${map.name}\n逃跑載具：${vehicleName}（有效加成 +${effectiveVehicleBonus}%）\n警方人數：${heist.police.size}/8\n警方戰術：${heistPoliceTacticSummary(heist)}\n警方載具：${heistPoliceVehicleSummary(heist)}（壓制 -${combat.policeVehiclePressure}%）\n警方總壓力：-${combat.policePressure}%\n線人情報：${informantText}\n警方應對：${heist.policeStrategy==='counter'?'反擊警察':'專心逃跑'}\n逃脫事件：${escapeEvent.title}\n最終成功率：${finalChance}%\n劫匪體力消耗：${heist.robberStaminaCost}｜警察體力消耗：10\n警方獎勵：每人保底 ${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}，另平分目標獎池 ${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜彈藥消耗：${heist.ammoConsumed} 箱${policePayouts.length?`\n\n**警方實際入帳**\n${policePayouts.join('\n')}`:''}`),escapeImage),components:[]};
+      payload.embeds[0].setDescription(payload.embeds[0].data.description+'\n\n**週行動委託**\n'+heistCampaignTeamText(campaignResults));
       return publishLatestHeistResult(i,payload);
     }
     escapeImage='success';
@@ -9316,6 +9386,7 @@ async function handleInteraction(i) {
       const after=changeBalance(i.guildId,memberId,amount,deedReward?'hao_xinyi_deed':successBank.sundayOnly?'casino_vault_heist':'job',memberId,deedReward?'HAO 信義區地契變現均分':successBank.sundayOnly?'賭場中央寶庫搶劫收益':'團隊搶銀行收益');
       return `<@${memberId}>：${fmt(after-before)}`;
     });
+    const campaignResults=heist.members.map(memberId=>({memberId,result:recordHeistCampaign(i.guildId,memberId,'team','success')}));
     if(finalChance<=25) {
       for(const memberId of heist.members) incrementAchievementProgress(i.guildId,memberId,'perfectHeists');
     }
@@ -9332,6 +9403,7 @@ async function handleInteraction(i) {
       {name:'💨 逃脫事件',value:`${escapeEvent.title}\n${escapeEvent.text}`.slice(0,1024)}
     ));
     const payload={...heistStagePayload(new EmbedBuilder().setColor(0x35C46A).setTitle(deedReward?'📜 HAO 信義區地契得手！':isMuseumTarget?'🏛️ 中央美術館搶劫成功！':'💰 團隊搶銀行成功！').setDescription(`隊伍成功突破警方封鎖，載滿戰利品返回藏身處！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n\n目標：**${heistBanks[heist.bankId].name}**${hot?'\n🔥 今日大量入金獎池加倍！':''}\n${isMuseumTarget?'戰利品':'金庫'}：**${vault.name}**｜${heistVaultRewardLabel(vault)}\n地圖：**${map.name}**${deedReward?'（地契固定結算，不套用地圖倍率）':`｜收益 ×${map.rewardMultiplier}`}\n逃跑載具：**${vehicleName}**｜有效成功率 +${effectiveVehicleBonus}%\n藏身處：**有效成功率 +${effectiveHideoutBonus}%｜戰利品 +${deedReward?0:((hideoutLootBonus-1)*100).toFixed(0)}%**\n警方戰術：**${heistPoliceTacticSummary(heist)}**\n警方載具：**${heistPoliceVehicleSummary(heist)}**｜載具壓制 -${combat.policeVehiclePressure}%｜總壓力 -${combat.policePressure}%\n${deedReward?'方案倍率：不套用於地契固定結算':`方案收益倍率：×${schemeMultiplier}`}\n警方人數：${heist.police.size}/8\n${deedReward?'地契變現總額':isMuseumTarget?'館藏戰利品':'銀行戰利品'}：**${fmt(lootTotal)}**\n${deedReward?`均分人數：**${heist.members.length} 人**`:`每人團隊獎勵：**${fmt(teamHeistRewardPerMember(heist.members.length))}**`}\n總收益：**${fmt(total)}**\n最終成功率：${finalChance}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜彈藥消耗：${heist.ammoConsumed} 箱\n\n**成員實際入帳**\n${payouts.join('\n')}${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),escapeImage),components:[]};
+    payload.embeds[0].setDescription(payload.embeds[0].data.description+'\n\n**週行動委託**\n'+heistCampaignTeamText(campaignResults));
     const result=await publishLatestHeistResult(i,payload);
     await maybeLaunchHideoutRaid(i.channel,heist);
     return result;
@@ -10066,13 +10138,14 @@ async function handleInteraction(i) {
   if (!i.isChatInputCommand() || !i.guildId) return;
   const g=i.guildId, u=i.user.id;
   const hubRoutes={
-    玩家:{金庫:'金庫',資料:'個人資料',生涯:'賭城生涯',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',稱號:'稱號'},
+    玩家:{金庫:'金庫',資料:'個人資料',生涯:'賭城生涯',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',搶劫:'搶劫日誌',稱號:'稱號'},
     日常:{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'},
     補給:{商城:'商城',背包:'背包',購買:'購買',使用:'使用'},
     寵物:{商店:'寵物店',我的:'我的寵物'}
   };
   const hubRoute=hubRoutes[i.commandName];
   const routedCommand=hubRoute?hubRoute[i.options.getSubcommand()]||i.commandName:i.commandName;
+  if(routedCommand==='搶劫日誌') return i.reply({embeds:[heistCampaignEmbed(g,u)],ephemeral:true});
   try {
     if (routedCommand==='金庫') {
       const target=i.options.getUser('玩家') || i.user;
@@ -10836,6 +10909,8 @@ async function handleInteraction(i) {
           db.prepare('DELETE FROM jail_escape WHERE guild_id=? AND user_id=?').run(g,u);
           changeBalance(g,u,0,'jail',u,'搶銀行失敗，關進小黑屋 8 分鐘');
         }
+        const campaign=recordHeistCampaign(g,u,'solo',escaped?'success':'failed');
+        if(escaped) next=campaign.balanceAfter;
         await i.reply(heistScenePayload(new EmbedBuilder().setColor(0xE53935).setTitle('🚨 銀行警報響起！').setDescription(`你抓起鈔票衝出銀行……\n🚓 警車正在後方追趕！\n警方應對：**${policeStrategy==='counter'?'🔫 反擊警察':'🏃 專心逃跑'}**\n體力：${staminaAfter}/${staminaMax(g,u)}`),'chase'));
         const chaseFrames=[
           {color:0x1565C0,title:'🔵 警車逼近！',text:'🚓　　💨　　🏃💰'},
@@ -10859,11 +10934,13 @@ async function handleInteraction(i) {
             {name:'💨 逃脫事件',value:`${escapeEvent.title}\n${escapeEvent.text}`.slice(0,1024)}
           ));
           const payload=heistScenePayload(new EmbedBuilder().setColor(0x35C46A).setTitle('🏦 搶銀行成功！').setDescription(`你成功甩開追兵，實際帶回 **${fmt(robberyEarned)}**！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n金庫：${fmt(next)}${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),'success');
+          payload.embeds[0].setDescription(payload.embeds[0].data.description+heistCampaignResultText(campaign));
           return publishLatestHeistResult(i,payload);
         }
         if(escapeEvent.forceFail) incrementAchievementProgress(g,u,'pomeranianVictim');
         const failureScene=escapeEvent.scene||(escapeEvent.forceFail?'arrested':'surrounded');
         const payload=heistScenePayload(new EmbedBuilder().setColor(0x1F1F1F).setTitle('🚔 搶銀行失敗！').setDescription(`${escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美將你撲倒在地，警員立刻上前逮捕。`:'你沒有逃過追捕。'}\n你被關進 **迷子的小黑屋 8 分鐘**。\n期間不能進行任何遊戲或再次賺錢。`),failureScene);
+        payload.embeds[0].setDescription(payload.embeds[0].data.description+heistCampaignResultText(campaign));
         return publishLatestHeistResult(i,payload);
       }
       if(job==='rebar' || job==='wire') {

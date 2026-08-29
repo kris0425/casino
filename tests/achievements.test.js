@@ -92,7 +92,7 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   for(const name of removed) {
     assert.doesNotMatch(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${name}'\\)`),`舊指令 /${name} 仍在註冊`);
   }
-  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',生涯:'賭城生涯',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',稱號:'稱號'\}/);
+  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',生涯:'賭城生涯',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',搶劫:'搶劫日誌',稱號:'稱號'\}/);
   assert.match(source,/日常:\{領取:'每日',增益:'每日增益',體力:'體力',回體力:'每日回體力'\}/);
   assert.match(source,/補給:\{商城:'商城',背包:'背包',購買:'購買',使用:'使用'\}/);
   assert.match(source,/寵物:\{商店:'寵物店',我的:'我的寵物'\}/);
@@ -1174,6 +1174,27 @@ test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>
   assert.deepEqual(sent[0].files,payload.files);
 });
 
+test('搶劫每週行動委託以完成日累積並提供非連續階段獎勵',()=>{
+  for(const table of ['heist_campaign_days','heist_campaign_weeks']) assert.match(source,new RegExp('CREATE TABLE IF NOT EXISTS '+table));
+  const block=source.match(/const heistCampaignMilestones=\[[\s\S]+?function heistCampaignEmbed\(g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.ok(block,'缺少搶劫每週行動委託');
+  assert.match(block,/\{days:1,reward:2500\}/);
+  assert.match(block,/\{days:3,reward:7500\}/);
+  assert.match(block,/\{days:5,reward:20000\}/);
+  assert.match(block,/INSERT OR IGNORE INTO heist_campaign_days/);
+  assert.match(block,/BEGIN IMMEDIATE/);
+  assert.match(block,/changeBalanceUnlocked\(g,u,reward,'heist_campaign_reward'/);
+  assert.match(block,/不必連續，失敗也會保留進度/);
+  assert.match(source,/recordHeistCampaign\(g,u,'solo',escaped\?'success':'failed'\)/);
+  assert.match(source,/recordHeistCampaign\(i\.guildId,memberId,'team','failed'\)/);
+  assert.match(source,/recordHeistCampaign\(i\.guildId,memberId,'team','success'\)/);
+  const commandStart=source.indexOf('const commands = ['),commandEnd=source.indexOf('].map(c=>c.toJSON());',commandStart),commands=source.slice(commandStart,commandEnd);
+  assert.match(commands,/setName\('搶劫'\)\.setDescription\('查看每週行動委託/);
+  assert.match(source,/玩家:\{金庫:'金庫',資料:'個人資料',生涯:'賭城生涯',成就:'成就',造型:'個人造型',遊戲:'網頁遊戲',搶劫:'搶劫日誌',稱號:'稱號'\}/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-29-heist-weekly-briefing.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-08-29-heist-weekly-briefing');
+  assert.match(update.changes.join('\n'),/不必連續/);
+});
 test('機場整合交通事業並支援最多五個同時航班機位',()=>{
   assert.match(source,/flight_slots INTEGER NOT NULL DEFAULT 1/);
   assert.match(source,/const AIRLINE_MAX_FLIGHT_SLOTS=5/);
