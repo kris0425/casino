@@ -924,13 +924,13 @@ test('限時資產拍賣公告可由所有玩家直接公開出價',()=>{
   assert.match(source,/publishAssetAuctionAnnouncement\(result\.auction,'🔨/);
 });
 
-test('限時拍賣保留舊 20 款收藏並啟用霓虹邊境 6 款新資產',()=>{
+test('限時拍賣保留舊 20 款收藏並啟用 21 款當期資產',()=>{
   const definitionBlock=source.match(/const auctionLimitedVehicleDefinitions=\[[\s\S]+?\n\];/)?.[0]||'';
   const legacyDefinitionBlock=source.match(/const legacyAuctionLimitedVehicleDefinitions=\[[\s\S]+?\n\];/)?.[0]||'';
-  assert.equal((definitionBlock.match(/\{id:'/g)||[]).length,6);
+  assert.equal((definitionBlock.match(/\{id:'/g)||[]).length,21);
   assert.equal((legacyDefinitionBlock.match(/\{id:'/g)||[]).length,20);
   const imagePaths=[...definitionBlock.matchAll(/image:'([^']+)'/g)].map(match=>match[1]);
-  assert.equal(imagePaths.length,6);
+  assert.equal(imagePaths.length,21);
   for(const imagePath of imagePaths) assert.equal(existsSync(new URL(`../assets/${imagePath}`,import.meta.url)),true,`缺少競標載具圖片：${imagePath}`);
   assert.match(source,/const auctionLimitedVehicleIds=auctionLimitedVehicleDefinitions\.map\(vehicle=>vehicle\.id\)/);
   assert.match(source,/const auctionLimitedTruckIds=allAuctionLimitedVehicleDefinitions\.filter\(vehicle=>vehicle\.category==='卡車'\)/);
@@ -946,12 +946,19 @@ test('限時拍賣保留舊 20 款收藏並啟用霓虹邊境 6 款新資產',()
   assert.match(newUpdate.summary,/6 款/);
   assert.ok(newUpdate.changes.some(change=>change.includes('完整退回')));
   assert.deepEqual(newUpdate.channelNames,['賭場公告']);
+  const transportUpdate=JSON.parse(readFileSync(new URL('../updates/2026-09-01-transport-auction.json',import.meta.url),'utf8'));
+  assert.equal(transportUpdate.id,'2026-09-01-transport-auction');
+  assert.match(transportUpdate.summary,/15 款/);
+  assert.match(transportUpdate.changes.join('\n'),/5 款限時汽車/);
+  assert.match(transportUpdate.changes.join('\n'),/5 款限時船舶/);
+  assert.match(transportUpdate.changes.join('\n'),/5 款限時飛行器/);
+  assert.deepEqual(transportUpdate.channelNames,['賭場公告']);
 });
 
 test('舊批次限時拍賣會暫停、跨服退款且不影響既有收藏',()=>{
   const retirement=source.match(/function retireLegacyAssetAuctions\(now=Date\.now\(\)\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.match(retirement,/status='active'/);
-  assert.match(retirement,/!auctionLimitedVehicleIds\.includes\(auction\.asset_id\)/,'輪替池只保留本期 6 款新資產');
+  assert.match(retirement,/!auctionLimitedVehicleIds\.includes\(auction\.asset_id\)/,'輪替池只保留本期當期資產');
   assert.match(retirement,/'auction_legacy_refund'/);
   assert.match(retirement,/status='expired',settled_at=\?,closed_announced_at=\?/,'下架場次不應再發流標公告');
   assert.match(retirement,/superseded_at=\?/,'舊場次公告需標記撤下');
