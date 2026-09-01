@@ -924,14 +924,17 @@ test('限時資產拍賣公告可由所有玩家直接公開出價',()=>{
   assert.match(source,/publishAssetAuctionAnnouncement\(result\.auction,'🔨/);
 });
 
-test('限時拍賣保留舊 20 款收藏並啟用 21 款當期資產',()=>{
+test('限時拍賣保留舊 20 款收藏並啟用 36 款當期資產',()=>{
   const definitionBlock=source.match(/const auctionLimitedVehicleDefinitions=\[[\s\S]+?\n\];/)?.[0]||'';
   const legacyDefinitionBlock=source.match(/const legacyAuctionLimitedVehicleDefinitions=\[[\s\S]+?\n\];/)?.[0]||'';
-  assert.equal((definitionBlock.match(/\{id:'/g)||[]).length,21);
+  assert.equal((definitionBlock.match(/\{id:'/g)||[]).length,36);
   assert.equal((legacyDefinitionBlock.match(/\{id:'/g)||[]).length,20);
   const imagePaths=[...definitionBlock.matchAll(/image:'([^']+)'/g)].map(match=>match[1]);
-  assert.equal(imagePaths.length,21);
+  assert.equal(imagePaths.length,36);
   for(const imagePath of imagePaths) assert.equal(existsSync(new URL(`../assets/${imagePath}`,import.meta.url)),true,`缺少競標載具圖片：${imagePath}`);
+  const jpegAuctionImages=[...definitionBlock.matchAll(/image:'(auction\/transport\/jpeg\/[^']+\.jpg)'/g)].map(match=>match[1]);
+  assert.equal(jpegAuctionImages.length,15);
+  for(const imagePath of jpegAuctionImages) assert.equal(existsSync(new URL(`../assets/${imagePath}`,import.meta.url)),true,`缺少 JPEG 競標圖片：${imagePath}`);
   assert.match(source,/const auctionLimitedVehicleIds=auctionLimitedVehicleDefinitions\.map\(vehicle=>vehicle\.id\)/);
   assert.match(source,/const auctionLimitedTruckIds=allAuctionLimitedVehicleDefinitions\.filter\(vehicle=>vehicle\.category==='卡車'\)/);
   assert.match(source,/auctionOnly:true/);
@@ -953,6 +956,12 @@ test('限時拍賣保留舊 20 款收藏並啟用 21 款當期資產',()=>{
   assert.match(transportUpdate.changes.join('\n'),/5 款限時船舶/);
   assert.match(transportUpdate.changes.join('\n'),/5 款限時飛行器/);
   assert.deepEqual(transportUpdate.channelNames,['賭場公告']);
+  const wave2Update=JSON.parse(readFileSync(new URL('../updates/2026-09-01-transport-auction-wave-2.json',import.meta.url),'utf8'));
+  assert.equal(wave2Update.id,'2026-09-01-transport-auction-wave-2');
+  assert.equal(wave2Update.version,'2026.09.01.2');
+  assert.match(wave2Update.summary,/15 款/);
+  assert.match(wave2Update.changes.join('\n'),/皆為 JPEG/);
+  assert.deepEqual(wave2Update.channelNames,['賭場公告']);
 });
 
 test('舊批次限時拍賣會暫停、跨服退款且不影響既有收藏',()=>{

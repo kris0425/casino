@@ -1,0 +1,18 @@
+{
+  "id": "2026-09-01-transport-auction-wave-2",
+  "version": "2026.09.01.2",
+  "date": "2026-09-01",
+  "channelNames": [
+    "賭場公告"
+  ],
+  "title": "限時資產拍賣｜交通工具典藏第二彈",
+  "summary": "維持原本拍賣玩法，再新增 15 款交通工具，全部採用 JPEG 圖片。",
+  "changes": [
+    "🚙 新增 5 款原創車型：Duskline GT、Basalt 6x6、Lumen Estate、Noir Regent 與 Alpine Comet。",
+    "🛳️ 新增 5 款船舶：Azure 雙體巡航艇、Coral 珊瑚灣渡輪、Golden River 黃金駁船、Jade Expedition 探險船與 Obsidian 玄武破冰艦。",
+    "✈️ 新增 5 款客機：Aurora Polar 787、Crimson Racing 777、Galaxy Whale A380、Jade Dragon A330 與 Koi Ocean 787。",
+    "🖼️ 15 張新增圖片皆為 JPEG，位於 assets/auction/transport/jpeg/，與既有 PNG 素材分離。",
+    "🔨 單一活躍場次、12 小時結標、最低加價 5%／100,000 金幣、最後 5 分鐘延時與託管退款規則維持不變。"
+  ],
+  "note": "本次只擴充拍賣輪替池，不會移除或重設玩家既有資產。"
+}
