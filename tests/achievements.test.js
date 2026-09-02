@@ -2160,6 +2160,32 @@ test('異界限定特殊寵物各自具備不同主題與橫向形象圖',()=>{
   assert.equal(update.id,'2026-08-29-special-theme-pets');
   for(const name of ['極光雪原犬','霓虹駭客貓','琉璃深海鸚']) assert.match(update.changes.join('\n'),new RegExp(name));
 });
+test('四隻尊榮典藏寵物具備高價專屬能力並實際套用到事業收益',()=>{
+  const pets=[
+    ['royal_vault_doberman','皇家金庫杜賓｜赫利俄斯','dog',18800000,'pets/royal_vault_doberman_helios.png','heist:9,stamina:25','皇家金庫'],
+    ['diamond_panther','鑽冕黑豹｜薇塔','cat',22200000,'pets/diamond_panther_vita.png','casino:0.11,work:0.09','鑽石貴賓廳'],
+    ['skyway_albatross','天穹航路信天翁｜奧德賽','bird',24800000,'pets/skyway_albatross_odyssey.png','transport:0.12,stamina:18','交通事業'],
+    ['jade_manor_fox','翡翠莊園狐｜玉衡','dog',28800000,'pets/jade_manor_fox_yuheng.png','property:0.12,discount:0.1','翡翠莊園']
+  ];
+  for(const [petId,name,petType,price,imagePath,bonuses,theme] of pets) {
+    const block=source.match(new RegExp(`${petId}:\\{[^\\n]+`))?.[0]||'';
+    assert.match(block,new RegExp(`name:'${name}'`));
+    assert.match(block,new RegExp(`price:${price}`));
+    assert.match(block,new RegExp(`petType:'${petType}'`));
+    assert.match(block,/rarity:'尊榮典藏'/);
+    assert.match(block,new RegExp(`bonuses:\\{${bonuses.replace(/[.]/g,'\\.')}\\}`));
+    assert.match(block,new RegExp(`image:'${imagePath.replace(/[/.]/g,'\\$&')}'`));
+    assert.match(block,new RegExp(theme));
+    const image=readFileSync(new URL(`../assets/${imagePath}`,import.meta.url));
+    assert.equal(image.subarray(1,4).toString(),'PNG',`${petId} 缺少 PNG 形象圖`);
+    assert.ok(image.readUInt32BE(16)>image.readUInt32BE(20),`${petId} 形象圖必須為橫向`);
+  }
+  assert.match(source,/dailyMultiplier\*demandMultiplier\*\(1\+petBonus\(g,u,'transport'\)\)/);
+  assert.match(source,/event\.multiplier\*\(1\+petBonus\(g,u,'property'\)\)/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-02-premium-pets.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-02-premium-pets');
+  for(const name of ['皇家金庫杜賓','鑽冕黑豹','天穹航路信天翁','翡翠莊園狐']) assert.match(update.changes.join('\\n'),new RegExp(name));
+});
 test('賭城生涯提供每日每週合約、資產配置與五區聲望',()=>{
   for(const table of ['casino_career_profiles','casino_district_reputation','casino_career_contracts']) {
     assert.match(source,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));

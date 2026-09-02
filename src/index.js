@@ -135,6 +135,10 @@ const petCatalog={
   aurora_samoyed:{name:'極光雪原犬｜北辰',emoji:'🐕‍🦺',price:5550000,image:'pets/aurora_samoyed_northstar.png',petType:'dog',rarity:'異界限定',hungerMultiplier:1.5,bonuses:{heist:6,stamina:12},bonusText:'搶劫成功率最高 +6%｜每日體力上限最高 +12',description:'披著極地探險披肩的雪原犬，能在極光與暴雪間嗅出安全撤退路線。每日心情消耗為一般犬類的 1.5 倍，維持好心情時會同時強化搶劫直覺與體力。'},
   neon_hacker_cat:{name:'霓虹駭客貓｜零號',emoji:'🐈‍⬛',price:6660000,image:'pets/neon_hacker_cat_zero.png',petType:'cat',rarity:'異界限定',hungerMultiplier:1.6,bonuses:{casino:0.07,work:0.06},bonusText:'賭場獲勝派彩最高 +7%｜工作收入最高 +6%',description:'潛伏在霓虹賭城資料網中的黑貓，青藍雙眼能破解牌桌節奏並找出高報酬差事。每日心情消耗為一般貓類的 1.6 倍。'},
   abyssal_glass_macaw:{name:'琉璃深海鸚｜潮汐',emoji:'🦜',price:7770000,image:'pets/abyssal_glass_macaw_tide.png',petType:'bird',rarity:'異界限定',hungerMultiplier:1.7,bonuses:{stamina:18,discount:0.08},bonusText:'每日體力上限最高 +18｜體力商城折扣最高 8%',description:'羽梢如琉璃般通透的深海金剛鸚鵡，會在珊瑚聖堂中替主人尋回珍稀補給。每日心情消耗為一般鳥類的 1.7 倍。'},
+  royal_vault_doberman:{name:'皇家金庫杜賓｜赫利俄斯',emoji:'🐕‍🦺',price:18800000,image:'pets/royal_vault_doberman_helios.png',petType:'dog',rarity:'尊榮典藏',hungerMultiplier:2,bonuses:{heist:9,stamina:25},bonusText:'搶劫成功率最高 +9%｜每日體力上限最高 +25',description:'鎮守皇家金庫的黑金杜賓，能在警報與暗門之間辨識最安全的撤離時機。尊榮守衛需要細緻照料，每日心情消耗為一般犬類的 2 倍。'},
+  diamond_panther:{name:'鑽冕黑豹｜薇塔',emoji:'🐈‍⬛',price:22200000,image:'pets/diamond_panther_vita.png',petType:'cat',rarity:'尊榮典藏',hungerMultiplier:2.1,bonuses:{casino:0.11,work:0.09},bonusText:'賭場獲勝派彩最高 +11%｜工作收入最高 +9%',description:'徘徊於鑽石貴賓廳的黑豹，能精準感知牌局節奏與高價委託。每日心情消耗為一般貓類的 2.1 倍，心情不足時不提供任何加成。'},
+  skyway_albatross:{name:'天穹航路信天翁｜奧德賽',emoji:'🕊️',price:24800000,image:'pets/skyway_albatross_odyssey.png',petType:'bird',rarity:'尊榮典藏',hungerMultiplier:2,bonuses:{transport:0.12,stamina:18},bonusText:'五類交通營收最高 +12%｜每日體力上限最高 +18',description:'跨越雲海與航路星圖的導航信天翁，會替所有交通事業挑選最有利的貨流與客流。每日心情消耗為一般鳥類的 2 倍。'},
+  jade_manor_fox:{name:'翡翠莊園狐｜玉衡',emoji:'🦊',price:28800000,image:'pets/jade_manor_fox_yuheng.png',petType:'dog',rarity:'尊榮典藏',hungerMultiplier:2.2,bonuses:{property:0.12,discount:0.1},bonusText:'房地產營收最高 +12%｜體力商城折扣最高 10%',description:'棲息於翡翠莊園的銀狐，擅長辨識租客需求與稀有補給時機。每日心情消耗為一般犬類的 2.2 倍，必須維持同行與良好心情。'},
   infernal_cerberus:{name:'冥獄三頭犬｜刻耳柏洛斯',emoji:'🐺',price:6660000,image:'pets/infernal_cerberus.png',petType:'dog',rarity:'地獄神話',hungerMultiplier:2,bonuses:{heist:7,stamina:15},bonusText:'搶劫成功率最高 +7%｜每日體力上限最高 +15',description:'鎮守黑曜金庫的三首獄犬，能同時監視三條撤退路線。食量是一般犬類的 2 倍，保持好心情時會提高搶劫成功率與每日體力上限。'},
   lava_hellcat:{name:'熔岩獄貓｜燼瞳',emoji:'🐈‍⬛',price:4440000,image:'pets/lava_hellcat.png',petType:'cat',rarity:'地獄神話',hungerMultiplier:1.6,bonuses:{casino:0.06,work:0.07},bonusText:'賭場獲勝派彩最高 +6%｜工作收入最高 +7%',description:'從熔岩貴賓廳誕生的黑曜獄貓，金色雙眼能看穿籌碼與商機。每日心情消耗為一般貓的 1.6 倍，同行時可同時強化派彩與工作收入。'},
   underworld_phoenix:{name:'冥焰不死鳥｜幽藍',emoji:'🦅',price:8880000,image:'pets/underworld_phoenix.png',petType:'bird',rarity:'地獄神話',hungerMultiplier:1.8,bonuses:{stamina:20,discount:0.07},bonusText:'每日體力上限最高 +20｜體力商城折扣最高 7%',description:'棲息在地獄輪盤祭壇上的冥焰不死鳥，幽藍火羽能替主人恢復精神並尋找珍稀補給。每日心情消耗為一般鳥類的 1.8 倍。'}
@@ -3491,7 +3495,7 @@ function startAirlineFlight(g,u,{skipRandomEvent=false,resolvedEvent=null}={}) {
   const upkeepQuote=transportUpkeepQuote(g,u,'airline',company),requiredFunds=operatingCost+upkeepQuote.totalDue;
   if(balance(g,u)<requiredFunds) throw new Error(`營運資金不足，需要 ${fmt(requiredFunds)}（含本次到期維持費 ${fmt(upkeepQuote.totalDue)}）`);
   const demandMultiplier=0.90+Math.random()*0.21;
-  const baseGrossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
+  const baseGrossRevenue=Math.floor(route.baseRevenue*airport.airlineMultiplier*airlinerRevenueMultiplier(company.aircraft_id)*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier*(1+petBonus(g,u,'transport')));
   const grossRevenue=Math.floor(baseGrossRevenue*(event?.revenueMultiplier||1));
   const startedAt=Date.now(),completesAt=startedAt+Math.floor(route.durationMs*(event?.durationMultiplier||1));
   const flightSlot=Array.from({length:slots},(_,index)=>index+1).find(slot=>!flights.some(flight=>flight.flight_slot===slot));
@@ -3929,7 +3933,7 @@ function startTransportBusinessOperation(g,u,businessType,{skipRandomEvent=false
   const coachMultiplier=coachAsset?1+coachAsset.coachRevenueBonus:1;
   const shipMultiplier=shipAsset?1+shipAsset.shipRevenueBonus:1;
   const demandMultiplier=0.90+Math.random()*0.21;
-  const baseGrossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*coachMultiplier*shipMultiplier*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier);
+  const baseGrossRevenue=Math.floor(route.baseRevenue*station.transportMultiplier*trainMultiplier*truckMultiplier*coachMultiplier*shipMultiplier*enterpriseRevenueMultiplier(company)*dailyMultiplier*demandMultiplier*(1+petBonus(g,u,'transport')));
   const grossRevenue=Math.floor(baseGrossRevenue*(event?.revenueMultiplier||1));
   const startedAt=Date.now(),completesAt=startedAt+Math.floor(route.durationMs*(event?.durationMultiplier||1));
   let upkeep;
@@ -4128,7 +4132,7 @@ function startPropertyOperation(g,u,propertyId) {
   const condition=business.maintenance_day!==upkeep.today?100:Number(business.condition||100);
   const conditionMultiplier=0.75+Math.max(40,Math.min(100,condition))/400;
   const levelMultiplier=1+(Math.max(1,Number(business.level||1))-1)*0.08;
-  const grossRevenue=Math.floor(definition.baseRevenue*levelMultiplier*conditionMultiplier*event.multiplier);
+  const grossRevenue=Math.floor(definition.baseRevenue*levelMultiplier*conditionMultiplier*event.multiplier*(1+petBonus(g,u,'property')));
   const startedAt=Date.now(),completesAt=startedAt+definition.durationMs,conditionAfter=Math.max(40,condition-(6+Math.floor(Math.random()*7)));
   db.exec('BEGIN IMMEDIATE');
   try {
