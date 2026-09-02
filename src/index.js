@@ -56,6 +56,7 @@ const ALL_IN_HERO_PAYOUT_MULTIPLIER = 2;
 const K_CAR_WASH_BASE_REWARD = 12_000;
 const K_CAR_WASH_SCRATCH_CHANCE = 0.10;
 const K_CAR_WASH_SCRATCH_COMPENSATION = 20_000;
+const GAMBLER_ROLE_NAME=String(process.env.GAMBLER_ROLE_NAME||'🎰｜賭徒').trim().slice(0,100)||'🎰｜賭徒';
 const BURGLARY_BASE_SUCCESS_RATE = 0.15;
 const BURGLARY_MEMBER_SUCCESS_BONUS = 0.05;
 const BURGLARY_MAX_SUCCESS_RATE = 0.30;
@@ -8296,6 +8297,46 @@ if(process.env.COMMAND_BUILD_ONLY==='1') {
 const rest = new REST({version:'10'}).setToken(TOKEN);
 await rest.put(GUILD_ID ? Routes.applicationGuildCommands(CLIENT_ID,GUILD_ID) : Routes.applicationCommands(CLIENT_ID), {body:commands});
 const client = new Client({intents:[GatewayIntentBits.Guilds]});
+const gamblerRoleCache=new Map();
+async function ensureGamblerRole(guild) {
+  const cachedId=gamblerRoleCache.get(guild.id),cachedRole=cachedId&&guild.roles.cache.get(cachedId);
+  if(cachedRole) return cachedRole;
+  const me=guild.members.me||await guild.members.fetchMe();
+  if(!me.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('機器人缺少「管理身分組」權限');
+  let role=guild.roles.cache.find(candidate=>candidate.name===GAMBLER_ROLE_NAME);
+  if(!role) role=await guild.roles.create({name:GAMBLER_ROLE_NAME,reason:'Casino player role'});
+  if(!role.editable) throw new Error('「'+GAMBLER_ROLE_NAME+'」的階級必須低於機器人');
+  gamblerRoleCache.set(guild.id,role.id);
+  return role;
+}
+async function grantGamblerRole(guild,userId,member=null) {
+  if(!guild||!userId) return false;
+  const role=await ensureGamblerRole(guild);
+  const target=member&&typeof member.roles?.add==='function'?member:await guild.members.fetch(userId).catch(()=>null);
+  if(!target||target.user?.bot||target.roles.cache.has(role.id)) return false;
+  await target.roles.add(role,'Casino player status');
+  return true;
+}
+async function grantGamblerRoleForInteraction(i) {
+  return grantGamblerRole(i.guild,i.user.id,i.member);
+}
+async function syncGamblerRoles() {
+  for(const guild of client.guilds.cache.values()) {
+    const rows=db.prepare('SELECT DISTINCT user_id FROM wallets WHERE guild_id=?').all(guild.id);
+    if(!rows.length) continue;
+    try { await ensureGamblerRole(guild); }
+    catch(error) {
+      console.error('賭徒身分組同步無法啟動 guild='+guild.id+': '+error.message);
+      continue;
+    }
+    let granted=0;
+    for(const row of rows) {
+      try { if(await grantGamblerRole(guild,row.user_id)) granted++; }
+      catch(error) { console.error('賭徒身分組補發失敗 guild='+guild.id+' user='+row.user_id+': '+error.message); }
+    }
+    console.log('賭徒身分組同步完成 guild='+guild.id+' players='+rows.length+' granted='+granted);
+  }
+}
 async function announceHeistSuccess(guildId,embed) {
   const setting=db.prepare('SELECT channel_id FROM heist_announcement_channels WHERE guild_id=?').get(guildId);
   if(!setting) return false;
@@ -11543,14 +11584,19 @@ async function handleInteraction(i) {
     return animatedGame?i.editReply(finalPayload):i.reply(finalPayload);
   } catch(e) { const msg=`⚠️ ${e.message}`; if(i.replied||i.deferred) await i.followUp({content:msg,ephemeral:true}); else await i.reply({content:msg,ephemeral:true}); }
 }
-client.on('interactionCreate',i=>handleInteraction(i).catch(async error=>{
-  console.error('未處理的 Discord 互動錯誤 type='+i.type+' id='+(i.customId||i.commandName||'unknown')+': '+(error.stack||error.message));
-  if(!i.isRepliable?.()) return;
-  try {
-    if(i.deferred||i.replied) await i.followUp({content:'⚠️ 操作暫時失敗，請重新開啟面板後再試。',ephemeral:true});
-    else await i.reply({content:'⚠️ 操作暫時失敗，請再試一次。',ephemeral:true});
-  } catch(replyError) { console.error('互動錯誤備援回覆失敗: '+replyError.message); }
-}));
+client.on('interactionCreate',i=>{
+  if(i.inGuild()&&i.isChatInputCommand()&&!i.user.bot) {
+    grantGamblerRoleForInteraction(i).catch(error=>console.error('賭徒身分組自動補發失敗 guild='+i.guildId+' user='+i.user.id+': '+error.message));
+  }
+  handleInteraction(i).catch(async error=>{
+    console.error('未處理的 Discord 互動錯誤 type='+i.type+' id='+(i.customId||i.commandName||'unknown')+': '+(error.stack||error.message));
+    if(!i.isRepliable?.()) return;
+    try {
+      if(i.deferred||i.replied) await i.followUp({content:'⚠️ 操作暫時失敗，請重新開啟面板後再試。',ephemeral:true});
+      else await i.reply({content:'⚠️ 操作暫時失敗，請再試一次。',ephemeral:true});
+    } catch(replyError) { console.error('互動錯誤備援回覆失敗: '+replyError.message); }
+  });
+});
 let lastBankAnnouncement='';
 const sundayVaultAnnouncementHours=new Set([12,14,16,18,20,22]);
 function taipeiClockParts() {
@@ -11632,6 +11678,7 @@ async function announceLuckyWheelGrandPrize() {
 }
 client.once('clientReady',()=>{
   console.log(`已登入：${client.user.tag}`);
+  syncGamblerRoles().catch(error=>console.error('啟動賭徒身分組同步失敗：'+error.message));
   setInterval(announceTomorrowBank,60000);
   setInterval(announceSundayCasinoVault,60000);
   setInterval(()=>announceLuckyWheelGrandPrize().catch(error=>console.error(`幸運輪盤每日大獎排程失敗：${error.message}`)),60000);

@@ -2293,3 +2293,19 @@ test('新增五種社區合法工作並套用既有次數與收益規則',()=>{
   assert.equal(update.channelNames[0],'賭場公告');
   assert.match(update.changes.join('\n'),/幫寵物洗澡/);
 });
+
+test('賭徒身分組會補發既有玩家並自動授予新互動玩家',()=>{
+  assert.match(source,/const GAMBLER_ROLE_NAME=String\(process\.env\.GAMBLER_ROLE_NAME\|\|'🎰｜賭徒'\)/);
+  assert.match(source,/async function ensureGamblerRole\(guild\)/);
+  assert.match(source,/guild\.roles\.create\(\{name:GAMBLER_ROLE_NAME/);
+  assert.match(source,/機器人缺少「管理身分組」權限/);
+  const sync=source.match(/async function syncGamblerRoles\(\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(sync,/SELECT DISTINCT user_id FROM wallets WHERE guild_id=\?/);
+  assert.match(sync,/grantGamblerRole\(guild,row\.user_id\)/);
+  assert.match(source,/i\.inGuild\(\)&&i\.isChatInputCommand\(\)&&!i\.user\.bot/);
+  assert.match(source,/syncGamblerRoles\(\)\.catch/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-02-gambler-role.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-02-gambler-role');
+  assert.equal(update.channelNames[0],'賭場公告');
+  assert.match(update.changes.join('\n'),/補發賭徒身分組/);
+});
