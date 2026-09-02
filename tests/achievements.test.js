@@ -1175,7 +1175,7 @@ test('搶劫最終結果在互動 Webhook 失效時改用頻道備援',async()=>
   assert.match(block,/return channel\.send\(\{/);
   assert.match(block,/搶劫已完成，以下為本次最終結果/);
   assert.doesNotMatch(block,/changeBalance|INSERT INTO jail|UPDATE wallets/);
-  assert.match(source,/if\(escaped\) \{[\s\S]+changeBalance\(g,u,SOLO_HEIST_REWARD,'job'/);
+  assert.match(source,/if\(escaped\) \{[\s\S]+changeBalance\(g,u,Math\.floor\(SOLO_HEIST_REWARD\*heistHeatLootMultiplier\(heatLevel\)\),'job'/);
   assert.match(source,/return publishLatestHeistResult\(i,payload\)/);
 
   class FakeEmbedBuilder {
@@ -2254,4 +2254,23 @@ test('幸運輪盤採三日大獎、每日五次免費與二十五次上限',()=
   assert.match(wheelUpdate.changes.join('\n'),/前 5 次免費/);
   assert.match(wheelUpdate.changes.join('\n'),/最多轉動 25 次/);
   assert.match(wheelUpdate.changes.join('\n'),/每天自動推送一次/);
+});
+
+test('搶劫加入不完整情報、加碼搜刮與持續熱度',()=>{
+  for(const constant of ['HEIST_HEAT_MAX','HEIST_HEAT_CHANCE_PENALTY','HEIST_HEAT_LOOT_BONUS','HEIST_PUSH_LOOT_MULTIPLIER','HEIST_PUSH_CHANCE_PENALTY']) assert.match(source,new RegExp(`const ${constant} = Number\\(process\\.env\\.${constant}`));
+  assert.match(source,/CREATE TABLE IF NOT EXISTS heist_heat/);
+  assert.match(source,/function heistHeat\(g,u\)/);
+  assert.match(source,/function recordHeistHeat\(g,u,outcome,lootChoice='safe'\)/);
+  assert.match(source,/const heistHeatLootMultiplier=heat=>/);
+  assert.ok(source.includes('heist_scout:${token}:vault'));
+  assert.ok(source.includes('heist_scout:${token}:police'));
+  assert.match(source,/if\(heist\.scoutFocus\)/);
+  assert.ok(source.includes('heist_loot:${token}:safe'));
+  assert.ok(source.includes('heist_loot:${token}:push'));
+  assert.match(source,/heist\.lootChoice==='push'\?HEIST_PUSH_LOOT_MULTIPLIER:1/);
+  assert.match(source,/heatLevel\*HEIST_HEAT_CHANCE_PENALTY/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-02-heist-risk-decisions.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-02-heist-risk-decisions');
+  assert.match(update.changes.join('\n'),/加碼搜刮/);
+  assert.match(update.changes.join('\n'),/搶劫熱度/);
 });
