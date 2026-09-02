@@ -44,6 +44,7 @@ const HEIST_PUSH_LOOT_MULTIPLIER = Number(process.env.HEIST_PUSH_LOOT_MULTIPLIER
 const HEIST_PUSH_CHANCE_PENALTY = Number(process.env.HEIST_PUSH_CHANCE_PENALTY || 6);
 const TEAM_HEIST_POLICE_CONFRONT_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_CONFRONT_PRESSURE || 2);
 const TEAM_HEIST_POLICE_REINFORCE_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_REINFORCE_PRESSURE || 3);
+const SOLO_HEIST_DEFAULT_BASE_CHANCE = Number(process.env.SOLO_HEIST_DEFAULT_BASE_CHANCE || 35);
 const ACTIVITY_PUBLIC_URL = String(process.env.ACTIVITY_PUBLIC_URL || '').replace(/\/$/,'');
 const ACTIVITY_API_PORT = Number(process.env.ACTIVITY_API_PORT || 8787);
 const ACTIVITY_SIGNING_SECRET = process.env.ACTIVITY_SIGNING_SECRET || '';
@@ -6167,7 +6168,7 @@ function heistCampaignEmbed(g,u) {
   ).setFooter({text:'使用 /賺錢 工作:搶銀行 或 /團隊搶銀行 完成當日行動'});
 }
 function soloHeistBaseChance(guildId) {
-  return db.prepare('SELECT base_chance FROM solo_heist_settings WHERE guild_id=?').get(guildId)?.base_chance??35;
+  return db.prepare('SELECT base_chance FROM solo_heist_settings WHERE guild_id=?').get(guildId)?.base_chance??SOLO_HEIST_DEFAULT_BASE_CHANCE;
 }
 const weeklyWorkMultiplier=()=>taipeiWeekday()===2?2:1;
 function heistHeat(g,u) {

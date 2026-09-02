@@ -1124,8 +1124,9 @@ test('團隊搶劫降低警方壓制並提高合作逃脫率',()=>{
 });
 
 test('搶劫難易度下調並保留週日寶庫風險上限',()=>{
+  assert.match(source,/const SOLO_HEIST_DEFAULT_BASE_CHANCE = Number\(process\.env\.SOLO_HEIST_DEFAULT_BASE_CHANCE \|\| 35\)/);
   assert.match(source,/base_chance INTEGER NOT NULL DEFAULT 35/);
-  assert.match(source,/\?\.base_chance\?\?35/);
+  assert.match(source,/\?\.base_chance\?\?SOLO_HEIST_DEFAULT_BASE_CHANCE/);
   const eventBlock=source.match(/function rollEscapeEvent\(context='heist'\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.match(eventBlock,/if\(roll<0\.04\).*police_dog/);
   assert.match(eventBlock,/if\(roll<0\.24\).*roadblock/);
