@@ -8254,6 +8254,11 @@ const commands = [
       {name:'🚕 開計程車（+750）',value:'taxi'},
       {name:'🛵 送外送（+650）',value:'delivery'},
       {name:'📸 幫 Hao 拍女僕寫真（+1,200）',value:'maid_photos'},
+      {name:'🗑️ 路邊撿垃圾（+900）',value:'street_cleanup'},
+      {name:'🛁 幫寵物洗澡（+1,500）',value:'pet_bath'},
+      {name:'🌿 公園園藝（+1,100）',value:'park_gardening'},
+      {name:'🏮 夜市收攤（+1,300）',value:'night_market_cleanup'},
+      {name:'🛒 社區代購（+1,400）',value:'grocery_errand'},
       {name:'🧽 幫 K 佬洗車（+12,000｜10% 刮傷賠 20,000）',value:'k_car_wash'},
       {name:'📦 運輸神秘粉末（非法工作）',value:'mystery_powder'},
       {name:'🏚️ 闖空門（可指定玩家）',value:'burglary'},
@@ -10990,7 +10995,7 @@ async function handleInteraction(i) {
       const hospitalized=hospitalRemaining(g,u);
       if(hospitalized) throw new Error(`你正在醫院休養，還有 ${jailText(hospitalized)} 才能行動`);
       const job=i.options.getString('工作',true);
-      if(!['dishes','hao','trash','move_bricks','clean_jail','taxi','delivery','maid_photos','k_car_wash','mystery_powder','burglary','rebar','wire','robbery'].includes(job)) throw new Error('未知的工作');
+      if(!['dishes','hao','trash','move_bricks','clean_jail','taxi','delivery','maid_photos','street_cleanup','pet_bath','park_gardening','night_market_cleanup','grocery_errand','k_car_wash','mystery_powder','burglary','rebar','wire','robbery'].includes(job)) throw new Error('未知的工作');
       if((job==='rebar'||job==='wire') && balance(g,u)<2000) throw new Error(`${job==='wire'?'剪電線':'偷鋼筋'}失敗可能被罰 ${fmt(2000)}，請先準備足夠金幣`);
       if(job==='burglary') {
         const target=i.options.getUser('目標');
@@ -11002,7 +11007,7 @@ async function handleInteraction(i) {
         setTimeout(()=>{if(burglaryLobbies.get(token)===lobby) burglaryLobbies.delete(token);},5*60*1000);
         return i.reply({embeds:[burglaryLobbyEmbed(lobby)],components:[burglaryLobbyRow(token)]});
       }
-      const legalJob=['dishes','hao','trash','move_bricks','clean_jail','taxi','delivery','maid_photos','k_car_wash'].includes(job);
+      const legalJob=['dishes','hao','trash','move_bricks','clean_jail','taxi','delivery','maid_photos','street_cleanup','pet_bath','park_gardening','night_market_cleanup','grocery_errand','k_car_wash'].includes(job);
       if(legalJob && legalWorkCount(g,u)>=5) throw new Error('今天的合法打工次數已達 5 次，請明天再來');
       const staminaAfter=consumeStamina(g,u,10);
       scheduleRandomEvent(i,g,u);
@@ -11155,6 +11160,11 @@ async function handleInteraction(i) {
         taxi:{amount:750,title:'🚕 開計程車',message:'你安全載完一整輪客人，還收到了一筆不錯的小費！'},
         delivery:{amount:650,title:'🛵 送外送',message:'你趕在餐點冷掉前送達，顧客給了五星好評！'},
         maid_photos:{amount:1200,title:'📸 幫 Hao 拍女僕寫真',message:'你替 Hao 完成一組女僕寫真，成品意外地大受好評！'},
+        street_cleanup:{amount:900,title:'🗑️ 路邊撿垃圾',message:'你把街角與人行道整理得乾乾淨淨，居民都向你道謝！'},
+        pet_bath:{amount:1500,title:'🛁 幫寵物洗澡',message:'你替社區毛孩洗香香，牠們搖著尾巴送你離開！'},
+        park_gardening:{amount:1100,title:'🌿 公園園藝',message:'你修剪花草、澆灌花圃，公園重新有了精神！'},
+        night_market_cleanup:{amount:1300,title:'🏮 夜市收攤',message:'你俐落收好攤位與桌椅，老闆多塞了一份宵夜當謝禮！'},
+        grocery_errand:{amount:1400,title:'🛒 社區代購',message:'你準時把採買送到鄰居手上，獲得了實在的跑腿費！'},
         k_car_wash:{amount:K_CAR_WASH_BASE_REWARD,title:'🧽 幫 K 佬洗車',message:'你幫 K 佬把豪車洗得閃閃發亮！'}
       };
       const selected=jobs[job];

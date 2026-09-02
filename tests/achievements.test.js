@@ -2274,3 +2274,22 @@ test('搶劫加入不完整情報、加碼搜刮與持續熱度',()=>{
   assert.match(update.changes.join('\n'),/加碼搜刮/);
   assert.match(update.changes.join('\n'),/搶劫熱度/);
 });
+
+test('新增五種社區合法工作並套用既有次數與收益規則',()=>{
+  for(const [id,label,amount] of [
+    ['street_cleanup','路邊撿垃圾',900],
+    ['pet_bath','幫寵物洗澡',1500],
+    ['park_gardening','公園園藝',1100],
+    ['night_market_cleanup','夜市收攤',1300],
+    ['grocery_errand','社區代購',1400]
+  ]) {
+    assert.match(source,new RegExp(`value:'${id}'`));
+    assert.match(source,new RegExp(`${id}:\\{amount:${amount},title:'[^']*${label}'`));
+  }
+  const legalJobs=source.match(/const legalJob=\[[^\]]+\]\.includes\(job\);/)?.[0]||'';
+  for(const id of ['street_cleanup','pet_bath','park_gardening','night_market_cleanup','grocery_errand']) assert.match(legalJobs,new RegExp(`'${id}'`));
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-02-community-legal-jobs.json',import.meta.url),'utf8'));
+  assert.equal(update.version,'2026.09.02.4');
+  assert.equal(update.channelNames[0],'賭場公告');
+  assert.match(update.changes.join('\n'),/幫寵物洗澡/);
+});
