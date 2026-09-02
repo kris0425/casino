@@ -33,11 +33,12 @@ const TEAM_HEIST_MEMBER_REWARD = Number(process.env.TEAM_HEIST_MEMBER_REWARD || 
 const TEAM_HEIST_TEAMMATE_BONUS = Number(process.env.TEAM_HEIST_TEAMMATE_BONUS || 5000);
 const TEAM_HEIST_POLICE_BASE_REWARD = Number(process.env.TEAM_HEIST_POLICE_BASE_REWARD || 30000);
 const TEAM_HEIST_POLICE_POOL_RATE = Number(process.env.TEAM_HEIST_POLICE_POOL_RATE || 0.30);
-const TEAM_HEIST_MEMBER_CHANCE_BONUS = Number(process.env.TEAM_HEIST_MEMBER_CHANCE_BONUS || 8);
-const TEAM_HEIST_SUCCESS_RATE_CAP = Number(process.env.TEAM_HEIST_SUCCESS_RATE_CAP || 55);
-const TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP = Number(process.env.TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP || 22);
-const TEAM_HEIST_POLICE_CONFRONT_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_CONFRONT_PRESSURE || 3);
-const TEAM_HEIST_POLICE_REINFORCE_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_REINFORCE_PRESSURE || 4);
+const TEAM_HEIST_MEMBER_CHANCE_BONUS = Number(process.env.TEAM_HEIST_MEMBER_CHANCE_BONUS || 10);
+const TEAM_HEIST_SUCCESS_RATE_CAP = Number(process.env.TEAM_HEIST_SUCCESS_RATE_CAP || 65);
+const TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP = Number(process.env.TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP || 18);
+const TEAM_HEIST_POLICE_MEMBER_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_MEMBER_PRESSURE || 2);
+const TEAM_HEIST_POLICE_CONFRONT_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_CONFRONT_PRESSURE || 2);
+const TEAM_HEIST_POLICE_REINFORCE_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_REINFORCE_PRESSURE || 3);
 const ACTIVITY_PUBLIC_URL = String(process.env.ACTIVITY_PUBLIC_URL || '').replace(/\/$/,'');
 const ACTIVITY_API_PORT = Number(process.env.ACTIVITY_API_PORT || 8787);
 const ACTIVITY_SIGNING_SECRET = process.env.ACTIVITY_SIGNING_SECRET || '';
@@ -570,7 +571,7 @@ db.exec(`
     PRIMARY KEY (guild_id, kind, slot)
   );
   CREATE TABLE IF NOT EXISTS solo_heist_settings (
-    guild_id TEXT PRIMARY KEY, base_chance INTEGER NOT NULL DEFAULT 25
+    guild_id TEXT PRIMARY KEY, base_chance INTEGER NOT NULL DEFAULT 35
   );
   CREATE TABLE IF NOT EXISTS heist_campaign_days (
     guild_id TEXT NOT NULL, user_id TEXT NOT NULL, day_key TEXT NOT NULL, week_key TEXT NOT NULL,
@@ -6155,26 +6156,26 @@ function heistCampaignEmbed(g,u) {
   ).setFooter({text:'使用 /賺錢 工作:搶銀行 或 /團隊搶銀行 完成當日行動'});
 }
 function soloHeistBaseChance(guildId) {
-  return db.prepare('SELECT base_chance FROM solo_heist_settings WHERE guild_id=?').get(guildId)?.base_chance??25;
+  return db.prepare('SELECT base_chance FROM solo_heist_settings WHERE guild_id=?').get(guildId)?.base_chance??35;
 }
 const weeklyWorkMultiplier=()=>taipeiWeekday()===2?2:1;
 const weeklyCasinoMultiplier=()=>taipeiWeekday()===4?1.2:1;
 const weeklyMahjongMultiplier=()=>taipeiWeekday()===6?1.5:1;
 const heistBanks={
-  mizi:{name:'🏦 迷子信用合作社',baseChance:10,reward:20000},
-  hao:{name:'🏛️ Hao 商業銀行',baseChance:8,reward:35000},
-  royal:{name:'👑 澳門皇家銀行',baseChance:7,reward:50000},
-  spade:{name:'♠️ 黑桃中央銀行',baseChance:6,reward:80000},
-  gold:{name:'🪙 黃金國際銀行',baseChance:5,reward:120000},
-  harbor_union:{name:'⚓ 港灣聯合銀行',baseChance:9,reward:30000},
-  metro:{name:'🏙️ 都會中央銀行',baseChance:7,reward:65000},
-  crown:{name:'💠 皇冠國際銀行',baseChance:4,reward:150000},
+  mizi:{name:'🏦 迷子信用合作社',baseChance:12,reward:20000},
+  hao:{name:'🏛️ Hao 商業銀行',baseChance:10,reward:35000},
+  royal:{name:'👑 澳門皇家銀行',baseChance:9,reward:50000},
+  spade:{name:'♠️ 黑桃中央銀行',baseChance:8,reward:80000},
+  gold:{name:'🪙 黃金國際銀行',baseChance:7,reward:120000},
+  harbor_union:{name:'⚓ 港灣聯合銀行',baseChance:11,reward:30000},
+  metro:{name:'🏙️ 都會中央銀行',baseChance:9,reward:65000},
+  crown:{name:'💠 皇冠國際銀行',baseChance:6,reward:150000},
   casino_vault:{name:'🎰 賭場中央寶庫（週日限定）',baseChance:2,reward:0,sundayOnly:true},
-  central_museum:{name:'🏛️ 中央美術館',baseChance:5,reward:120000,museumTarget:true},
-  diamond_exchange:{name:'💎 帝王國際鑽石交易所',baseChance:12,reward:5000000,prepFee:250000,minMembers:2,staminaCost:35,successCap:45,policePressure:12,jailMinutes:12,highStake:true,hotEligible:false,description:'夜間珠寶交割中心，保全以生物辨識與裝甲運鈔隊守護未切割鑽石。'},
-  offshore_crypto_vault:{name:'🧊 離岸加密資產冷庫',baseChance:10,reward:12000000,prepFee:750000,minMembers:2,staminaCost:45,successCap:40,policePressure:14,jailMinutes:16,highStake:true,hotEligible:false,description:'斷網冷錢包與實體金鑰封存在離岸資料堡壘，撤離前必須突破多層電子封鎖。'},
-  sovereign_gold_reserve:{name:'🏛️ 皇家主權黃金儲備庫',baseChance:8,reward:30000000,prepFee:2000000,minMembers:2,staminaCost:60,successCap:36,policePressure:16,jailMinutes:20,highStake:true,hotEligible:false,description:'國家級地下金庫存放戰略黃金，重裝特勤與防爆閘門會全面封鎖撤退路線。'},
-  obsidian_clearing_house:{name:'🌑 黑曜地下清算中心',baseChance:6,reward:60000000,prepFee:5000000,minMembers:2,staminaCost:80,successCap:32,policePressure:18,jailMinutes:25,highStake:true,hotEligible:false,description:'地下金融網的最終清算節點，兩人即可嘗試挑戰，是目前最高風險的終局行動。'}
+  central_museum:{name:'🏛️ 中央美術館',baseChance:7,reward:120000,museumTarget:true},
+  diamond_exchange:{name:'💎 帝王國際鑽石交易所',baseChance:16,reward:5000000,prepFee:250000,minMembers:2,staminaCost:35,successCap:52,policePressure:9,jailMinutes:8,highStake:true,hotEligible:false,description:'夜間珠寶交割中心，保全以生物辨識與裝甲運鈔隊守護未切割鑽石。'},
+  offshore_crypto_vault:{name:'🧊 離岸加密資產冷庫',baseChance:14,reward:12000000,prepFee:750000,minMembers:2,staminaCost:45,successCap:48,policePressure:10,jailMinutes:10,highStake:true,hotEligible:false,description:'斷網冷錢包與實體金鑰封存在離岸資料堡壘，撤離前必須突破多層電子封鎖。'},
+  sovereign_gold_reserve:{name:'🏛️ 皇家主權黃金儲備庫',baseChance:12,reward:30000000,prepFee:2000000,minMembers:2,staminaCost:60,successCap:44,policePressure:12,jailMinutes:12,highStake:true,hotEligible:false,description:'國家級地下金庫存放戰略黃金，重裝特勤與防爆閘門會全面封鎖撤退路線。'},
+  obsidian_clearing_house:{name:'🌑 黑曜地下清算中心',baseChance:10,reward:60000000,prepFee:5000000,minMembers:2,staminaCost:80,successCap:40,policePressure:14,jailMinutes:15,highStake:true,hotEligible:false,description:'地下金融網的最終清算節點，兩人即可嘗試挑戰，是目前最高風險的終局行動。'}
 };
 const heistMinimumMembers=bank=>bank?.minMembers||2;
 const heistPreparationFee=bank=>bank?.prepFee??TEAM_HEIST_PREP_FEE;
@@ -6642,9 +6643,9 @@ const heistPoliceVehicles={
 function heistNpcPolicePressure(heist) {
   const bank=heistBanks[heist.bankId];
   if(Number.isFinite(bank?.policePressure)) return bank.policePressure;
-  if(bank?.sundayOnly||bank?.museumTarget||(bank?.reward||0)>=100000) return 12;
-  if((bank?.reward||0)>=50000) return 9;
-  return 5;
+  if(bank?.sundayOnly||bank?.museumTarget||(bank?.reward||0)>=100000) return 9;
+  if((bank?.reward||0)>=50000) return 7;
+  return 3;
 }
 function heistPoliceTacticModifiers(heist) {
   const tacticPressures=[];
@@ -6700,12 +6701,12 @@ function heistCombatModifiers(heist) {
   const policeWeaponPressure=Math.min(TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP,Math.round(policeValues.reduce((a,b)=>a+b,0)*0.6));
   const confrontationPressure=confrontingPolice*TEAM_HEIST_POLICE_CONFRONT_PRESSURE;
   const reinforcementPressure=reinforcingPolice*TEAM_HEIST_POLICE_REINFORCE_PRESSURE;
-  const informantPressure=heist.informants.size*6;
+  const informantPressure=heist.informants.size*4;
   const npcPolicePressure=heistNpcPolicePressure(heist);
   const tactic=heistPoliceTacticModifiers(heist);
   const policeVehicles=heistPoliceVehicleModifiers(heist);
-  const playerPolicePressure=heist.police.size*3+policeWeaponPressure+confrontationPressure+reinforcementPressure;
-  const policePressureCap=npcPolicePressure+Math.round(12*Math.min(1,heist.police.size/Math.max(1,heist.members.length)));
+  const playerPolicePressure=heist.police.size*TEAM_HEIST_POLICE_MEMBER_PRESSURE+policeWeaponPressure+confrontationPressure+reinforcementPressure;
+  const policePressureCap=npcPolicePressure+Math.round(10*Math.min(1,heist.police.size/Math.max(1,heist.members.length)));
   const activePolicePressure=Math.max(npcPolicePressure,Math.min(playerPolicePressure,policePressureCap));
   const policePressure=activePolicePressure+tactic.tacticalPressure+policeVehicles.policeVehiclePressure+informantPressure;
   return {
@@ -7770,11 +7771,11 @@ async function runCompetition(i,token,session) {
 const POLICE_DOG_TEXT = '🐕‍🦺 乎有龐然大物拔山倒樹而來——警犬「猛博美」從暗處飛撲而出！';
 function rollEscapeEvent(context='heist') {
   const roll=Math.random();
-  if(roll<0.08) return {id:'police_dog',title:'🐕‍🦺 警犬突襲',text:POLICE_DOG_TEXT,modifier:0,forceFail:true,scene:randomPoliceDogScene()};
-  if(roll<0.28) return {id:'roadblock',title:'🚧 臨時封鎖',text:'前方突然架起臨時路障，撤離速度大幅下降。',modifier:-5,forceFail:false};
-  if(roll<0.50) return {id:'shortcut',title:'🗺️ 神祕捷徑',text:'你發現一條情報中沒有標示的捷徑，成功拉開追兵距離。',modifier:5,forceFail:false};
-  if(roll<0.68) return {id:'decoy',title:'🎭 誘餌奏效',text:context==='jail'?'巡邏人員被遠處的聲響引開，你獲得短暫空檔。':'預先安排的誘餌車成功引開一部分警力。',modifier:4,forceFail:false};
-  if(roll<0.82) return {id:'wrong_turn',title:'↩️ 走錯方向',text:'慌亂中轉錯路口，只能繞路尋找出口。',modifier:-4,forceFail:false};
+  if(roll<0.04) return {id:'police_dog',title:'🐕‍🦺 警犬突襲',text:POLICE_DOG_TEXT,modifier:0,forceFail:true,scene:randomPoliceDogScene()};
+  if(roll<0.24) return {id:'roadblock',title:'🚧 臨時封鎖',text:'前方突然架起臨時路障，撤離速度大幅下降。',modifier:-5,forceFail:false};
+  if(roll<0.46) return {id:'shortcut',title:'🗺️ 神祕捷徑',text:'你發現一條情報中沒有標示的捷徑，成功拉開追兵距離。',modifier:5,forceFail:false};
+  if(roll<0.66) return {id:'decoy',title:'🎭 誘餌奏效',text:context==='jail'?'巡邏人員被遠處的聲響引開，你獲得短暫空檔。':'預先安排的誘餌車成功引開一部分警力。',modifier:4,forceFail:false};
+  if(roll<0.78) return {id:'wrong_turn',title:'↩️ 走錯方向',text:'慌亂中轉錯路口，只能繞路尋找出口。',modifier:-4,forceFail:false};
   return {id:'clear',title:'🌙 路線暢通',text:'撤離路線暫時沒有異狀，追兵仍在後方緊追。',modifier:0,forceFail:false};
 }
 const mahjongTiles=['🀇','🀈','🀉','🀊','🀋','🀌','🀍','🀎','🀏','🀙','🀚','🀛','🀜','🀝','🀞','🀟','🀠','🀡','🀐','🀑','🀒','🀓','🀔','🀕','🀖','🀗','🀘','🀀','🀁','🀂','🀃','🀄','🀅','🀆'];
@@ -9367,7 +9368,7 @@ async function handleInteraction(i) {
         for(const memberId of heist.members) incrementAchievementProgress(i.guildId,memberId,'pomeranianVictim');
       }
       escapeImage=escapeEvent.scene||(escapeEvent.forceFail?'arrested':heistFailureScene(heist.plan));
-      const jailDurationMs=Math.max(3*60_000,(heistBanks[heist.bankId].jailMinutes||8)*60_000-hideoutJailReductionMs(heist.guildId,heist.leaderId));
+      const jailDurationMs=Math.max(3*60_000,(heistBanks[heist.bankId].jailMinutes||5)*60_000-hideoutJailReductionMs(heist.guildId,heist.leaderId));
       const releaseAt=Date.now()+jailDurationMs;
       const jailMinutes=Math.floor(jailDurationMs/60_000),jailSeconds=Math.floor((jailDurationMs%60_000)/1000);
       const jailDurationText=`${jailMinutes} 分鐘${jailSeconds?` ${jailSeconds} 秒`:''}`;
@@ -10937,11 +10938,11 @@ async function handleInteraction(i) {
           next=changeBalance(g,u,SOLO_HEIST_REWARD,'job',u,'搶銀行成功');
           robberyEarned=next-before;
         } else {
-          const releaseAt=Date.now()+8*60*1000;
+          const releaseAt=Date.now()+5*60*1000;
           db.prepare('INSERT INTO jail(guild_id,user_id,release_at,reason) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET release_at=excluded.release_at,reason=excluded.reason').run(g,u,releaseAt,'搶銀行失敗');
           db.prepare('DELETE FROM jail_training WHERE guild_id=? AND user_id=?').run(g,u);
           db.prepare('DELETE FROM jail_escape WHERE guild_id=? AND user_id=?').run(g,u);
-          changeBalance(g,u,0,'jail',u,'搶銀行失敗，關進小黑屋 8 分鐘');
+          changeBalance(g,u,0,'jail',u,'搶銀行失敗，關進小黑屋 5 分鐘');
         }
         const campaign=recordHeistCampaign(g,u,'solo',escaped?'success':'failed');
         if(escaped) next=campaign.balanceAfter;
@@ -10973,7 +10974,7 @@ async function handleInteraction(i) {
         }
         if(escapeEvent.forceFail) incrementAchievementProgress(g,u,'pomeranianVictim');
         const failureScene=escapeEvent.scene||(escapeEvent.forceFail?'arrested':'surrounded');
-        const payload=heistScenePayload(new EmbedBuilder().setColor(0x1F1F1F).setTitle('🚔 搶銀行失敗！').setDescription(`${escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美將你撲倒在地，警員立刻上前逮捕。`:'你沒有逃過追捕。'}\n你被關進 **迷子的小黑屋 8 分鐘**。\n期間不能進行任何遊戲或再次賺錢。`),failureScene);
+        const payload=heistScenePayload(new EmbedBuilder().setColor(0x1F1F1F).setTitle('🚔 搶銀行失敗！').setDescription(`${escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美將你撲倒在地，警員立刻上前逮捕。`:'你沒有逃過追捕。'}\n你被關進 **迷子的小黑屋 5 分鐘**。\n期間不能進行任何遊戲或再次賺錢。`),failureScene);
         payload.embeds[0].setDescription(payload.embeds[0].data.description+heistCampaignResultText(campaign));
         return publishLatestHeistResult(i,payload);
       }

@@ -1070,21 +1070,25 @@ test('高額團隊搶劫具有獨立成本、風險上限與經濟保護',()=>{
   assert.equal(banks.obsidian_clearing_house.staminaCost,80);
   assert.deepEqual(
     Object.values(banks).filter(bank=>bank.highStake).map(bank=>bank.baseChance),
-    [12,10,8,6]
+    [16,14,12,10]
   );
   assert.deepEqual(
     Object.values(banks).filter(bank=>bank.highStake).map(bank=>bank.successCap),
-    [45,40,36,32]
+    [52,48,44,40]
   );
   assert.deepEqual(
     Object.values(banks).filter(bank=>bank.highStake).map(bank=>bank.policePressure),
-    [12,14,16,18]
+    [9,10,12,14]
+  );
+  assert.deepEqual(
+    Object.values(banks).filter(bank=>bank.highStake).map(bank=>bank.jailMinutes),
+    [8,10,12,15]
   );
   assert.ok(Object.values(banks).filter(bank=>bank.highStake).every(bank=>bank.hotEligible===false));
   assert.match(source,/function chargeTeamHeistPreparation\(g,members,feePerMember=TEAM_HEIST_PREP_FEE\)/);
   assert.match(source,/heistSuccessRateCap\(heistBanks\[heist\.bankId\],normalSuccessCap\)/);
   assert.match(source,/heist\.members\.forEach\(memberId=>consumeStamina\(i\.guildId,memberId,heist\.robberStaminaCost\)\)/);
-  assert.match(source,/\(heistBanks\[heist\.bankId\]\.jailMinutes\|\|8\)\*60_000/);
+  assert.match(source,/\(heistBanks\[heist\.bankId\]\.jailMinutes\|\|5\)\*60_000/);
   assert.match(source,/bank\.hotEligible!==false/);
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-14-high-stakes-heists.json',import.meta.url),'utf8'));
   assert.match(update.summary,/高投入、高風險、高回報/);
@@ -1102,29 +1106,36 @@ test('限時資產拍賣可指定跨伺服器公告頻道',()=>{
   assert.doesNotMatch(scheduler,/casinoAnnouncementChannel\(auction\.guild_id\)/);
 });
 
-test('團隊搶劫提高合作逃脫率並小幅下調警方壓制',()=>{
-  assert.match(source,/const TEAM_HEIST_MEMBER_CHANCE_BONUS = Number\(process\.env\.TEAM_HEIST_MEMBER_CHANCE_BONUS \|\| 8\)/);
-  assert.match(source,/const TEAM_HEIST_SUCCESS_RATE_CAP = Number\(process\.env\.TEAM_HEIST_SUCCESS_RATE_CAP \|\| 55\)/);
-  assert.match(source,/if\(bank\?\.sundayOnly\|\|bank\?\.museumTarget\|\|\(bank\?\.reward\|\|0\)>=100000\) return 12/);
-  assert.match(source,/if\(\(bank\?\.reward\|\|0\)>=50000\) return 9/);
-  assert.match(source,/return 5;/);
-  assert.match(source,/const TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP = Number\(process\.env\.TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP \|\| 22\)/);
-  assert.match(source,/const TEAM_HEIST_POLICE_CONFRONT_PRESSURE = Number\(process\.env\.TEAM_HEIST_POLICE_CONFRONT_PRESSURE \|\| 3\)/);
-  assert.match(source,/const TEAM_HEIST_POLICE_REINFORCE_PRESSURE = Number\(process\.env\.TEAM_HEIST_POLICE_REINFORCE_PRESSURE \|\| 4\)/);
+test('團隊搶劫降低警方壓制並提高合作逃脫率',()=>{
+  assert.match(source,/const TEAM_HEIST_MEMBER_CHANCE_BONUS = Number\(process\.env\.TEAM_HEIST_MEMBER_CHANCE_BONUS \|\| 10\)/);
+  assert.match(source,/const TEAM_HEIST_SUCCESS_RATE_CAP = Number\(process\.env\.TEAM_HEIST_SUCCESS_RATE_CAP \|\| 65\)/);
+  assert.match(source,/if\(bank\?\.sundayOnly\|\|bank\?\.museumTarget\|\|\(bank\?\.reward\|\|0\)>=100000\) return 9/);
+  assert.match(source,/if\(\(bank\?\.reward\|\|0\)>=50000\) return 7/);
+  assert.match(source,/return 3;/);
+  assert.match(source,/const TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP = Number\(process\.env\.TEAM_HEIST_POLICE_WEAPON_PRESSURE_CAP \|\| 18\)/);
+  assert.match(source,/const TEAM_HEIST_POLICE_MEMBER_PRESSURE = Number\(process\.env\.TEAM_HEIST_POLICE_MEMBER_PRESSURE \|\| 2\)/);
+  assert.match(source,/const TEAM_HEIST_POLICE_CONFRONT_PRESSURE = Number\(process\.env\.TEAM_HEIST_POLICE_CONFRONT_PRESSURE \|\| 2\)/);
+  assert.match(source,/const TEAM_HEIST_POLICE_REINFORCE_PRESSURE = Number\(process\.env\.TEAM_HEIST_POLICE_REINFORCE_PRESSURE \|\| 3\)/);
   assert.match(source,/members\.length-1\)\*TEAM_HEIST_MEMBER_CHANCE_BONUS/);
+  assert.match(source,/heist\.police\.size\*TEAM_HEIST_POLICE_MEMBER_PRESSURE/);
+  assert.match(source,/Math\.round\(10\*Math\.min\(1,heist\.police\.size/);
   assert.match(source,/TEAM_HEIST_SUCCESS_RATE_CAP\+weeklyHeistBonus/);
   assert.match(source,/heistSuccessRateCap\(heistBanks\[heist\.bankId\],normalSuccessCap\)/);
 });
 
-test('搶劫平衡調整降低警犬強制失敗並提高單人基礎率',()=>{
-  assert.match(source,/base_chance INTEGER NOT NULL DEFAULT 25/);
-  assert.match(source,/\?\.base_chance\?\?25/);
+test('搶劫難易度下調並保留週日寶庫風險上限',()=>{
+  assert.match(source,/base_chance INTEGER NOT NULL DEFAULT 35/);
+  assert.match(source,/\?\.base_chance\?\?35/);
   const eventBlock=source.match(/function rollEscapeEvent\(context='heist'\) \{[\s\S]+?\n\}/)?.[0]||'';
-  assert.match(eventBlock,/if\(roll<0\.08\).*police_dog/);
-  assert.match(eventBlock,/if\(roll<0\.28\).*roadblock/);
-  assert.match(eventBlock,/if\(roll<0\.50\).*shortcut/);
-  assert.match(eventBlock,/if\(roll<0\.68\).*decoy/);
-  assert.match(eventBlock,/if\(roll<0\.82\).*wrong_turn/);
+  assert.match(eventBlock,/if\(roll<0\.04\).*police_dog/);
+  assert.match(eventBlock,/if\(roll<0\.24\).*roadblock/);
+  assert.match(eventBlock,/if\(roll<0\.46\).*shortcut/);
+  assert.match(eventBlock,/if\(roll<0\.66\).*decoy/);
+  assert.match(eventBlock,/if\(roll<0\.78\).*wrong_turn/);
+  assert.match(source,/const CASINO_VAULT_MAX_SUCCESS_RATE=25/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-02-heist-difficulty.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-02-heist-difficulty');
+  assert.match(update.changes.join('\n'),/單人搶銀行/);
 });
 
 test('搶劫流程新增六張場景並於每次顯示時隨機輪替',()=>{
