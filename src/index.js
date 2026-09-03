@@ -45,6 +45,15 @@ const HEIST_PUSH_CHANCE_PENALTY = Number(process.env.HEIST_PUSH_CHANCE_PENALTY |
 const TEAM_HEIST_POLICE_CONFRONT_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_CONFRONT_PRESSURE || 2);
 const TEAM_HEIST_POLICE_REINFORCE_PRESSURE = Number(process.env.TEAM_HEIST_POLICE_REINFORCE_PRESSURE || 3);
 const SOLO_HEIST_DEFAULT_BASE_CHANCE = Number(process.env.SOLO_HEIST_DEFAULT_BASE_CHANCE || 35);
+const BLACK_MARKET_AUCTION_DURATION_MS = 12*60*60*1000;
+const BLACK_MARKET_AUCTION_EXTENSION_MS = 60*1000;
+const BLACK_MARKET_MIN_BID = 10_000;
+const BLACK_MARKET_COMMISSION_RATE = 0.10;
+const WANTED_SCORE_PER_SOLO_HEIST = 15;
+const WANTED_SCORE_PER_TEAM_HEIST = 10;
+const WANTED_MAX_SCORE = 100;
+const WANTED_MAX_BOUNTY = 2_000_000;
+const BOUNTY_HUNT_COOLDOWN_MS = 10*60*1000;
 const ACTIVITY_PUBLIC_URL = String(process.env.ACTIVITY_PUBLIC_URL || '').replace(/\/$/,'');
 const ACTIVITY_API_PORT = Number(process.env.ACTIVITY_API_PORT || 8787);
 const ACTIVITY_SIGNING_SECRET = process.env.ACTIVITY_SIGNING_SECRET || '';
@@ -88,13 +97,14 @@ const ECONOMY_SINK_LABELS={
   transport_strike_resolution:'交通事業員工罷工協調費',
   enterprise_upgrade:'交通企業升級',
   auction_payment:'限時資產拍賣得標款',
+  black_market_commission:'黑市拍賣手續費',
   train_blind_box:'列車盲盒',
   shipping_blind_box:'船運盲盒',
   cosmetic_purchase:'個人造型商城',
   career_contract_fee:'賭城生涯合約保證金',
   transfer_fee:'玩家轉帳手續費'
 };
-const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund','auction_legacy_refund','auction_singleton_refund']);
+const ECONOMY_TRANSFER_KINDS=new Set(['asset_trade','market_purchase','market_sale','theft','pvp_wager','wager_return','casino_vault_heist','player_transfer','auction_bid_escrow','auction_bid_refund','auction_legacy_refund','auction_singleton_refund','black_market_bid_escrow','black_market_bid_refund','black_market_sale','bounty_forfeit','bounty_reward']);
 const BASE_STAMINA = 800;
 const CAREER_REPUTATION_LEVELS=[0,100,250,500,1000,2000];
 const careerDistricts={
@@ -766,6 +776,44 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'active', buyer_id TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT
   );
+  CREATE TABLE IF NOT EXISTS black_market_auctions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL, seller_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL, quantity INTEGER NOT NULL, buff_id TEXT,
+    minimum_bid INTEGER NOT NULL, reserve_price INTEGER NOT NULL,
+    bid_count INTEGER NOT NULL DEFAULT 0,
+    starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','expired','cancelled')),
+    winner_id TEXT, final_price INTEGER, settled_at INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_black_market_auctions_active
+    ON black_market_auctions(guild_id,status,ends_at);
+  CREATE TABLE IF NOT EXISTS black_market_bids (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    auction_id INTEGER NOT NULL, guild_id TEXT NOT NULL, bidder_id TEXT NOT NULL,
+    amount INTEGER NOT NULL, refunded_at INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (auction_id,bidder_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_black_market_bids_auction
+    ON black_market_bids(auction_id,amount DESC,created_at);
+  CREATE TABLE IF NOT EXISTS wanted_profiles (
+    guild_id TEXT NOT NULL, user_id TEXT NOT NULL,
+    wanted_score INTEGER NOT NULL DEFAULT 0, bounty_amount INTEGER NOT NULL DEFAULT 0,
+    last_heist_at INTEGER, last_captured_at INTEGER,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id,user_id)
+  );
+  CREATE TABLE IF NOT EXISTS bounty_hunts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL, hunter_id TEXT NOT NULL, target_id TEXT NOT NULL,
+    weapon_id TEXT NOT NULL, success_chance INTEGER NOT NULL, bounty_paid INTEGER NOT NULL DEFAULT 0,
+    outcome TEXT NOT NULL CHECK (outcome IN ('captured','escaped')),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_bounty_hunts_hunter
+    ON bounty_hunts(guild_id,hunter_id,created_at DESC);
   CREATE TABLE IF NOT EXISTS asset_auctions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id TEXT NOT NULL,
@@ -1898,8 +1946,11 @@ function economyFlow(g,sinceModifier) {
   }
   const auctionBurned=db.prepare("SELECT COALESCE(SUM(final_price),0) total FROM asset_auctions WHERE guild_id=? AND status='completed' AND settled_at>=unixepoch('now',?)*1000")
     .get(g,sinceModifier).total||0;
-  burned+=auctionBurned;
+  const blackMarketCommission=db.prepare("SELECT COALESCE(SUM(delta),0) total FROM casino_vault_ledger WHERE guild_id=? AND kind='black_market_commission' AND created_at>=datetime('now',?)")
+    .get(g,sinceModifier).total||0;
+  burned+=auctionBurned+blackMarketCommission;
   sinks.auction_payment=auctionBurned;
+  sinks.black_market_commission=blackMarketCommission;
   return {minted,burned,net:minted-burned,sinks};
 }
 const dayNumber=day=>Math.floor(Date.parse(`${day}T00:00:00Z`)/86400000);
@@ -5311,11 +5362,14 @@ function completeAssetTrade(g,sellerId,buyerId,assetId,quantity,price) {
     db.exec('COMMIT');
   } catch(e) { db.exec('ROLLBACK'); throw e; }
 }
-function createMarketListing(g,sellerId,assetId,quantity,price) {
+function createBlackMarketAuction(g,sellerId,assetId,quantity,minimumBid,reservePrice) {
   const asset=assetCatalog[assetId];
   if(!asset) throw new Error('找不到這項資產');
   if(asset.nonTransferable) throw new Error(`${asset.name} 是系統配給資產，不能刊登或交易`);
-  const buffId=ensureAssetBuff(g,sellerId,assetId);
+  if(!Number.isInteger(quantity)||quantity<1) throw new Error('刊登數量必須至少為 1');
+  if(!Number.isSafeInteger(minimumBid)||minimumBid<BLACK_MARKET_MIN_BID) throw new Error(`最低競標額至少為 ${fmt(BLACK_MARKET_MIN_BID)}`);
+  if(!Number.isSafeInteger(reservePrice)||reservePrice<minimumBid) throw new Error('保留價必須大於或等於最低競標額');
+  const buffId=ensureAssetBuff(g,sellerId,assetId),now=Date.now();
   db.exec('BEGIN IMMEDIATE');
   try {
     const owned=assetQuantity(g,sellerId,assetId);
@@ -5323,46 +5377,116 @@ function createMarketListing(g,sellerId,assetId,quantity,price) {
     const remaining=owned-quantity;
     setAssetQuantity(g,sellerId,assetId,remaining);
     if(remaining<=0) db.prepare('DELETE FROM asset_bonuses WHERE guild_id=? AND user_id=? AND asset_id=?').run(g,sellerId,assetId);
-    const result=db.prepare('INSERT INTO asset_market_listings(guild_id,seller_id,asset_id,quantity,price,buff_id) VALUES(?,?,?,?,?,?)').run(g,sellerId,assetId,quantity,price,buffId);
+    const result=db.prepare(`INSERT INTO black_market_auctions(
+      guild_id,seller_id,asset_id,quantity,buff_id,minimum_bid,reserve_price,starts_at,ends_at
+    ) VALUES(?,?,?,?,?,?,?,?,?)`).run(g,sellerId,assetId,quantity,buffId,minimumBid,reservePrice,now,now+BLACK_MARKET_AUCTION_DURATION_MS);
     db.exec('COMMIT');
-    return Number(result.lastInsertRowid);
-  } catch(e) { db.exec('ROLLBACK'); throw e; }
+    return db.prepare('SELECT * FROM black_market_auctions WHERE id=?').get(Number(result.lastInsertRowid));
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
 }
-function cancelMarketListing(g,sellerId,listingId) {
+function blackMarketAuctionById(auctionId) {
+  return db.prepare('SELECT * FROM black_market_auctions WHERE id=?').get(auctionId)||null;
+}
+function placeBlackMarketBid(g,bidderId,auctionId,amount) {
+  if(!Number.isSafeInteger(amount)||amount<BLACK_MARKET_MIN_BID) throw new Error(`競標額至少為 ${fmt(BLACK_MARKET_MIN_BID)}`);
+  ensureWallet(g,bidderId);
+  const now=Date.now();
   db.exec('BEGIN IMMEDIATE');
   try {
-    const listing=db.prepare("SELECT * FROM asset_market_listings WHERE id=? AND guild_id=? AND status='active'").get(listingId,g);
-    if(!listing) throw new Error('這筆二手商品已下架或售出');
-    if(listing.seller_id!==sellerId) throw new Error('只有賣家可以取消這筆商品');
-    db.prepare("UPDATE asset_market_listings SET status='cancelled',completed_at=CURRENT_TIMESTAMP WHERE id=?").run(listingId);
-    addAssetQuantity(g,sellerId,listing.asset_id,listing.quantity);
-    ensureAssetBuff(g,sellerId,listing.asset_id,listing.buff_id);
+    const auction=db.prepare("SELECT * FROM black_market_auctions WHERE id=? AND guild_id=? AND status='active'").get(auctionId,g);
+    if(!auction||auction.ends_at<=now) throw new Error('這場黑市拍賣已結束或不存在');
+    if(auction.seller_id===bidderId) throw new Error('不能競標自己匿名刊登的資產');
+    const previous=db.prepare('SELECT * FROM black_market_bids WHERE auction_id=? AND bidder_id=? AND refunded_at IS NULL').get(auction.id,bidderId);
+    const minimum=previous?previous.amount+BLACK_MARKET_MIN_BID:auction.minimum_bid;
+    if(amount<minimum) throw new Error(`你的密封出價至少需為 ${fmt(minimum)}`);
+    const extra=amount-(previous?.amount||0),before=balance(g,bidderId);
+    if(before<extra) throw new Error(`金幣不足，補足本次密封出價尚需 ${fmt(extra)}`);
+    db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(before-extra,g,bidderId);
+    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+      .run(g,bidderId,-extra,before-extra,'black_market_bid_escrow',bidderId,`黑市拍賣 #${auction.id} 密封出價託管`);
+    if(previous) db.prepare('UPDATE black_market_bids SET amount=? WHERE id=?').run(amount,previous.id);
+    else db.prepare('INSERT INTO black_market_bids(auction_id,guild_id,bidder_id,amount) VALUES(?,?,?,?)').run(auction.id,g,bidderId,amount);
+    const extended=auction.ends_at-now<=BLACK_MARKET_AUCTION_EXTENSION_MS;
+    const endsAt=extended?Math.max(auction.ends_at,now+BLACK_MARKET_AUCTION_EXTENSION_MS):auction.ends_at;
+    db.prepare('UPDATE black_market_auctions SET bid_count=bid_count+?,ends_at=? WHERE id=? AND status=\'active\'').run(previous?0:1,endsAt,auction.id);
     db.exec('COMMIT');
-    return listing;
-  } catch(e) { db.exec('ROLLBACK'); throw e; }
+    return {...auction,amount,endsAt,extended};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
 }
-function buyMarketListing(g,buyerId,listingId) {
-  ensureWallet(g,buyerId);
+function cancelBlackMarketAuction(g,sellerId,auctionId) {
   db.exec('BEGIN IMMEDIATE');
   try {
-    const listing=db.prepare("SELECT * FROM asset_market_listings WHERE id=? AND guild_id=? AND status='active'").get(listingId,g);
-    if(!listing) throw new Error('這筆二手商品已下架或售出');
-    if(listing.seller_id===buyerId) throw new Error('不能購買自己刊登的商品');
-    ensureWallet(g,listing.seller_id);
-    const buyerBalance=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,buyerId).balance;
-    const sellerBalance=db.prepare('SELECT balance FROM wallets WHERE guild_id=? AND user_id=?').get(g,listing.seller_id).balance;
-    if(buyerBalance<listing.price) throw new Error(`金幣不足，需要 ${fmt(listing.price)}`);
-    db.prepare('UPDATE wallets SET balance=balance-?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(listing.price,g,buyerId);
-    db.prepare('UPDATE wallets SET balance=balance+?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(listing.price,g,listing.seller_id);
-    addAssetQuantity(g,buyerId,listing.asset_id,listing.quantity);
-    ensureAssetBuff(g,buyerId,listing.asset_id,listing.buff_id);
-    db.prepare("UPDATE asset_market_listings SET status='sold',buyer_id=?,completed_at=CURRENT_TIMESTAMP WHERE id=?").run(buyerId,listingId);
-    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,buyerId,-listing.price,buyerBalance-listing.price,'market_purchase',listing.seller_id,`二手市場購買 ${assetCatalog[listing.asset_id].name} x${listing.quantity}`);
-    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)').run(g,listing.seller_id,listing.price,sellerBalance+listing.price,'market_sale',buyerId,`二手市場售出 ${assetCatalog[listing.asset_id].name} x${listing.quantity}`);
+    const auction=db.prepare("SELECT * FROM black_market_auctions WHERE id=? AND guild_id=? AND status='active'").get(auctionId,g);
+    if(!auction) throw new Error('這場黑市拍賣已結束或不存在');
+    if(auction.seller_id!==sellerId) throw new Error('只有匿名刊登者可以取消這場拍賣');
+    if(auction.bid_count>0) throw new Error('已有密封出價，為保障競標者權益不能取消');
+    addAssetQuantity(g,sellerId,auction.asset_id,auction.quantity);
+    ensureAssetBuff(g,sellerId,auction.asset_id,auction.buff_id);
+    db.prepare("UPDATE black_market_auctions SET status='cancelled',settled_at=? WHERE id=? AND status='active'").run(Date.now(),auction.id);
     db.exec('COMMIT');
-    return {...listing,buyerBalanceAfter:buyerBalance-listing.price};
-  } catch(e) { db.exec('ROLLBACK'); throw e; }
+    return auction;
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
 }
+function settleBlackMarketAuction(auctionId,now=Date.now()) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const auction=db.prepare("SELECT * FROM black_market_auctions WHERE id=? AND status='active'").get(auctionId);
+    if(!auction||auction.ends_at>now) { db.exec('COMMIT'); return null; }
+    const bids=db.prepare('SELECT * FROM black_market_bids WHERE auction_id=? AND refunded_at IS NULL ORDER BY amount DESC,created_at ASC,id ASC').all(auction.id);
+    const winner=bids.find(bid=>bid.amount>=auction.reserve_price)||null;
+    for(const bid of bids) {
+      if(winner&&bid.id===winner.id) continue;
+      const before=balance(auction.guild_id,bid.bidder_id),next=before+bid.amount;
+      db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(next,auction.guild_id,bid.bidder_id);
+      db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+        .run(auction.guild_id,bid.bidder_id,bid.amount,next,'black_market_bid_refund',bid.bidder_id,`黑市拍賣 #${auction.id} 未得標密封出價退回`);
+      db.prepare('UPDATE black_market_bids SET refunded_at=? WHERE id=?').run(now,bid.id);
+    }
+    if(!winner) {
+      addAssetQuantity(auction.guild_id,auction.seller_id,auction.asset_id,auction.quantity);
+      ensureAssetBuff(auction.guild_id,auction.seller_id,auction.asset_id,auction.buff_id);
+      db.prepare("UPDATE black_market_auctions SET status='expired',settled_at=? WHERE id=? AND status='active'").run(now,auction.id);
+      db.exec('COMMIT');
+      return {...auction,status:'expired',winner:null,refundCount:bids.length};
+    }
+    const commission=Math.max(1,Math.floor(winner.amount*BLACK_MARKET_COMMISSION_RATE));
+    const sellerProceeds=winner.amount-commission,sellerBefore=balance(auction.guild_id,auction.seller_id),sellerNext=sellerBefore+sellerProceeds;
+    addAssetQuantity(auction.guild_id,winner.bidder_id,auction.asset_id,auction.quantity);
+    ensureAssetBuff(auction.guild_id,winner.bidder_id,auction.asset_id,auction.buff_id);
+    db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(sellerNext,auction.guild_id,auction.seller_id);
+    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+      .run(auction.guild_id,auction.seller_id,sellerProceeds,sellerNext,'black_market_sale',winner.bidder_id,`黑市拍賣 #${auction.id} 匿名成交`);
+    changeCasinoVaultUnlocked(auction.guild_id,commission,'black_market_commission',auction.seller_id,`黑市拍賣 #${auction.id} 手續費`);
+    db.prepare("UPDATE black_market_auctions SET status='completed',winner_id=?,final_price=?,settled_at=? WHERE id=? AND status='active'")
+      .run(winner.bidder_id,winner.amount,now,auction.id);
+    db.exec('COMMIT');
+    return {...auction,status:'completed',winnerId:winner.bidder_id,finalPrice:winner.amount,sellerProceeds,commission,refundCount:bids.length-1};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+function processBlackMarketAuctions(now=Date.now()) {
+  const auctions=db.prepare("SELECT id FROM black_market_auctions WHERE status='active' AND ends_at<=? ORDER BY ends_at,id").all(now);
+  return auctions.map(row=>settleBlackMarketAuction(row.id,now)).filter(Boolean);
+}
+const LEGACY_SECONDHAND_MARKET_RETIRE_MIGRATION='2026-09-03-retire-secondhand-market';
+function retireLegacySecondhandMarketOnce() {
+  if(db.prepare('SELECT 1 FROM system_migrations WHERE migration_id=?').get(LEGACY_SECONDHAND_MARKET_RETIRE_MIGRATION)) return null;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const listings=db.prepare("SELECT * FROM asset_market_listings WHERE status='active'").all();
+    for(const listing of listings) {
+      addAssetQuantity(listing.guild_id,listing.seller_id,listing.asset_id,listing.quantity);
+      if(listing.buff_id) db.prepare('INSERT OR REPLACE INTO asset_bonuses(guild_id,user_id,asset_id,buff_id) VALUES(?,?,?,?)')
+        .run(listing.guild_id,listing.seller_id,listing.asset_id,listing.buff_id);
+    }
+    db.prepare("UPDATE asset_market_listings SET status='retired',completed_at=CURRENT_TIMESTAMP WHERE status='active'").run();
+    db.prepare('INSERT INTO system_migrations(migration_id,details_json) VALUES(?,?)')
+      .run(LEGACY_SECONDHAND_MARKET_RETIRE_MIGRATION,JSON.stringify({returnedListings:listings.length}));
+    db.exec('COMMIT');
+    if(listings.length) console.log(`SECONDHAND_MARKET_RETIRED returned=${listings.length}`);
+    return {returnedListings:listings.length};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
+retireLegacySecondhandMarketOnce();
 const taipeiDay=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const calendarDayDiff=(from,to)=>Math.max(0,Math.floor((Date.parse(`${to}T00:00:00Z`)-Date.parse(`${from}T00:00:00Z`))/86400000));
 function refreshPetMood(g,u,petId) {
@@ -6346,6 +6470,82 @@ shotgunSeries.forEach(shotgun=>{
     description:`劫匪 +${goldenRobber}／警方 +${goldenPolice}｜霰彈槍通用子彈`
   };
 });
+function wantedProfile(g,u) {
+  return db.prepare('SELECT * FROM wanted_profiles WHERE guild_id=? AND user_id=?').get(g,u)
+    ||{guild_id:g,user_id:u,wanted_score:0,bounty_amount:0,last_heist_at:null,last_captured_at:null};
+}
+function wantedRank(score) {
+  if(score>=80) return '☠️ 頭號通緝犯';
+  if(score>=55) return '🔴 高度通緝';
+  if(score>=30) return '🟠 危險人物';
+  return '🟡 可疑人士';
+}
+function registerWantedHeist(g,u,reward,scoreGain,reason) {
+  const now=Date.now(),current=wantedProfile(g,u);
+  const wantedScore=Math.min(WANTED_MAX_SCORE,Math.max(0,current.wanted_score+scoreGain));
+  const bountyGain=Math.max(10_000,Math.floor(Math.max(0,reward)*0.12));
+  const bountyAmount=Math.min(WANTED_MAX_BOUNTY,Math.max(0,current.bounty_amount+bountyGain));
+  db.prepare(`INSERT INTO wanted_profiles(guild_id,user_id,wanted_score,bounty_amount,last_heist_at,updated_at)
+    VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(guild_id,user_id) DO UPDATE SET
+      wanted_score=excluded.wanted_score,bounty_amount=excluded.bounty_amount,last_heist_at=excluded.last_heist_at,updated_at=CURRENT_TIMESTAMP`)
+    .run(g,u,wantedScore,bountyAmount,now);
+  return {wantedScore,bountyAmount,bountyGain,rank:wantedRank(wantedScore),reason};
+}
+function bountyHunterWeapons(g,u) {
+  return Object.entries(heistWeapons)
+    .map(([weaponId,weapon])=>({weaponId,weapon}))
+    .filter(({weapon})=>assetQuantity(g,u,weapon.assetId)>0&&assetQuantity(g,u,weapon.ammoId)>0)
+    .sort((a,b)=>b.weapon.police-a.weapon.police||a.weapon.name.localeCompare(b.weapon.name,'zh-TW'));
+}
+function bountyHuntSuccessChance(profile,weapon) {
+  return Math.max(25,Math.min(85,42+weapon.police*5+Math.floor(profile.wanted_score/10)));
+}
+function bountyHuntCooldownRemaining(g,u,now=Date.now()) {
+  const last=db.prepare('SELECT created_at FROM bounty_hunts WHERE guild_id=? AND hunter_id=? ORDER BY id DESC LIMIT 1').get(g,u)?.created_at||0;
+  return Math.max(0,last+BOUNTY_HUNT_COOLDOWN_MS-now);
+}
+function executeBountyHunt(g,hunterId,targetId,weaponId,now=Date.now()) {
+  if(hunterId===targetId) throw new Error('不能追捕自己');
+  const weapon=heistWeapons[weaponId];
+  if(!weapon||assetQuantity(g,hunterId,weapon.assetId)<1||assetQuantity(g,hunterId,weapon.ammoId)<1) throw new Error('請選擇自己持有且備有彈藥的武器');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if(bountyHuntCooldownRemaining(g,hunterId,now)>0) throw new Error(`警方任務冷卻中，還要 ${jailText(bountyHuntCooldownRemaining(g,hunterId,now))}`);
+    if(jailRemaining(g,targetId)||hospitalRemaining(g,targetId)) throw new Error('這名通緝犯目前已被拘留或住院，無法追捕');
+    const profile=wantedProfile(g,targetId);
+    if(profile.wanted_score<1||profile.bounty_amount<1) throw new Error('這名玩家目前沒有可接取的警方懸賞');
+    const chance=bountyHuntSuccessChance(profile,weapon),success=Math.random()*100<chance;
+    const ammoBefore=assetQuantity(g,hunterId,weapon.ammoId),ammoAfter=ammoBefore-1;
+    setAssetQuantity(g,hunterId,weapon.ammoId,ammoAfter);
+    db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+      .run(g,hunterId,0,balance(g,hunterId),'bounty_hunt_ammo',hunterId,`${weapon.name} 執行賞金追捕消耗 ${assetCatalog[weapon.ammoId].name} x1｜剩餘 ${ammoAfter}`);
+    let payout=0,targetLoss=0,releaseAt=null;
+    if(success) {
+      const targetBefore=balance(g,targetId);
+      payout=Math.min(profile.bounty_amount,targetBefore);
+      targetLoss=payout;
+      if(payout>0) {
+        const targetNext=targetBefore-payout,hunterBefore=balance(g,hunterId),hunterNext=hunterBefore+payout;
+        db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(targetNext,g,targetId);
+        db.prepare('UPDATE wallets SET balance=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?').run(hunterNext,g,hunterId);
+        db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+          .run(g,targetId,-payout,targetNext,'bounty_forfeit',hunterId,'遭賞金獵人逮捕，沒收通緝懸賞金');
+        db.prepare('INSERT INTO ledger(guild_id,user_id,delta,balance_after,kind,actor_id,reason) VALUES(?,?,?,?,?,?,?)')
+          .run(g,hunterId,payout,hunterNext,'bounty_reward',targetId,'警方賞金獵人追捕獎金');
+      }
+      releaseAt=now+3*60_000;
+      db.prepare('INSERT INTO jail(guild_id,user_id,release_at,reason) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET release_at=excluded.release_at,reason=excluded.reason')
+        .run(g,targetId,releaseAt,'遭賞金獵人逮捕');
+      db.prepare('UPDATE wanted_profiles SET wanted_score=0,bounty_amount=0,last_captured_at=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?')
+        .run(now,g,targetId);
+    }
+    db.prepare('INSERT INTO bounty_hunts(guild_id,hunter_id,target_id,weapon_id,success_chance,bounty_paid,outcome,created_at) VALUES(?,?,?,?,?,?,?,?)')
+      .run(g,hunterId,targetId,weaponId,chance,payout,success?'captured':'escaped',now);
+    db.exec('COMMIT');
+    return {success,chance,weapon,profile,payout,targetLoss,releaseAt,ammoAfter};
+  } catch(error) { db.exec('ROLLBACK'); throw error; }
+}
 function weaponAmmoIdForAsset(assetId) {
   return Object.values(heistWeapons).find(weapon=>weapon.assetId===assetId)?.ammoId||null;
 }
@@ -8026,7 +8226,7 @@ const commandHelpCategories={
   account:{label:'👤 玩家與經濟',description:'玩家中心、轉帳、銀行與日常',commands:['玩家','轉帳','銀行','日常']},
   shop:{label:'🛒 商城與背包',description:'集中購買、查看及使用補給品',commands:['補給']},
   pets:{label:'🐾 寵物與陪伴',description:'寵物商店及同行夥伴管理',commands:['寵物']},
-  assets:{label:'🏎️ 資產與交易',description:'房產、航空與交通事業、載具、改裝、展示與二手市場',commands:['資產商城','購買資產','我的資產','藏身處','交通事業','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','變賣資產','回收廠','二手市場']},
+  assets:{label:'🏎️ 資產與交易',description:'房產、航空與交通事業、載具、改裝、展示、匿名黑市拍賣與賞金追捕',commands:['資產商城','購買資產','我的資產','藏身處','交通事業','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','回收廠','黑市拍賣','賞金獵人']},
   heist:{label:'🚓 團隊與小黑屋',description:'隊伍搶劫、情報、救援、逃獄與暴動',commands:['隊伍','團隊搶銀行','銀行情報','賄絡迷子','減刑','逃獄','小黑屋暴動','救援同伴']},
   admin:{label:'🛡️ 管理員與系統',description:'玩法入口及限管理員使用的維護指令',commands:['玩法','造型後台','搶劫公告頻道','單人搶劫機率','稱號設定','資產調整','金幣調整','管理員入金','帳務紀錄','經濟監控']}
 };
@@ -8210,15 +8410,23 @@ const commands = [
     .addStringOption(o=>o.setName('資產').setDescription('輸入名稱搜尋要出售的資產').setRequired(true).setAutocomplete(true))
     .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇出售數量').setRequired(true).setMinValue(1).setMaxValue(10).addChoices(...integerChoiceOptions(10)))
     .addIntegerOption(o=>o.setName('價格').setDescription('從建議下拉選擇或輸入整筆交易價格').setRequired(true).setMinValue(1).setMaxValue(100000000).setAutocomplete(true)),
-  new SlashCommandBuilder().setName('變賣資產').setDescription('將自己的資產刊登到二手市場')
-    .addStringOption(o=>o.setName('資產').setDescription('輸入名稱搜尋要變賣的資產').setRequired(true).setAutocomplete(true))
-    .addIntegerOption(o=>o.setName('售價').setDescription('從建議下拉選擇或輸入整筆商品售價').setRequired(true).setMinValue(1).setMaxValue(100000000).setAutocomplete(true))
-    .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇刊登數量，未填寫時預設為 1').setMinValue(1).setMaxValue(10).addChoices(...integerChoiceOptions(10))),
+  new SlashCommandBuilder().setName('黑市拍賣').setDescription('匿名刊登、密封出價與警方監控下的玩家資產拍賣')
+    .addSubcommand(s=>s.setName('刊登').setDescription('匿名刊登自己的資產，設定最低競標額與隱藏保留價')
+      .addStringOption(o=>o.setName('資產').setDescription('輸入名稱搜尋要刊登的資產').setRequired(true).setAutocomplete(true))
+      .addIntegerOption(o=>o.setName('最低競標').setDescription('公開顯示的最低密封出價').setRequired(true).setMinValue(BLACK_MARKET_MIN_BID).setMaxValue(100000000).setAutocomplete(true))
+      .addIntegerOption(o=>o.setName('保留價').setDescription('不公開；未達此價格即流標退回').setRequired(true).setMinValue(BLACK_MARKET_MIN_BID).setMaxValue(100000000).setAutocomplete(true))
+      .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇刊登數量，未填寫時預設為 1').setMinValue(1).setMaxValue(10).addChoices(...integerChoiceOptions(10))))
+    .addSubcommand(s=>s.setName('查看').setDescription('查看黑市拍賣品；不公開賣家、出價者與最高出價')
+      .addIntegerOption(o=>o.setName('編號').setDescription('從下拉選擇拍賣品').setRequired(true).setMinValue(1).setAutocomplete(true)))
+    .addSubcommand(s=>s.setName('競標').setDescription('提交或提高自己的密封出價')
+      .addIntegerOption(o=>o.setName('編號').setDescription('拍賣品編號').setRequired(true).setMinValue(1).setAutocomplete(true))
+      .addIntegerOption(o=>o.setName('金額').setDescription('你的密封出價；其他玩家與賣家都看不到').setRequired(true).setMinValue(BLACK_MARKET_MIN_BID).setMaxValue(100000000).setAutocomplete(true)))
+    .addSubcommand(s=>s.setName('取消').setDescription('取消尚未收到任何競標的匿名刊登')
+      .addIntegerOption(o=>o.setName('編號').setDescription('自己的拍賣編號').setRequired(true).setMinValue(1).setAutocomplete(true)))
+    .addSubcommand(s=>s.setName('我的').setDescription('查看自己的匿名刊登與密封出價')),
   new SlashCommandBuilder().setName('回收廠').setDescription('把不要的載具壓成廢鐵，確認後返還原價 30%')
     .addStringOption(o=>o.setName('載具').setDescription('輸入名稱搜尋要回收的載具').setRequired(true).setAutocomplete(true))
     .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇回收數量，未填寫時預設為 1').setMinValue(1).setMaxValue(10).addChoices(...integerChoiceOptions(10))),
-  new SlashCommandBuilder().setName('二手市場').setDescription('查看其他玩家刊登的二手資產')
-    .addIntegerOption(o=>o.setName('編號').setDescription('從下拉選擇市場商品').setMinValue(1).setAutocomplete(true)),
   new SlashCommandBuilder().setName('小遊戲').setDescription('從下拉式選單開啟所有小遊戲（不含工作與搶劫）'),
   new SlashCommandBuilder().setName('世界首領').setDescription('挑戰全伺服器共享生命值的世界首領'),
   new SlashCommandBuilder().setName('玩法').setDescription('快速查看賭場玩法與常用指令'),
@@ -8234,6 +8442,12 @@ const commands = [
       ...Object.entries(heistBanks).map(([value,bank])=>({name:bank.sundayOnly?`${bank.name}｜成功取得寶庫 ${Math.round(CASINO_VAULT_LOOT_RATE*100)}%`:bank.highStake?`${bank.name}｜${bank.minMembers}人｜準備費 ${bank.prepFee}｜獎池 ${bank.reward}`:`${bank.name}｜基礎 ${bank.baseChance}%｜獎池 ${bank.reward}`,value}))))
     .addStringOption(o=>o.setName('地圖').setDescription('選擇本次搶劫地圖').setRequired(true).addChoices(
       ...Object.entries(heistMaps).map(([value,map])=>({name:`${map.name}｜成功率 ${map.chance>=0?'+':''}${map.chance}%｜收益 ×${map.rewardMultiplier}`,value})))),
+  new SlashCommandBuilder().setName('賞金獵人').setDescription('查看通緝犯、接取警方懸賞並追捕搶劫成功的玩家')
+    .addSubcommand(s=>s.setName('通緝榜').setDescription('查看目前可接取的警方懸賞'))
+    .addSubcommand(s=>s.setName('追捕').setDescription('使用自己的槍枝與彈藥追捕一名通緝犯')
+      .addUserOption(o=>o.setName('目標').setDescription('要追捕的通緝犯').setRequired(true))
+      .addStringOption(o=>o.setName('武器').setDescription('只顯示你持有且有彈藥的槍枝').setRequired(true).setAutocomplete(true)))
+    .addSubcommand(s=>s.setName('我的狀態').setDescription('查看自己的通緝值、警方懸賞與追捕冷卻')),
   new SlashCommandBuilder().setName('銀行情報').setDescription('查看今日與明日大量入金銀行'),
   new SlashCommandBuilder().setName('賄絡迷子').setDescription('花費 500 金幣嘗試提早離開小黑屋（45% 被拒絕）'),
   new SlashCommandBuilder().setName('減刑').setDescription('選擇迷子的調教方案以縮短或解除刑期')
@@ -8421,15 +8635,22 @@ async function handleInteraction(i) {
         .slice(0,25)
         .map(([value,name])=>({name,value})));
     }
-    if(i.commandName==='二手市場'&&focused.name==='編號') {
+    if(i.commandName==='黑市拍賣'&&focused.name==='編號') {
       if(!i.guildId) return i.respond([]);
-      const listings=db.prepare("SELECT id,asset_id,quantity,price FROM asset_market_listings WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 25").all(i.guildId);
-      return i.respond(listings
+      const auctions=db.prepare("SELECT id,asset_id,quantity,minimum_bid,seller_id FROM black_market_auctions WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 25").all(i.guildId);
+      return i.respond(auctions
         .filter(row=>!query||String(row.id).includes(query)||(assetCatalog[row.asset_id]?.name||'').toLowerCase().includes(query))
         .slice(0,25)
-        .map(row=>({name:`#${row.id}｜${assetCatalog[row.asset_id]?.name||row.asset_id} ×${row.quantity}｜${Number(row.price).toLocaleString('zh-TW')}`.slice(0,100),value:Number(row.id)})));
+        .map(row=>({name:`#${row.id}｜${assetCatalog[row.asset_id]?.name||row.asset_id} ×${row.quantity}｜最低 ${Number(row.minimum_bid).toLocaleString('zh-TW')}`.slice(0,100),value:Number(row.id)})));
     }
-    const numericFields=['金額','價格','售價','數量','幸運號碼'];
+    if(i.commandName==='賞金獵人'&&focused.name==='武器') {
+      if(!i.guildId) return i.respond([]);
+      return i.respond(bountyHunterWeapons(i.guildId,i.user.id)
+        .filter(({weaponId,weapon})=>!query||weaponId.includes(query)||weapon.name.toLowerCase().includes(query))
+        .slice(0,25)
+        .map(({weaponId,weapon})=>({name:`${weapon.name}｜警方火力 +${weapon.police}｜${assetCatalog[weapon.ammoId]?.name||'通用子彈'}`.slice(0,100),value:weaponId})));
+    }
+    const numericFields=['金額','價格','售價','最低競標','保留價','數量','幸運號碼'];
     if(numericFields.includes(focused.name)) {
       let values=[];
       if(focused.name==='幸運號碼') values=Array.from({length:49},(_,index)=>index+1);
@@ -8442,7 +8663,7 @@ async function handleInteraction(i) {
           .filter(value=>value>0&&value<=upper);
       }
       else if(focused.name==='金額') values=[1000,5000,10000,25000,50000,100000,250000,500000];
-      else if(['價格','售價'].includes(focused.name)) values=[1000,5000,10000,25000,50000,100000,250000,500000,1000000,5000000,10000000];
+      else if(['價格','售價','最低競標','保留價'].includes(focused.name)) values=[10000,25000,50000,100000,250000,500000,1000000,5000000,10000000];
       else if(i.commandName==='金幣調整') values=[-100000,-50000,-10000,-5000,-1000,1000,5000,10000,50000,100000];
       else values=[1,2,5,10,20,50,100];
       return i.respond([...new Set(values)]
@@ -8450,14 +8671,14 @@ async function handleInteraction(i) {
         .slice(0,25)
         .map(value=>({name:`${value<0?'扣除':'選擇'} ${Math.abs(value).toLocaleString('zh-TW')}`,value})));
     }
-    if(!['資產商城','購買資產','資產交易','變賣資產','回收廠','車庫','改裝','停機坪','碼頭','資產調整'].includes(i.commandName)) return i.respond([]);
+    if(!['資產商城','購買資產','資產交易','黑市拍賣','回收廠','車庫','改裝','停機坪','碼頭','資產調整'].includes(i.commandName)) return i.respond([]);
     let entries=Object.entries(assetCatalog);
     if(i.commandName==='資產商城') {
       const category=i.options.getString('分類');
       if(category) entries=entries.filter(([,asset])=>asset.category===category);
     }
     if(['資產商城','購買資產'].includes(i.commandName)) entries=entries.filter(([,asset])=>assetIsForSale(asset));
-    if(['資產交易','變賣資產'].includes(i.commandName)&&i.guildId) {
+    if(['資產交易','黑市拍賣'].includes(i.commandName)&&i.guildId) {
       const owned=new Set(assetsOf(i.guildId,i.user.id).map(row=>row.asset_id));
       entries=entries.filter(([assetId])=>owned.has(assetId));
     }
@@ -9029,22 +9250,7 @@ async function handleInteraction(i) {
     }
   }
   if(i.isButton() && i.customId.startsWith('asset_market:') && i.guildId) {
-    const [, ,action,idText]=i.customId.split(':'),listingId=Number(idText);
-    if(action==='cancel') {
-      try {
-        cancelMarketListing(i.guildId,i.user.id,listingId);
-        await i.deferUpdate();
-        return i.message.delete().catch(()=>{});
-      } catch(e) { return i.reply({content:`⚠️ ${e.message}`,ephemeral:true}); }
-    }
-    if(action==='buy') {
-      try {
-        const listing=buyMarketListing(i.guildId,i.user.id,listingId),asset=assetCatalog[listing.asset_id];
-        await i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🛍️ 二手資產購買完成').setDescription(`買家：${i.user}\n賣家：<@${listing.seller_id}>\n資產：**${asset.name} × ${listing.quantity}**\n支付：**${fmt(listing.price)}**\n剩餘金幣：**${fmt(listing.buyerBalanceAfter)}**\n\n商品已從二手市場下架並登記到你的資產。\n⏳ 此訊息將在 **1 分鐘後**自動刪除。`)],components:[],attachments:[],files:[]});
-        setTimeout(()=>i.message.delete().catch(()=>{}),60*1000);
-        return;
-      } catch(e) { return i.reply({content:`⚠️ 購買失敗：${e.message}`,ephemeral:true}); }
-    }
+    return i.reply({content:'ℹ️ 二手市場已關閉，所有舊刊登資產已自動退回原持有人。請改用 `/黑市拍賣` 匿名刊登、查看與競標。',ephemeral:true});
   }
   if(i.isButton() && i.customId.startsWith('dragon_gate:') && i.guildId) {
     const [,token,action]=i.customId.split(':'),game=dragonGateGames.get(token);
@@ -9544,6 +9750,11 @@ async function handleInteraction(i) {
       const after=changeBalance(i.guildId,memberId,amount,deedReward?'hao_xinyi_deed':successBank.sundayOnly?'casino_vault_heist':'job',memberId,deedReward?'HAO 信義區地契變現均分':successBank.sundayOnly?'賭場中央寶庫搶劫收益':'團隊搶銀行收益');
       return `<@${memberId}>：${fmt(after-before)}`;
     });
+    const wantedResults=heist.members.map((memberId,index)=>{
+      const reward=baseShare+(index<remainder?1:0);
+      return {memberId,...registerWantedHeist(i.guildId,memberId,reward,WANTED_SCORE_PER_TEAM_HEIST,'團隊搶銀行成功')};
+    });
+    const wantedSummary=wantedResults.map(result=>`<@${result.memberId}> ${result.wantedScore}/${WANTED_MAX_SCORE}｜${fmt(result.bountyAmount)}`).join('\n');
     const campaignResults=heist.members.map(memberId=>({memberId,result:recordHeistCampaign(i.guildId,memberId,'team','success')}));
     const heatResults=heist.members.map(memberId=>({memberId,result:recordHeistHeat(i.guildId,memberId,'success',heist.lootChoice)}));
     if(finalChance<=25) {
@@ -9561,9 +9772,10 @@ async function handleInteraction(i) {
       {name:'💼 戰利品策略',value:heist.lootChoice==='push'?`加碼搜刮｜+${Math.round((HEIST_PUSH_LOOT_MULTIPLIER-1)*100)}% 收益`:'見好就收',inline:true},
       {name:'🔥 搶劫熱度',value:`${heist.heatLevel||0}/${HEIST_HEAT_MAX}｜普通戰利品 +${((heist.heatLevel||0)*HEIST_HEAT_LOOT_BONUS*100).toFixed(0)}%`,inline:true},
       {name:'👥 搶匪名單',value:heist.members.map(memberId=>`<@${memberId}>`).join('、').slice(0,1024)},
+      {name:'🚓 警方通緝',value:`全員通緝值已增加；懸賞獵人可使用 /賞金獵人 追捕。\n${wantedSummary}`.slice(0,1024)},
       {name:'💨 逃脫事件',value:`${escapeEvent.title}\n${escapeEvent.text}`.slice(0,1024)}
     ));
-    const payload={...heistStagePayload(new EmbedBuilder().setColor(0x35C46A).setTitle(deedReward?'📜 HAO 信義區地契得手！':isMuseumTarget?'🏛️ 中央美術館搶劫成功！':'💰 團隊搶銀行成功！').setDescription(`隊伍成功突破警方封鎖，載滿戰利品返回藏身處！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n\n目標：**${heistBanks[heist.bankId].name}**${hot?'\n🔥 今日大量入金獎池加倍！':''}\n${isMuseumTarget?'戰利品':'金庫'}：**${vault.name}**｜${heistVaultRewardLabel(vault)}\n地圖：**${map.name}**${deedReward?'（地契固定結算，不套用地圖倍率）':`｜收益 ×${map.rewardMultiplier}`}\n逃跑載具：**${vehicleName}**｜有效成功率 +${effectiveVehicleBonus}%\n藏身處：**有效成功率 +${effectiveHideoutBonus}%｜戰利品 +${deedReward?0:((hideoutLootBonus-1)*100).toFixed(0)}%**\n警方戰術：**${heistPoliceTacticSummary(heist)}**\n警方載具：**${heistPoliceVehicleSummary(heist)}**｜載具壓制 -${combat.policeVehiclePressure}%｜總壓力 -${combat.policePressure}%\n${deedReward?'方案倍率：不套用於地契固定結算':`方案收益倍率：×${schemeMultiplier}`}\n警方人數：${heist.police.size}/8\n${deedReward?'地契變現總額':isMuseumTarget?'館藏戰利品':'銀行戰利品'}：**${fmt(lootTotal)}**\n${deedReward?`均分人數：**${heist.members.length} 人**`:`每人團隊獎勵：**${fmt(teamHeistRewardPerMember(heist.members.length))}**`}\n總收益：**${fmt(total)}**\n最終成功率：${finalChance}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜彈藥消耗：${heist.ammoConsumed} 箱\n\n**成員實際入帳**\n${payouts.join('\n')}${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),escapeImage),components:[]};
+    const payload={...heistStagePayload(new EmbedBuilder().setColor(0x35C46A).setTitle(deedReward?'📜 HAO 信義區地契得手！':isMuseumTarget?'🏛️ 中央美術館搶劫成功！':'💰 團隊搶銀行成功！').setDescription(`隊伍成功突破警方封鎖，載滿戰利品返回藏身處！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n\n目標：**${heistBanks[heist.bankId].name}**${hot?'\n🔥 今日大量入金獎池加倍！':''}\n${isMuseumTarget?'戰利品':'金庫'}：**${vault.name}**｜${heistVaultRewardLabel(vault)}\n地圖：**${map.name}**${deedReward?'（地契固定結算，不套用地圖倍率）':`｜收益 ×${map.rewardMultiplier}`}\n逃跑載具：**${vehicleName}**｜有效成功率 +${effectiveVehicleBonus}%\n藏身處：**有效成功率 +${effectiveHideoutBonus}%｜戰利品 +${deedReward?0:((hideoutLootBonus-1)*100).toFixed(0)}%**\n警方戰術：**${heistPoliceTacticSummary(heist)}**\n警方載具：**${heistPoliceVehicleSummary(heist)}**｜載具壓制 -${combat.policeVehiclePressure}%｜總壓力 -${combat.policePressure}%\n${deedReward?'方案倍率：不套用於地契固定結算':`方案收益倍率：×${schemeMultiplier}`}\n警方人數：${heist.police.size}/8\n${deedReward?'地契變現總額':isMuseumTarget?'館藏戰利品':'銀行戰利品'}：**${fmt(lootTotal)}**\n${deedReward?`均分人數：**${heist.members.length} 人**`:`每人團隊獎勵：**${fmt(teamHeistRewardPerMember(heist.members.length))}**`}\n總收益：**${fmt(total)}**\n最終成功率：${finalChance}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜彈藥消耗：${heist.ammoConsumed} 箱\n\n🚨 **警方通緝已建立**：全體搶匪的通緝值與警方懸賞已上升。其他玩家可使用 \`/賞金獵人 通緝榜\` 接取追捕。\n\n**成員實際入帳**\n${payouts.join('\n')}${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),escapeImage),components:[]};
     payload.embeds[0].setDescription(payload.embeds[0].data.description+'\n\n**週行動委託**\n'+heistCampaignTeamText(campaignResults));
     payload.embeds[0].setDescription(payload.embeds[0].data.description+'\n\n**戰利品策略**\n'+(heist.lootChoice==='push'?`加碼搜刮｜收益 ×${riskLootMultiplier}`:'見好就收｜無額外風險')+'\n\n**搶劫熱度**\n'+heistHeatTeamText(heatResults));
     const result=await publishLatestHeistResult(i,payload);
@@ -10609,11 +10821,43 @@ async function handleInteraction(i) {
       );
       return i.reply({content:`${buyer}`,embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🤝 玩家資產交易邀請').setDescription(`賣家：${i.user}\n買家：${buyer}\n資產：**${assetCatalog[assetId].name} × ${quantity}**\n交易價格：**${fmt(price)}**\n\n買家接受時系統才會再次確認餘額與持有數量，並同步完成轉移。邀請 **5 分鐘**後失效。`)],components:[row]});
     }
-    if(i.commandName==='變賣資產') {
-      const assetId=i.options.getString('資產',true),quantity=i.options.getInteger('數量')??1,price=i.options.getInteger('售價',true),asset=assetCatalog[assetId];
-      if(!asset) throw new Error('找不到這項資產，請從搜尋建議中選擇');
-      const listingId=createMarketListing(g,u,assetId,quantity,price);
-      return i.reply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('🏷️ 二手商品刊登完成').setDescription(`商品編號：**#${listingId}**\n賣家：${i.user}\n資產：**${asset.name} × ${quantity}**\n售價：**${fmt(price)}**\n\n刊登中的資產已由市場保管，不會被重複出售。使用 \`/二手市場 編號:${listingId}\` 可查看圖片、購買或取消刊登。`)]});
+    if(i.commandName==='黑市拍賣') {
+      const action=i.options.getSubcommand();
+      if(action==='刊登') {
+        const assetId=i.options.getString('資產',true),quantity=i.options.getInteger('數量')??1;
+        const minimumBid=i.options.getInteger('最低競標',true),reservePrice=i.options.getInteger('保留價',true);
+        const auction=createBlackMarketAuction(g,u,assetId,quantity,minimumBid,reservePrice),asset=assetCatalog[assetId];
+        return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x4A235A).setTitle('🕶️ 匿名黑市拍賣已刊登').setDescription(`拍賣編號：**#${auction.id}**\n資產：**${asset.name} × ${auction.quantity}**\n公開最低競標：**${fmt(auction.minimum_bid)}**\n你的隱藏保留價：**${fmt(auction.reserve_price)}**\n結束時間：<t:${Math.ceil(auction.ends_at/1000)}:R>\n\n賣家、競標者、競標金額與保留價均不會向其他玩家公開；最後 **1 分鐘**內有新競標時，結束時間會延長 1 分鐘。成交後將收取 **10%** 手續費存入賭場寶庫。`)]});
+      }
+      if(action==='查看') {
+        const auction=blackMarketAuctionById(i.options.getInteger('編號',true));
+        if(!auction||auction.guild_id!==g||auction.status!=='active') throw new Error('找不到進行中的黑市拍賣');
+        const asset=assetCatalog[auction.asset_id],buff=assetBuffs[auction.buff_id]||null;
+        if(!asset) throw new Error('這項資產已不存在');
+        const ownBid=db.prepare('SELECT amount FROM black_market_bids WHERE auction_id=? AND bidder_id=? AND refunded_at IS NULL').get(auction.id,u);
+        const ownInfo=ownBid?`\n你的密封出價：**${fmt(ownBid.amount)}**（僅你可見）`:'';
+        const ownerInfo=auction.seller_id===u?`\n你的隱藏保留價：**${fmt(auction.reserve_price)}**（僅你可見）`:'';
+        const embed=new EmbedBuilder().setColor(0x4A235A).setTitle(`🕶️ 黑市拍賣 #${auction.id}｜${asset.name}`).setDescription(`分類：**${asset.category}**\n稀有度：**${asset.rarity||'一般'}**\n數量：**${auction.quantity}**\n公開最低競標：**${fmt(auction.minimum_bid)}**\n目前密封出價：**${auction.bid_count} 筆**\n結束時間：<t:${Math.ceil(auction.ends_at/1000)}:R>\n${buff?`\n🎲 資產增益：**${buff.name}**\n${buff.description}\n`:''}\n🕵️ 賣家、出價者、最高出價及保留價一律匿名；出價只會在結算時比較。${ownInfo}${ownerInfo}`);
+        return i.reply(assetMediaPayload(embed,auction.asset_id,asset));
+      }
+      if(action==='競標') {
+        const auction=placeBlackMarketBid(g,u,i.options.getInteger('編號',true),i.options.getInteger('金額',true));
+        return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔒 密封出價已保管').setDescription(`黑市拍賣：**#${auction.id}**\n你的密封出價：**${fmt(auction.amount)}**\n結束時間：<t:${Math.ceil(auction.endsAt/1000)}:R>${auction.extended?'\n\n⏱️ 此次競標進入最後 1 分鐘，結束時間已延長 1 分鐘。':''}\n\n其他玩家與賣家都不會看到你的金額。若未得標或未達保留價，金幣會自動全額退回。`)]});
+      }
+      if(action==='取消') {
+        const auction=cancelBlackMarketAuction(g,u,i.options.getInteger('編號',true)),asset=assetCatalog[auction.asset_id];
+        return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x78909C).setTitle('🕶️ 黑市拍賣已取消').setDescription(`拍賣 #${auction.id} 的 **${asset?.name||auction.asset_id} × ${auction.quantity}** 已退回你的資產。\n\n只有尚未收到密封出價的刊登可以取消。`)]});
+      }
+      const sales=db.prepare("SELECT * FROM black_market_auctions WHERE guild_id=? AND seller_id=? ORDER BY id DESC LIMIT 10").all(g,u);
+      const bids=db.prepare(`SELECT a.id,a.asset_id,a.quantity,a.status,a.ends_at,b.amount
+        FROM black_market_bids b JOIN black_market_auctions a ON a.id=b.auction_id
+        WHERE a.guild_id=? AND b.bidder_id=? ORDER BY b.id DESC LIMIT 10`).all(g,u);
+      const saleText=sales.length?sales.map(auction=>`**#${auction.id}**｜${assetCatalog[auction.asset_id]?.name||auction.asset_id} ×${auction.quantity}\n狀態：${auction.status==='active'?'進行中':auction.status==='completed'?'已成交':auction.status==='expired'?'流標退回':'已取消'}｜保留價：${fmt(auction.reserve_price)}${auction.status==='active'?`｜<t:${Math.ceil(auction.ends_at/1000)}:R>`:''}`).join('\n\n'):'尚未刊登黑市拍賣。';
+      const bidText=bids.length?bids.map(bid=>`**#${bid.id}**｜${assetCatalog[bid.asset_id]?.name||bid.asset_id} ×${bid.quantity}\n你的密封出價：${fmt(bid.amount)}｜${bid.status==='active'?'競標中（不公開）':bid.status==='completed'?'已結算':'已結束／已退回'}`).join('\n\n'):'尚未送出密封出價。';
+      return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x4A235A).setTitle('🕶️ 我的黑市紀錄').addFields(
+        {name:'匿名刊登',value:saleText.slice(0,1024)},
+        {name:'我的密封出價',value:bidText.slice(0,1024)}
+      ).setFooter({text:'此面板只會向你顯示；公開頁面不會洩漏身分或出價。'})]});
     }
     if(i.commandName==='回收廠') {
       const assetId=i.options.getString('載具',true),quantity=i.options.getInteger('數量')??1,asset=assetCatalog[assetId];
@@ -10630,22 +10874,25 @@ async function handleInteraction(i) {
       const embed=new EmbedBuilder().setColor(0xF5B942).setTitle('♻️ 回收廠估價單').setDescription(`載具：**${asset.name}**\n分類：**${asset.category}**\n持有數量：**${owned}**\n本次回收：**${quantity}**\n商城原價：**${fmt(asset.price)}／輛**\n回收比例：**30%**\n預計返還：**${fmt(reward)}**\n\n⚠️ 確認後載具將永久移除且無法復原；改裝費不列入回收價。若回收最後一輛，同款載具增益與改裝資料也會一併移除。`);
       return i.reply({...assetMediaPayload(embed,assetId,asset),components:[row]});
     }
-    if(i.commandName==='二手市場') {
-      const listingId=i.options.getInteger('編號');
-      if(listingId) {
-        const listing=db.prepare("SELECT * FROM asset_market_listings WHERE id=? AND guild_id=? AND status='active'").get(listingId,g);
-        if(!listing) throw new Error('找不到這筆商品，可能已售出或下架');
-        const asset=assetCatalog[listing.asset_id],buff=assetBuffs[listing.buff_id]||null;
-        if(!asset) throw new Error('這項資產已不存在');
-        const buttons=[new ButtonBuilder().setCustomId(`asset_market:listing:buy:${listing.id}`).setLabel('確認購買').setEmoji('🛍️').setStyle(ButtonStyle.Success)];
-        if(listing.seller_id===u) buttons.push(new ButtonBuilder().setCustomId(`asset_market:listing:cancel:${listing.id}`).setLabel('取消刊登').setEmoji('🗑️').setStyle(ButtonStyle.Danger));
-        const embed=new EmbedBuilder().setColor(0xF5B942).setTitle(`🏷️ 二手商品 #${listing.id}｜${asset.name}`).setDescription(`賣家：<@${listing.seller_id}>\n分類：**${asset.category}**\n稀有度：**${asset.rarity||'一般'}**\n數量：**${listing.quantity}**\n售價：**${fmt(listing.price)}**\n商城原價參考：**${fmt(asset.price*listing.quantity)}**\n${buff?`\n🎲 資產增益：**${buff.name}**\n${buff.description}`:''}\n\n請先查看資產圖片，再決定是否購買。`);
-        const payload=assetMediaPayload(embed,listing.asset_id,asset);
-        return i.reply({...payload,components:[new ActionRowBuilder().addComponents(buttons)]});
+    if(i.commandName==='賞金獵人') {
+      const action=i.options.getSubcommand();
+      if(action==='通緝榜') {
+        const profiles=db.prepare('SELECT * FROM wanted_profiles WHERE guild_id=? AND wanted_score>0 AND bounty_amount>0 ORDER BY bounty_amount DESC,wanted_score DESC LIMIT 15').all(g);
+        const list=profiles.length?profiles.map((profile,index)=>`**${index+1}.** <@${profile.user_id}>｜${wantedRank(profile.wanted_score)}\n通緝值：**${profile.wanted_score}/${WANTED_MAX_SCORE}**｜警方懸賞：**${fmt(profile.bounty_amount)}**`).join('\n\n'):'目前沒有可追捕的通緝犯。';
+        return i.reply({embeds:[new EmbedBuilder().setColor(0x1E88E5).setTitle('🚓 警方通緝／賞金懸賞').setDescription(`${list}\n\n使用 \`/賞金獵人 追捕\`，選擇自己持有且有彈藥的武器接取任務。成功會沒收目標現有金幣中的懸賞額並使其入獄 3 分鐘；每位獵人每 10 分鐘可執行一次。`)]});
       }
-      const listings=db.prepare("SELECT * FROM asset_market_listings WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 20").all(g);
-      const list=listings.length?listings.map(row=>{const asset=assetCatalog[row.asset_id];return `**#${row.id}**｜${asset?.name||row.asset_id} × ${row.quantity}\n賣家：<@${row.seller_id}>｜售價：**${fmt(row.price)}**`;}).join('\n\n'):'目前沒有玩家刊登二手商品。';
-      return i.reply({embeds:[new EmbedBuilder().setColor(0x795548).setTitle('🛍️ 玩家二手市場').setDescription(`${list}\n\n使用 \`/二手市場 編號:\` 查看商品圖片與完整資料。\n使用 \`/變賣資產\` 刊登自己的資產。`)]});
+      if(action==='我的狀態') {
+        const profile=wantedProfile(g,u),cooldown=bountyHuntCooldownRemaining(g,u);
+        return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x1E88E5).setTitle('🪪 我的警方檔案').setDescription(`通緝身分：**${profile.wanted_score?wantedRank(profile.wanted_score):'✅ 無通緝紀錄'}**\n通緝值：**${profile.wanted_score}/${WANTED_MAX_SCORE}**\n目前懸賞：**${fmt(profile.bounty_amount)}**\n追捕任務：**${cooldown?jailText(cooldown)+' 後可再接取':'可以接取'}**\n可用武器：**${bountyHunterWeapons(g,u).length} 把**（需同時持有武器與對應通用子彈）`)]});
+      }
+      if(jailRemaining(g,u)||hospitalRemaining(g,u)) throw new Error('你目前被拘留或住院，無法接取警方追捕任務');
+      const target=i.options.getUser('目標',true);
+      if(target.bot) throw new Error('不能對機器人發布警方追捕任務');
+      const result=executeBountyHunt(g,u,target.id,i.options.getString('武器',true));
+      const outcome=result.success
+        ? `你成功追捕 <@${target.id}>，沒收並領取 **${fmt(result.payout)}** 警方懸賞；目標已被拘留 **3 分鐘**。`
+        : `你錯失 <@${target.id}> 的行蹤，對方仍維持通緝狀態。`;
+      return i.reply({embeds:[new EmbedBuilder().setColor(result.success?0x35C46A:0xD94A4A).setTitle(result.success?'🎯 賞金追捕成功':'💨 賞金追捕失敗').setDescription(`${outcome}\n\n使用武器：**${result.weapon.name}**\n本次成功率：**${result.chance}%**\n已消耗：**${assetCatalog[result.weapon.ammoId]?.name||'通用子彈'} ×1**｜剩餘 **${result.ammoAfter}**\n${result.success&&result.payout<result.profile.bounty_amount?`\n⚠️ 目標現有金幣不足，實際僅沒收 ${fmt(result.payout)}。`:''}\n\n下一次追捕任務可於 <t:${Math.ceil((Date.now()+BOUNTY_HUNT_COOLDOWN_MS)/1000)}:R> 接取。`)]});
     }
     if(i.commandName==='小遊戲') {
       return i.reply({embeds:[miniGameLauncherEmbed()],components:[miniGameMenuRow(u)]});
@@ -10918,7 +11165,7 @@ async function handleInteraction(i) {
           {name:'📅 最近 7 天',value:`產生：**${fmt(weekFlow.minted)}**\n銷毀：**${fmt(weekFlow.burned)}**\n淨變化：**${signed(weekFlow.net)}**`,inline:true},
           {name:'🔥 7 天指定銷毀',value:sinkText,inline:false}
         )
-        .setFooter({text:'玩家交易、二手市場與偷竊屬於轉移，不列入產生或銷毀；房產、套房、食物、醫療、槍枝與準備費均永久離開流通。'});
+        .setFooter({text:'玩家交易、黑市密封競標與偷竊屬於轉移；黑市成交手續費、房產、套房、食物、醫療、槍枝與準備費均永久離開流通。'});
       return i.reply({embeds:[embed],ephemeral:true});
     }
     if (i.commandName==='逃獄') {
@@ -11094,14 +11341,16 @@ async function handleInteraction(i) {
         await i.editReply(escapeEvent.scene?heistScenePayload(soloEventEmbed,escapeEvent.scene):{embeds:[soloEventEmbed]});
         await sleep(1800);
         if(escaped) {
+          const wanted=registerWantedHeist(g,u,robberyEarned,WANTED_SCORE_PER_SOLO_HEIST,'單人銀行搶劫成功');
           const announced=await announceHeistSuccess(g,new EmbedBuilder().setColor(0x35C46A).setTitle('🚨 搶劫成功公告').setDescription(`<@${u}> 成功甩開追兵，完成單人銀行搶劫！`).addFields(
             {name:'💰 實際收益',value:fmt(robberyEarned),inline:true},
             {name:'🎯 逃脫成功率',value:`${soloEscapeChance}%`,inline:true},
             {name:'🐦 同行寵物加成',value:`+${petHeistBonus.toFixed(1)}%`,inline:true},
             {name:'🔥 搶劫熱度',value:heistHeatResultText(heatResult),inline:true},
+            {name:'🚓 警方通緝',value:`${wanted.rank}\n通緝值：${wanted.wantedScore}/${WANTED_MAX_SCORE}｜警方懸賞：${fmt(wanted.bountyAmount)}`,inline:true},
             {name:'💨 逃脫事件',value:`${escapeEvent.title}\n${escapeEvent.text}`.slice(0,1024)}
           ));
-          const payload=heistScenePayload(new EmbedBuilder().setColor(0x35C46A).setTitle('🏦 搶銀行成功！').setDescription(`你成功甩開追兵，實際帶回 **${fmt(robberyEarned)}**！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n金庫：${fmt(next)}${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),'success');
+          const payload=heistScenePayload(new EmbedBuilder().setColor(0x35C46A).setTitle('🏦 搶銀行成功！').setDescription(`你成功甩開追兵，實際帶回 **${fmt(robberyEarned)}**！\n\n逃脫事件：**${escapeEvent.title}**\n${escapeEvent.text}\n金庫：${fmt(next)}\n\n🚨 **警方通緝已建立**\n${wanted.rank}｜通緝值 **${wanted.wantedScore}/${WANTED_MAX_SCORE}**｜警方懸賞 **${fmt(wanted.bountyAmount)}**\n其他玩家可用 \`/賞金獵人 通緝榜\` 接取追捕。${announced?'':'\n\n⚠️ 搶劫公告未送達，請管理員重新設定公告頻道並檢查權限。'}`),'success');
           payload.embeds[0].setDescription(payload.embeds[0].data.description+heistCampaignResultText(campaign)+'\n\n'+heistHeatResultText(heatResult));
           return publishLatestHeistResult(i,payload);
         }
@@ -11689,6 +11938,10 @@ client.once('clientReady',()=>{
   setInterval(()=>notifyPendingCasinoAllIns().catch(error=>console.error(`待補發歐印警報失敗：${error.message}`)),60000);
   setInterval(expireWebJengaGames,60000);
   setInterval(()=>processAssetAuctions().catch(error=>console.error(`限時資產拍賣排程失敗：${error.message}`)),60000);
+  setInterval(()=>{
+    try { processBlackMarketAuctions(); }
+    catch(error) { console.error(`黑市拍賣結算排程失敗：${error.message}`); }
+  },60000);
   announceTomorrowBank();
   announceSundayCasinoVault();
   announceLuckyWheelGrandPrize().catch(error=>console.error(`啟動幸運輪盤大獎公告失敗：${error.message}`));
@@ -11698,6 +11951,8 @@ client.once('clientReady',()=>{
   notifyPendingCasinoAllIns().catch(error=>console.error(`啟動補發歐印警報失敗：${error.message}`));
   expireWebJengaGames();
   processAssetAuctions().catch(error=>console.error(`啟動限時資產拍賣失敗：${error.message}`));
+  try { processBlackMarketAuctions(); }
+  catch(error) { console.error(`啟動黑市拍賣結算失敗：${error.message}`); }
 });
 function activitySignature(value) {
   return createHmac('sha256',ACTIVITY_SIGNING_SECRET).update(value).digest('base64url');

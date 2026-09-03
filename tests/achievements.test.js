@@ -2310,3 +2310,35 @@ test('賭徒身分組會補發既有玩家並自動授予新互動玩家',()=>{
   assert.equal(update.channelNames[0],'賭場公告');
   assert.match(update.changes.join('\n'),/補發賭徒身分組/);
 });
+
+test('通緝賞金獵人與匿名黑市拍賣取代舊二手市場',()=>{
+  for(const table of ['black_market_auctions','black_market_bids','wanted_profiles','bounty_hunts']) {
+    assert.match(source,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
+  for(const constant of ['BLACK_MARKET_AUCTION_DURATION_MS','BLACK_MARKET_AUCTION_EXTENSION_MS','BLACK_MARKET_COMMISSION_RATE','WANTED_SCORE_PER_SOLO_HEIST','WANTED_SCORE_PER_TEAM_HEIST','BOUNTY_HUNT_COOLDOWN_MS']) {
+    assert.match(source,new RegExp(`const ${constant}\\s*=`));
+  }
+  assert.match(source,/const BLACK_MARKET_AUCTION_EXTENSION_MS\s*=\s*60\*1000/,'黑市壓哨延長必須限定最後一分鐘');
+  const auction=source.match(/function createBlackMarketAuction\([\s\S]+?function retireLegacySecondhandMarketOnce\(\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(auction,/reserve_price/,'黑市必須保存不公開的保留價');
+  assert.match(auction,/ORDER BY amount DESC,created_at ASC,id ASC/,'密封出價應以最高價、最早出價結算');
+  assert.match(auction,/BLACK_MARKET_AUCTION_EXTENSION_MS/,'最後一分鐘延時規則不得遺漏');
+  assert.match(auction,/black_market_bid_refund/,'未得標者的託管金額必須退回');
+  assert.match(auction,/black_market_commission/,'成交手續費必須進入賭場寶庫');
+  assert.match(auction,/LEGACY_SECONDHAND_MARKET_RETIRE_MIGRATION/,'舊二手市場刊登必須安全退回');
+  assert.match(source,/function registerWantedHeist\(/);
+  assert.match(source,/function executeBountyHunt\(/);
+  assert.match(source,/bountyHuntSuccessChance/);
+  assert.match(source,/bounty_forfeit/);
+  assert.match(source,/bounty_reward/);
+  assert.match(source,/setName\('黑市拍賣'\)/);
+  assert.match(source,/setName\('賞金獵人'\)/);
+  assert.doesNotMatch(source,/setName\('變賣資產'\)/);
+  assert.doesNotMatch(source,/setName\('二手市場'\)/);
+  assert.match(source,/processBlackMarketAuctions\(\)/,'黑市拍賣必須由排程結算');
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-03-wanted-black-market.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-03-wanted-black-market');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  assert.match(update.changes.join('\n'),/二手市場已關閉/);
+  assert.match(update.changes.join('\n'),/密封出價/);
+});
