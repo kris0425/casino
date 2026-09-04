@@ -2498,8 +2498,11 @@ const auctionLimitedVehicleDefinitions=[
   {id:'auction_transport_jade_dragon_a330_jpeg',name:'🐉 Jade Dragon A330 翡翠龍航線版',category:'飛行器',price:21000000,image:'auction/transport/jpeg/jade_dragon_a330.jpg',rarity:'限時傳說',buff:'casino',buffMultiplier:3.4,auctionSeries:'交通工具典藏 II',description:'翡翠龍塗裝的中長程客機，為跨區航線與賭場品牌活動增添收藏亮點。'},
   {id:'auction_transport_koi_ocean_787_jpeg',name:'🎏 Koi Ocean 787 錦鯉海洋版',category:'飛行器',price:23000000,image:'auction/transport/jpeg/koi_ocean_787.jpg',rarity:'限時傳說',buff:'discount',buffMultiplier:3.2,auctionSeries:'交通工具典藏 II',description:'錦鯉與海洋主題彩繪的寬體客機，提供高級商城折扣與航線收藏價值。'}
 ];
+const currentAuctionSeries='交通工具典藏 II';
+const activeAuctionLimitedVehicleDefinitions=auctionLimitedVehicleDefinitions.filter(vehicle=>vehicle.auctionSeries===currentAuctionSeries);
+const retiredAuctionLimitedVehicleIds=auctionLimitedVehicleDefinitions.filter(vehicle=>vehicle.auctionSeries!==currentAuctionSeries).map(vehicle=>vehicle.id);
 const allAuctionLimitedVehicleDefinitions=[...legacyAuctionLimitedVehicleDefinitions,...auctionLimitedVehicleDefinitions];
-const auctionLimitedVehicleIds=auctionLimitedVehicleDefinitions.map(vehicle=>vehicle.id);
+const auctionLimitedVehicleIds=activeAuctionLimitedVehicleDefinitions.map(vehicle=>vehicle.id);
 const auctionLimitedTruckIds=allAuctionLimitedVehicleDefinitions.filter(vehicle=>vehicle.category==='卡車').map(vehicle=>vehicle.id);
 for(const vehicle of allAuctionLimitedVehicleDefinitions) {
   assetCatalog[vehicle.id]={...vehicle,forSale:false,auctionOnly:true};
@@ -4686,7 +4689,7 @@ function settleAssetAuction(auctionId,now=Date.now()) {
 }
 function retireLegacyAssetAuctions(now=Date.now()) {
   const legacyAuctions=db.prepare("SELECT * FROM asset_auctions WHERE status='active'").all()
-    .filter(auction=>!auctionLimitedVehicleIds.includes(auction.asset_id));
+    .filter(auction=>retiredAuctionLimitedVehicleIds.includes(auction.asset_id)||!auctionLimitedVehicleIds.includes(auction.asset_id));
   if(!legacyAuctions.length) return 0;
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -4885,7 +4888,7 @@ async function processAssetAuctions() {
       const claim=db.prepare('UPDATE asset_auctions SET announced_at=? WHERE id=? AND status=\'active\' AND announced_at IS NULL').run(Date.now(),auction.id);
       if(Number(claim.changes)!==1) continue;
       try {
-        const published=await publishAssetAuctionAnnouncement(assetAuctionById(auction.id),'✨ **霓虹邊境典藏｜全新系統拍賣已開始！**');
+        const published=await publishAssetAuctionAnnouncement(assetAuctionById(auction.id),'✨ **交通工具典藏 II｜全新無重複輪替已開始！**');
         const announcedAt=Date.now();
         db.prepare("UPDATE asset_auctions SET announced_at=?,last_reminder_at=?,announcement_channel_id=?,announcement_message_id=? WHERE id=? AND status='active'").run(announcedAt,announcedAt,published.channelId,published.messageId,auction.id);
       } catch(error) {

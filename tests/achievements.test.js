@@ -924,49 +924,36 @@ test('限時資產拍賣公告可由所有玩家直接公開出價',()=>{
   assert.match(source,/publishAssetAuctionAnnouncement\(result\.auction,'🔨/);
 });
 
-test('限時拍賣保留舊 20 款收藏並啟用 36 款當期資產',()=>{
+test('限時拍賣停止舊重複輪替並只啟用 15 款交通工具典藏 II',()=>{
   const definitionBlock=source.match(/const auctionLimitedVehicleDefinitions=\[[\s\S]+?\n\];/)?.[0]||'';
   const legacyDefinitionBlock=source.match(/const legacyAuctionLimitedVehicleDefinitions=\[[\s\S]+?\n\];/)?.[0]||'';
   assert.equal((definitionBlock.match(/\{id:'/g)||[]).length,36);
   assert.equal((legacyDefinitionBlock.match(/\{id:'/g)||[]).length,20);
   const imagePaths=[...definitionBlock.matchAll(/image:'([^']+)'/g)].map(match=>match[1]);
-  assert.equal(imagePaths.length,36);
   for(const imagePath of imagePaths) assert.equal(existsSync(new URL(`../assets/${imagePath}`,import.meta.url)),true,`缺少競標載具圖片：${imagePath}`);
   const jpegAuctionImages=[...definitionBlock.matchAll(/image:'(auction\/transport\/jpeg\/[^']+\.jpg)'/g)].map(match=>match[1]);
   assert.equal(jpegAuctionImages.length,15);
-  for(const imagePath of jpegAuctionImages) assert.equal(existsSync(new URL(`../assets/${imagePath}`,import.meta.url)),true,`缺少 JPEG 競標圖片：${imagePath}`);
-  assert.match(source,/const auctionLimitedVehicleIds=auctionLimitedVehicleDefinitions\.map\(vehicle=>vehicle\.id\)/);
-  assert.match(source,/const auctionLimitedTruckIds=allAuctionLimitedVehicleDefinitions\.filter\(vehicle=>vehicle\.category==='卡車'\)/);
+  assert.equal(new Set(jpegAuctionImages).size,15,'新輪替的 15 張 JPEG 圖片不得重複');
+  assert.equal((definitionBlock.match(/auctionSeries:'交通工具典藏 II'/g)||[]).length,15);
+  assert.match(source,/const currentAuctionSeries='交通工具典藏 II'/);
+  assert.match(source,/const activeAuctionLimitedVehicleDefinitions=auctionLimitedVehicleDefinitions\.filter\(vehicle=>vehicle\.auctionSeries===currentAuctionSeries\)/);
+  assert.match(source,/const retiredAuctionLimitedVehicleIds=auctionLimitedVehicleDefinitions\.filter\(vehicle=>vehicle\.auctionSeries!==currentAuctionSeries\)/);
+  assert.match(source,/const auctionLimitedVehicleIds=activeAuctionLimitedVehicleDefinitions\.map\(vehicle=>vehicle\.id\)/);
+  assert.match(source,/交通工具典藏 II｜全新無重複輪替已開始/);
   assert.match(source,/auctionOnly:true/);
-  assert.match(source,/asset\.auctionOnly\?\`\\n🏁 \*\*\$\{asset\.auctionSeries/);
-  const update=JSON.parse(readFileSync(new URL('../updates/2026-08-05-limited-auction-vehicles.json',import.meta.url),'utf8'));
-  assert.equal(update.id,'2026-08-05-limited-auction-vehicles');
-  assert.match(update.summary,/20 款限量/);
-  assert.match(update.changes.join('\n'),/汽車.*卡車.*機車/s);
-  const newUpdate=JSON.parse(readFileSync(new URL('../updates/2026-08-27-neon-frontier-auction.json',import.meta.url),'utf8'));
-  assert.equal(newUpdate.id,'2026-08-27-neon-frontier-auction');
-  assert.equal(newUpdate.version,'2026.08.27.1');
-  assert.match(newUpdate.summary,/6 款/);
-  assert.ok(newUpdate.changes.some(change=>change.includes('完整退回')));
-  assert.deepEqual(newUpdate.channelNames,['賭場公告']);
-  const transportUpdate=JSON.parse(readFileSync(new URL('../updates/2026-09-01-transport-auction.json',import.meta.url),'utf8'));
-  assert.equal(transportUpdate.id,'2026-09-01-transport-auction');
-  assert.match(transportUpdate.summary,/15 款/);
-  assert.match(transportUpdate.changes.join('\n'),/5 款限時汽車/);
-  assert.match(transportUpdate.changes.join('\n'),/5 款限時船舶/);
-  assert.match(transportUpdate.changes.join('\n'),/5 款限時飛行器/);
-  assert.deepEqual(transportUpdate.channelNames,['賭場公告']);
   const wave2Update=JSON.parse(readFileSync(new URL('../updates/2026-09-01-transport-auction-wave-2.json',import.meta.url),'utf8'));
-  assert.equal(wave2Update.id,'2026-09-01-transport-auction-wave-2');
   assert.equal(wave2Update.version,'2026.09.01.2');
-  assert.match(wave2Update.summary,/15 款/);
-  assert.match(wave2Update.changes.join('\n'),/皆為 JPEG/);
-  assert.deepEqual(wave2Update.channelNames,['賭場公告']);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-04-auction-rotation-ii.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-04-auction-rotation-ii');
+  assert.equal(update.channelNames[0],'賭場公告');
+  assert.match(update.changes.join('\n'),/全額退回/);
+  assert.match(update.changes.join('\n'),/15 款/);
 });
 
 test('舊批次限時拍賣會暫停、跨服退款且不影響既有收藏',()=>{
   const retirement=source.match(/function retireLegacyAssetAuctions\(now=Date\.now\(\)\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.match(retirement,/status='active'/);
+  assert.match(retirement,/retiredAuctionLimitedVehicleIds\.includes\(auction\.asset_id\)/,'已知舊系列必須明確下架');
   assert.match(retirement,/!auctionLimitedVehicleIds\.includes\(auction\.asset_id\)/,'輪替池只保留本期當期資產');
   assert.match(retirement,/'auction_legacy_refund'/);
   assert.match(retirement,/status='expired',settled_at=\?,closed_announced_at=\?/,'下架場次不應再發流標公告');
@@ -974,7 +961,7 @@ test('舊批次限時拍賣會暫停、跨服退款且不影響既有收藏',()=
   assert.match(retirement,/changeBalanceUnlocked\(auction\.current_bidder_guild_id\|\|auction\.guild_id,auction\.current_bidder_id,auction\.current_bid/,'跨服出價必須退回正確玩家金庫');
   const refunds=[],expirations=[];
   const fakeDb={exec:()=>{},prepare:sql=>sql.startsWith('SELECT')?{all:()=>[{id:42,guild_id:'auction-owner-guild',asset_id:'legacy',current_bidder_id:'player',current_bidder_guild_id:'bidder-guild',current_bid:7654321}]}:{run:(...args)=>{expirations.push(args);return {changes:1};}}};
-  const retire=new Function('db','auctionLimitedVehicleIds','assetCatalog','changeBalanceUnlocked',`${retirement};return retireLegacyAssetAuctions;`)(fakeDb,['current'],{legacy:{name:'舊資產'}},(...args)=>refunds.push(args));
+  const retire=new Function('db','retiredAuctionLimitedVehicleIds','auctionLimitedVehicleIds','assetCatalog','changeBalanceUnlocked',`${retirement};return retireLegacyAssetAuctions;`)(fakeDb,['legacy'],['current'],{legacy:{name:'舊資產'}},(...args)=>refunds.push(args));
   const retired=retire(1234);
   assert.equal(retired,1);
   assert.equal(refunds.length,1);
