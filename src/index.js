@@ -7357,7 +7357,16 @@ const miniGameCatalog=[
   {id:'duel',command:'決鬥',label:'PvP 輪盤決鬥',emoji:'🔫',description:'指定玩家進行虛構槍械決鬥',setup:'pvp'}
 ];
 function miniGameLauncherEmbed() {
-  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🎮 小遊戲大廳').setDescription(`所有 **19 款遊戲**已整合到此入口；從下方選單選擇遊戲，機器人會接著開啟下注、號碼或對手設定。\n\n🕹️ **互動網站：夾娃娃機**\n每局 25,000 金幣與 5 體力，親自控制左右位置並落爪；機台內會出現車輛、房產、各式槍枝與彈藥，成功後直接送入資產庫。\n\n🎯 **靶場打靶**\n開始前可從自己的武器庫選擇槍枝；槍枝的精準加成會提高命中率。靶場不消耗彈藥，每次消耗 8 體力、完成後冷卻 10 分鐘，命中靶心最高可獲得 **6,000 金幣**。\n\n🧱 **圖片版網頁遊戲：堆積木**\n完成下注後會取得專屬網站連結；網站會以圖片呈現穩定、搖晃及倒塌的積木塔。每回合從左、中、右三塊積木中選一塊，成功後可安全收手或繼續挑戰。完成六次的基礎派彩為 **4.4 倍**，高風險積木成功時還會累加額外倍率。\n\n下注欄可輸入金額，想投入全部金幣時輸入「**歐印**」。\n\n個別遊戲舊指令已移除；工作與搶劫請使用 \`/賺錢\`、\`/團隊搶銀行\`。`);
+  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🎮 小遊戲大廳').setDescription(`🚀 **熱門快速入口：射龍門、賽馬、賓果**。直接按下方按鈕，就能開啟該局的下注、選馬或九宮格設定。\n\n所有 **19 款遊戲**仍整合在選單中；選擇其他遊戲後，機器人會接著開啟下注、號碼或對手設定。\n\n🕹️ **互動網站：夾娃娃機**\n每局 25,000 金幣與 5 體力，親自控制左右位置並落爪；機台內會出現車輛、房產、各式槍枝與彈藥，成功後直接送入資產庫。\n\n🎯 **靶場打靶**\n開始前可從自己的武器庫選擇槍枝；槍枝的精準加成會提高命中率。靶場不消耗彈藥，每次消耗 8 體力、完成後冷卻 10 分鐘，命中靶心最高可獲得 **6,000 金幣**。\n\n🧱 **圖片版網頁遊戲：堆積木**\n完成下注後會取得專屬網站連結；網站會以圖片呈現穩定、搖晃及倒塌的積木塔。每回合從左、中、右三塊積木中選一塊，成功後可安全收手或繼續挑戰。完成六次的基礎派彩為 **4.4 倍**，高風險積木成功時還會累加額外倍率。\n\n下注欄可輸入金額，想投入全部金幣時輸入「**歐印**」。\n\n個別遊戲舊指令已移除；工作與搶劫請使用 \`/賺錢\`、\`/團隊搶銀行\`。`);
+}
+const featuredMiniGameIds=['dragon','horse','bingo'];
+function miniGameFeaturedRow(ownerId) {
+  return new ActionRowBuilder().addComponents(
+    featuredMiniGameIds.map(id=>{
+      const game=miniGameCatalog.find(entry=>entry.id===id);
+      return new ButtonBuilder().setCustomId(`mini_game_feature:${ownerId}:${game.id}`).setLabel(game.label).setEmoji(game.emoji).setStyle(ButtonStyle.Primary);
+    })
+  );
 }
 function miniGameMenuRow(ownerId) {
   return new ActionRowBuilder().addComponents(
@@ -8386,7 +8395,7 @@ const gameHelpDetails={
   petRacePvp:{label:'寵物競速 PVP',emoji:'🐾',hint:'指定玩家進行寵物障礙對決',title:'🐾 寵物競速 PVP',body:'使用 `/玩法` 選擇「寵物競速 PVP」，輸入對手與下注。勝者取得雙方獎池；每人消耗 **8 體力**，參賽寵物幸福度 -8。'},
   liarDice:{label:'骰盅吹牛 PVP',emoji:'🎲',hint:'秘密看骰、輪流喊骰與抓吹牛',title:'🎲 骰盅吹牛｜雙人 PVP',body:'使用 `/玩法` 選擇「骰盅吹牛 PVP」，輸入對手與下注。雙方各擲 **5 顆秘密骰子**，1 點為百搭；雙方各押同額，勝者取得完整獎池。'},
   big2:{label:'大老二',emoji:'🂡',hint:'挑戰五張牌型強度',title:'🂡 大老二挑戰',body:'系統發出 13 張牌並選出最高五張牌型。牌型通過本局強度門檻即可獲得下注額 **2 倍**。'},
-  miniGames:{label:'小遊戲大廳',emoji:'🎮',hint:'用單一下拉選單開啟所有遊戲',title:'🎮 小遊戲大廳與圖片版堆積木',body:'使用 `/玩法` 後，從下拉式選單選擇遊戲；需要下注、號碼、馬匹或 PVP 對手時，機器人會自動開啟設定視窗。選單不包含工作與搶劫。「抽積木」完成下注後會提供專屬網站連結，以圖片呈現積木塔的穩定、搖晃與倒塌狀態。玩家從左、中、右三塊積木中選擇一塊抽出，畫面會標示每塊的倒塌率；每次成功後可立即收手領取目前倍率，或繼續挑戰。成功 1～6 次的基礎派彩依序為 **1.1、1.3、1.65、2.2、3、4.4 倍**；普通與緊實積木風險較高，但成功時會額外累加倍率。高塔倒塌會失去本局下注，結果與派彩皆由 Oracle 伺服器保存，重新整理不會重抽。'},
+  miniGames:{label:'小遊戲大廳',emoji:'🎮',hint:'用單一下拉選單開啟所有遊戲',title:'🎮 小遊戲大廳與圖片版堆積木',body:'使用 `/玩法` 後，可優先直接點選射龍門、賽馬或賓果的快速按鈕，也可以從下拉式選單選擇其他遊戲；需要下注、號碼、馬匹或 PVP 對手時，機器人會自動開啟設定視窗。選單不包含工作與搶劫。「抽積木」完成下注後會提供專屬網站連結，以圖片呈現積木塔的穩定、搖晃與倒塌狀態。玩家從左、中、右三塊積木中選擇一塊抽出，畫面會標示每塊的倒塌率；每次成功後可立即收手領取目前倍率，或繼續挑戰。成功 1～6 次的基礎派彩依序為 **1.1、1.3、1.65、2.2、3、4.4 倍**；普通與緊實積木風險較高，但成功時會額外累加倍率。高塔倒塌會失去本局下注，結果與派彩皆由 Oracle 伺服器保存，重新整理不會重抽。'},
   slots:{label:'角子機',emoji:'🎰',hint:'三軸圖案配對派彩',title:'🎰 角子機',body:'三個 7️⃣ 可獲得 **20 倍**，其他三個相同圖案 **10 倍**，兩個相同圖案 **2 倍**；沒有配對則失去下注。'},
   lottery:{label:'大樂透',emoji:'🎱',hint:'從 1～49 選擇幸運號碼',title:'🎱 大樂透',body:'選擇 1～49 的一個幸運號碼，完全命中系統開出的號碼即可獲得下注額 **40 倍**。'},
   bingo:{label:'賓果',emoji:'🔢',hint:'自選九宮格號碼連線',title:'🔢 賓果',body:'自選 9 個不重複的 1～25 數字組成九宮格。橫、直或斜線完成連線即可獲得下注額 **4 倍**。'},
@@ -8944,6 +8953,14 @@ async function handleInteraction(i) {
       .slice(0,25).map(([value,asset])=>({name:`${asset.name}｜${fmt(asset.price)} 金幣`,value}));
     return i.respond(choices);
   }
+  if(i.isButton()&&i.customId.startsWith('mini_game_feature:')&&i.guildId) {
+    const [,ownerId,gameId]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的 `/玩法` 選單。',ephemeral:true});
+    const game=miniGameCatalog.find(entry=>entry.id===gameId);
+    if(!game) return i.reply({content:'⚠️ 找不到這款小遊戲。',ephemeral:true});
+    if(game.setup==='direct') return handleInteraction(miniGameProxyInteraction(i,game.command,{}));
+    return i.showModal(miniGameSetupModal(ownerId,game));
+  }
   if(i.isStringSelectMenu()&&i.customId.startsWith('mini_game_select:')&&i.guildId) {
     const ownerId=i.customId.split(':')[1];
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的 `/玩法` 選單。',ephemeral:true});
@@ -9079,7 +9096,7 @@ async function handleInteraction(i) {
       return;
     }
     if(action==='career') return render(careerHomeEmbed(g,ownerId),careerHomeComponents(g,ownerId));
-    if(action==='games') return render(miniGameLauncherEmbed(),[miniGameMenuRow(ownerId)]);
+    if(action==='games') return render(miniGameLauncherEmbed(),[miniGameFeaturedRow(ownerId),miniGameMenuRow(ownerId)]);
     if(action==='heist') return render(heistCampaignEmbed(g,ownerId));
     return i.update(casinoHubPayload(g,ownerId));
   }

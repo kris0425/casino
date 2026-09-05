@@ -2473,3 +2473,17 @@ test('通緝賞金獵人與匿名黑市拍賣取代舊二手市場',()=>{
   assert.match(update.changes.join('\n'),/二手市場已關閉/);
   assert.match(update.changes.join('\n'),/密封出價/);
 });
+test('玩法小遊戲提供賓果賽馬射龍門的快速入口',()=>{
+  assert.match(source,/const featuredMiniGameIds=\['dragon','horse','bingo'\]/);
+  assert.match(source,/function miniGameFeaturedRow\(ownerId\)/);
+  assert.match(source,/setCustomId\(`mini_game_feature:\$\{ownerId\}:\$\{game\.id\}`\)/);
+  assert.match(source,/i\.isButton\(\)&&i\.customId\.startsWith\('mini_game_feature:'\)/);
+  assert.match(source,/return i\.showModal\(miniGameSetupModal\(ownerId,game\)\);/);
+  assert.match(source,/if\(action==='games'\) return render\(miniGameLauncherEmbed\(\),\[miniGameFeaturedRow\(ownerId\),miniGameMenuRow\(ownerId\)\]\);/);
+  assert.match(source,/熱門快速入口：射龍門、賽馬、賓果/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-05-featured-mini-games.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-05-featured-mini-games');
+  assert.equal(update.version,'2026.09.05.9');
+  assert.match(update.summary,/賓果、賽馬或射龍門/);
+  assert.match(update.changes.join('\n'),/快速入口/);
+});
