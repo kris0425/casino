@@ -26,11 +26,11 @@ function renderPlayer(data){
   $('#heroBackground').src=data.appearance.backgroundImage||'';$('#heroCharacter').src=data.appearance.characterImage||'';
   setText('#buffIcon',data.dailyBuff.icon);setText('#buffName',`${data.dailyBuff.day}｜${data.dailyBuff.name}`);setText('#buffText',data.dailyBuff.text);
   setText('#assetCount',format(data.assets.count));setText('#assetValue',format(data.assets.value));setText('#achievementCount',`${data.achievements.unlocked} / ${data.achievements.total}`);
-  setText('#versionLabel',`版本 ${data.version}`);const appearanceModule=data.modules.find(module=>module.id==='appearance'),appearanceLink=$('#appearanceLink'),appearanceClosed=appearanceModule?.state==='coming';appearanceLink.href=appearanceModule?.href||'#';appearanceLink.textContent=appearanceClosed?'造型系統維護中':'進入角色造型';appearanceLink.classList.toggle('disabled',appearanceClosed);appearanceLink.setAttribute('aria-disabled',String(appearanceClosed));appearanceLink.onclick=appearanceClosed?event=>event.preventDefault():null;
+  setText('#versionLabel',`版本 ${data.version}`);const appearanceModule=data.modules.find(module=>module.id==='appearance'),appearanceLink=$('#appearanceLink'),appearanceClosed=appearanceModule?.state==='coming',appearanceOnDiscord=appearanceModule?.state==='discord',appearanceDisabled=appearanceClosed||appearanceOnDiscord;appearanceLink.href=appearanceOnDiscord?'#':appearanceModule?.href||'#';appearanceLink.textContent=appearanceClosed?'造型系統維護中':appearanceOnDiscord?'請在 Discord 使用 /玩家 造型':'進入角色造型';appearanceLink.classList.toggle('disabled',appearanceDisabled);appearanceLink.setAttribute('aria-disabled',String(appearanceDisabled));appearanceLink.onclick=appearanceDisabled?event=>event.preventDefault():null;
 }
 function sidebarItem({icon,name,description,href,state}){
-  const item=node(state==='coming'?'button':'a',`nav-item${state==='coming'?' disabled':''}`);if(item.tagName==='A')item.href=href;
-  item.append(node('span','nav-icon',icon));const copy=node('span','nav-copy');copy.append(node('strong','',name),node('small','',description));item.append(copy,node('span','nav-arrow',state==='coming'?'即將推出':'›'));
+  const disabled=state==='coming'||state==='discord',item=node(disabled?'button':'a',`nav-item${disabled?' disabled':''}`);if(item.tagName==='A')item.href=href;
+  item.append(node('span','nav-icon',icon));const copy=node('span','nav-copy');copy.append(node('strong','',name),node('small','',description));item.append(copy,node('span','nav-arrow',state==='coming'?'即將推出':state==='discord'?'Discord':'›'));
   if(item.tagName==='A')item.onclick=()=>closeDrawer();return item;
 }
 function renderSidebar(modules){

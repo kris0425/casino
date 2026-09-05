@@ -2,7 +2,7 @@ export const WEB_GAME_VERSION='2026.08.16.3';
 
 export const WEB_GAME_MODULES=[
   {id:'real-estate',icon:'🏙️',name:'城市建設',description:'買地、蓋樓並經營自己的房地產事業',state:'available'},
-  {id:'appearance',icon:'✨',name:'角色造型',description:'選擇角色與管理員發布的完整造型',state:'available'},
+  {id:'appearance',icon:'✨',name:'角色造型',description:'請在 Discord 使用 /玩家 造型 預覽、購買並套用完整角色外觀',state:'discord'},
   {id:'transport',icon:'🧭',name:'交通事業',description:'航空、鐵路、客運與貨運企業總覽',state:'dashboard'},
   {id:'garage',icon:'🗂️',name:'全載具車庫',description:'飛行器、汽車、機車、列車與卡車收藏',state:'dashboard'},
   {id:'vehicle-pvp',icon:'🏁',name:'載具 PVP',description:'建立房間、選車下注並觀看即時競速',state:'available'},

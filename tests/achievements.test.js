@@ -232,6 +232,30 @@ test('四套完整角色外觀可安全購買並顯示於個人資料卡',()=>{
   assert.deepEqual(update.channelNames,['賭場公告']);
   assert.match(update.summary,/自動套用/);
 });
+test('玩家角色造型改為 Discord 原生預覽、購買與套用面板',()=>{
+  const gameHtml=readFileSync(new URL('../activity/public/game.html',import.meta.url),'utf8');
+  const gameJs=readFileSync(new URL('../activity/public/game.js',import.meta.url),'utf8');
+  const webGame=readFileSync(new URL('../src/game-data/web-game.js',import.meta.url),'utf8');
+  const start=source.indexOf("if(routedCommand==='個人造型')"),end=source.indexOf("if(routedCommand==='網頁遊戲')",start),commandBlock=source.slice(start,end);
+  assert.ok(start>=0&&end>start,'缺少 /玩家 造型處理器');
+  assert.match(source,/function appearanceDiscordPayload\(g,u,characterId=null,styleId=null,notice=''\)/);
+  assert.match(source,/function handleDiscordAppearanceInteraction\(i\)/);
+  assert.match(source,/appearance_character:\$\{u\}/);
+  assert.match(source,/appearance_style:\$\{u\}:\$\{character\.id\}/);
+  assert.match(source,/appearance_purchase:\$\{u\}:\$\{character\.id\}/);
+  assert.match(source,/appearance_equip:\$\{u\}:\$\{character\.id\}:\$\{style\.id\}/);
+  assert.match(source,/await i\.deferUpdate\(\)/);
+  assert.match(commandBlock,/return i\.reply\(\{ephemeral:true,\.\.\.appearanceDiscordPayload\(g,u\)\}\)/);
+  assert.doesNotMatch(commandBlock,/appearanceActivityUrl|setURL\(/);
+  assert.match(webGame,/id:'appearance'[^\n]+state:'discord'/);
+  assert.match(gameHtml,/請在 Discord 使用 \/玩家 造型/);
+  assert.match(gameJs,/appearanceOnDiscord=appearanceModule\?\.state==='discord'/);
+  assert.match(gameJs,/state==='coming'\|\|state==='discord'/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-05-discord-native-appearance-panel.json',import.meta.url),'utf8'));
+  assert.equal(update.version,'2026.09.05.8');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  assert.match(update.summary,/Discord/);
+});
 test('四套造型以 16 張透明穿戴素材取代 Emoji 疊圖',()=>{
   for(const theme of ['casino','transport','heist','pomeranian']) for(const slot of ['outfit','headwear','face','handheld']) {
     const file=theme==='heist'&&slot==='headwear'?'headwear-open':theme==='heist'&&slot==='face'?'face-open':slot;

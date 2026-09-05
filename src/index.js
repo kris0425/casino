@@ -1694,6 +1694,75 @@ function purchaseCharacterCosmetic(g,u,characterId) {
     return {character,style,balance:next};
   } catch(error) { db.exec('ROLLBACK');throw error; }
 }
+function characterStyleAttachment(g,character,style) {
+  let file=null;
+  if(style.base) file=resolve(ACTIVITY_STATIC_ROOT,'appearance','characters',character.image);
+  else {
+    const row=db.prepare('SELECT image_file FROM character_styles WHERE guild_id=? AND character_id=? AND style_id=? AND active=1').get(g,character.id,style.id);
+    const relative=String(row?.image_file||'');
+    if(relative.startsWith(`${g}/${character.id}/`)) file=resolve(CHARACTER_STYLE_ROOT,...relative.split('/'));
+  }
+  if(!file||!existsSync(file)) return null;
+  return {file,name:`appearance-${character.id}${extname(file)||'.png'}`};
+}
+function appearanceStyleOptions(styles,selectedStyleId) {
+  const selected=styles.find(style=>style.id===selectedStyleId),options=styles.slice(0,25);
+  if(selected&&!options.some(style=>style.id===selected.id)) options[options.length-1]=selected;
+  return options;
+}
+function appearanceDiscordPayload(g,u,characterId=null,styleId=null,notice='') {
+  const equipped=equippedCharacterStyle(g,u),character=characterCosmeticById[characterId]||equipped.character||characterCosmetics[0];
+  const styles=[characterBaseStyle(character),...characterUploadedStyles(g,character.id)],style=styles.find(entry=>entry.id===styleId)||characterStyleById(g,character.id,equipped.character.id===character.id?equipped.style.id:null)||styles[0];
+  const owned=ownsCosmetic(g,u,character.id),isEquipped=equipped.character.id===character.id&&equipped.style.id===style.id;
+  const purchasePrice=Number.isSafeInteger(character.price)&&character.price>0?character.price:null;
+  const embed=new EmbedBuilder().setColor(owned?0xD7A4FF:0xF3CA70).setTitle(`${character.icon||'✨'} 角色造型｜${character.name}`).setDescription(`${notice?`${notice}\n\n`:''}${character.theme}｜完整角色外觀\n\n${owned?'✅ **已永久持有**｜可自由套用這名角色的完整造型。':purchasePrice?`🔒 **尚未持有**｜售價 **${fmt(purchasePrice)} 金幣**。`:'✅ 初始角色｜已可直接使用。'}\n目前金庫：**${fmt(balance(g,u))} 金幣**`).addFields(
+    {name:'👗 目前預覽',value:`${style.name}${style.base?'（經典造型）':'（管理員發布）'}`,inline:true},
+    {name:'📌 使用狀態',value:isEquipped?'目前正在使用':'可預覽或套用',inline:true},
+    {name:'🛡️ 規則',value:'完整角色外觀只影響展示，不提供遊戲數值加成。',inline:false}
+  ).setFooter({text:'Discord 原生造型面板｜只有開啟面板的玩家能操作'});
+  const attachment=characterStyleAttachment(g,character,style),files=attachment?[new AttachmentBuilder(attachment.file,{name:attachment.name})]:[];
+  if(attachment) embed.setImage(`attachment://${attachment.name}`);
+  const characterOptions=characterCosmetics.slice(0,25).map(entry=>({
+    label:`${entry.icon||'✨'} ${entry.name}`.slice(0,100),value:entry.id,default:entry.id===character.id,
+    description:(ownsCosmetic(g,u,entry.id)?`已擁有｜${characterUploadedStyles(g,entry.id).length+1} 款完整造型`:entry.price>0?`售價 ${fmt(entry.price)} 金幣`:'初始完整角色').slice(0,100)
+  }));
+  const styleOptions=appearanceStyleOptions(styles,style.id).map(entry=>({label:entry.name.slice(0,100),value:entry.id,default:entry.id===style.id,description:(entry.base?'系統經典造型':'管理員發布的完整造型').slice(0,100)}));
+  const components=[
+    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`appearance_character:${u}`).setPlaceholder('選擇要預覽或購買的角色').addOptions(characterOptions)),
+    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`appearance_style:${u}:${character.id}`).setPlaceholder('選擇這名角色的完整造型').addOptions(styleOptions))
+  ];
+  const actions=[];
+  if(!owned&&purchasePrice) actions.push(new ButtonBuilder().setCustomId(`appearance_purchase:${u}:${character.id}`).setLabel(`購買並套用｜${fmt(purchasePrice)}`).setEmoji('🛍️').setStyle(ButtonStyle.Success));
+  if(owned) actions.push(new ButtonBuilder().setCustomId(`appearance_equip:${u}:${character.id}:${style.id}`).setLabel(isEquipped?'目前正在使用':'套用這個完整造型').setEmoji(isEquipped?'✅':'✨').setStyle(isEquipped?ButtonStyle.Secondary:ButtonStyle.Primary).setDisabled(isEquipped));
+  components.push(new ActionRowBuilder().addComponents(actions));
+  return {embeds:[embed],components,files,attachments:[]};
+}
+async function handleDiscordAppearanceInteraction(i) {
+  const parts=i.customId.split(':'),ownerId=parts[1];
+  if(i.user.id!==ownerId) return i.reply({content:'⚠️ 這是其他玩家的角色造型面板，請使用 `/玩家 造型` 開啟自己的面板。',ephemeral:true});
+  const g=i.guildId;
+  try {
+    await i.deferUpdate();
+    if(i.isStringSelectMenu()&&parts[0]==='appearance_character') return i.editReply(appearanceDiscordPayload(g,ownerId,i.values[0],null,'👁️ 已切換角色預覽。'));
+    if(i.isStringSelectMenu()&&parts[0]==='appearance_style') {
+      const characterId=parts[2],styleId=i.values[0];
+      if(!characterCosmeticById[characterId]||!characterStyleById(g,characterId,styleId)) throw new Error('找不到這個完整造型，請重新選擇');
+      return i.editReply(appearanceDiscordPayload(g,ownerId,characterId,styleId,'👁️ 已切換完整造型預覽。'));
+    }
+    if(i.isButton()&&parts[0]==='appearance_purchase') {
+      const result=purchaseCharacterCosmetic(g,ownerId,parts[2]);
+      return i.editReply(appearanceDiscordPayload(g,ownerId,result.character.id,result.style.id,`✅ 已購入並套用 **${result.character.name}｜${result.style.name}**，支付 **${fmt(result.character.price)} 金幣**。`));
+    }
+    if(i.isButton()&&parts[0]==='appearance_equip') {
+      const result=equipCharacterStyle(g,ownerId,parts[2],parts.slice(3).join(':'));
+      return i.editReply(appearanceDiscordPayload(g,ownerId,result.character.id,result.style.id,`✅ 已套用 **${result.character.name}｜${result.style.name}**。`));
+    }
+    throw new Error('找不到這個造型操作');
+  } catch(error) {
+    console.error(`Discord 角色造型互動失敗 guild=${g} user=${ownerId}: ${error.stack||error.message}`);
+    return i.followUp({content:`⚠️ ${error.message}`,ephemeral:true}).catch(()=>null);
+  }
+}
 function decodeCharacterStyleImage(dataUrl) {
   const match=/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl||''));
   if(!match) throw new Error('圖片只支援 PNG、JPG 或 WebP');
@@ -8797,6 +8866,7 @@ async function handleInteraction(i) {
   touchTransportPanelInteraction(i);
   if(i.isButton()&&['world_boss_attack','world_boss_refresh'].includes(i.customId)&&i.guildId) return handleWorldBossInteraction(i);
   if((i.isButton()||i.isStringSelectMenu())&&i.customId.startsWith('career_')&&i.guildId) return handleCareerInteraction(i);
+  if((i.isButton()||i.isStringSelectMenu())&&i.customId.startsWith('appearance_')&&i.guildId) return handleDiscordAppearanceInteraction(i);
   if(i.isAutocomplete()) {
     const focused=i.options.getFocused(true),query=String(focused.value||'').trim().toLowerCase();
     if(i.commandName==='稱號設定'&&focused.name==='稱號') {
@@ -10843,16 +10913,7 @@ async function handleInteraction(i) {
     if(routedCommand==='賭城生涯') return i.reply({ephemeral:true,embeds:[careerHomeEmbed(g,u)],components:careerHomeComponents(g,u)});
     if(routedCommand==='個人造型') {
       if(!CHARACTER_STYLE_SYSTEM_ENABLED) return i.reply({content:'🛠️ 角色造型系統目前暫時關閉維護中。既有角色與資料都會完整保留。',ephemeral:true});
-      const url=appearanceActivityUrl(g,u,i.channelId);
-      if(!url) throw new Error('角色造型網站尚未完成設定，請稍後再試');
-      return i.reply({
-        ephemeral:true,
-        embeds:[new EmbedBuilder().setColor(0xD7A4FF).setTitle('✨ 角色造型系統').setDescription('進入網站即可選擇已擁有的角色，並套用管理員為該角色發布的完整造型。舊版分層服裝、頭飾、臉部與手持物換裝已取消。').addFields(
-          {name:'🔐 專屬安全連結',value:'連結綁定你的 Discord 帳號與伺服器，15 分鐘後失效。'},
-          {name:'🧹 舊版資料',value:'舊服裝購買、穿戴與快速預設資料已清除；已擁有的角色本體不受影響。'}
-        )],
-        components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('開啟角色造型').setEmoji('✨').setStyle(ButtonStyle.Link).setURL(url))]
-      });
+      return i.reply({ephemeral:true,...appearanceDiscordPayload(g,u)});
     }
     if(routedCommand==='網頁遊戲') {
       const url=gameActivityUrl(g,u,i.channelId);
@@ -12632,7 +12693,7 @@ async function webGamePayload(session) {
       ...module,state:'coming',description:'角色造型系統暫時維護中',href:'#'
     }:{
       ...module,
-      href:module.id==='real-estate'?`${ACTIVITY_PUBLIC_URL}/real-estate?session=${encodeURIComponent(gameActivityToken(g,u,session.channelId))}`:module.id==='appearance'?appearanceActivityUrl(g,u,session.channelId):module.id==='mahjong'?`${ACTIVITY_PUBLIC_URL}/mahjong`:`#${module.id}`
+      href:module.id==='appearance'?'#':module.id==='real-estate'?`${ACTIVITY_PUBLIC_URL}/real-estate?session=${encodeURIComponent(gameActivityToken(g,u,session.channelId))}`:module.id==='mahjong'?`${ACTIVITY_PUBLIC_URL}/mahjong`:`#${module.id}`
     }),
     expiresAt:session.exp
   };
