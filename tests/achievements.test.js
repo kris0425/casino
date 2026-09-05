@@ -1153,6 +1153,10 @@ test('團隊搶劫準備階段的戰術耗材只能本次購買並結算',()=>{
   assert.match(source,/tacticalItems:new Map\(\)/);
   assert.match(source,/heist_tactical_shop:/);
   assert.match(source,/combat\.escapeChanceBonus/);
+  assert.match(source,/grenade:\{name:'💣 手榴彈',price:18000.*robberFirepowerBonus:3/);
+  const grenadeUpdate=JSON.parse(readFileSync(new URL('../updates/2026-09-05-heist-grenade.json',import.meta.url),'utf8'));
+  assert.equal(grenadeUpdate.version,'2026.09.05.6');
+  assert.match([grenadeUpdate.title,grenadeUpdate.summary,...grenadeUpdate.changes,grenadeUpdate.note].join('\n'),/手榴彈/);
   assert.doesNotMatch(source,/setName\('戰術耗材'\)/);
 });
 test('搶劫難易度下調並保留週日寶庫風險上限',()=>{

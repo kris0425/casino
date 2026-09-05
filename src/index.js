@@ -6788,6 +6788,7 @@ const heistTacticalItems={
   flashbang:{name:'💥 閃光彈',price:10000,description:'擾亂警方武器壓制，使其降低 3%。',policeWeaponSuppression:3},
   smoke:{name:'🌫️ 煙霧彈',price:9000,description:'遮蔽撤離視線，最終成功率 +3%。',escapeChanceBonus:3},
   poison_gas:{name:'☣️ 毒氣彈',price:16000,description:'高價化學干擾，NPC 基礎警力降低 3%。',npcPoliceSuppression:3},
+  grenade:{name:'💣 手榴彈',price:18000,description:'強制突破防線，讓劫匪槍枝火力 +3。',robberFirepowerBonus:3},
   tear_gas:{name:'🫧 催淚瓦斯',price:8000,description:'迫使警方分散隊形，總警方壓制降低 2%。',policePressureSuppression:2}
 };
 function heistTacticalPurchases(heist) {
