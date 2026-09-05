@@ -1137,6 +1137,24 @@ test('團隊搶劫降低警方壓制並提高合作逃脫率',()=>{
   assert.match(source,/heistSuccessRateCap\(heistBanks\[heist\.bankId\],normalSuccessCap\)/);
 });
 
+test('團隊搶劫準備階段的戰術耗材只能本次購買並結算',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-05-heist-tactical-items.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-05-heist-tactical-items');
+  assert.equal(update.version,'2026.09.05.5');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  const text=[update.title,update.summary,...update.changes,update.note].join('\n');
+  for(const name of ['燃燒瓶','閃光彈','煙霧彈','毒氣彈','催淚瓦斯','平時商城不販售']) assert.match(text,new RegExp(name));
+  assert.match(source,/const heistTacticalItems=\{/);
+  assert.match(source,/function buyHeistTacticalItem\(g,heist,userId,itemId\)/);
+  assert.match(source,/if\(!heist\|\|heist\.lobbyClosed\) throw new Error\('這次搶劫的準備階段已結束/);
+  assert.match(source,/if\(!heist\.members\.includes\(userId\)\) throw new Error\('只有本次劫匪隊伍成員/);
+  assert.match(source,/purchases\.has\(itemId\).*每類全隊限購 1 次/);
+  assert.match(source,/changeBalance\(g,userId,-item\.price,'heist_tactical'/);
+  assert.match(source,/tacticalItems:new Map\(\)/);
+  assert.match(source,/heist_tactical_shop:/);
+  assert.match(source,/combat\.escapeChanceBonus/);
+  assert.doesNotMatch(source,/setName\('戰術耗材'\)/);
+});
 test('搶劫難易度下調並保留週日寶庫風險上限',()=>{
   assert.match(source,/const SOLO_HEIST_DEFAULT_BASE_CHANCE = Number\(process\.env\.SOLO_HEIST_DEFAULT_BASE_CHANCE \|\| 35\)/);
   assert.match(source,/base_chance INTEGER NOT NULL DEFAULT 35/);
