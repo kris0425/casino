@@ -2079,7 +2079,8 @@ test('搶劫失敗小黑屋提供即時賄賂與三種逃獄選擇',()=>{
     assert.match(methods,new RegExp(`${method}:\\{[^\\n]+chance:${chance}`));
     assert.match(methods,new RegExp(`${method}:\\{[^\\n]+failureMs:${failure}`));
   }
-  assert.match(source,/const JAIL_BRIBE_COST=500/);
+  assert.match(source,/const JAIL_BRIBE_COST=5_000_000/);
+  assert.match(source,/const JAIL_BRIBE_REFUSAL_CHANCE=0\.35/);
   assert.match(source,/function jailExitRows\(releaseAt\)/);
   assert.match(source,/setCustomId\(`jail_exit:\$\{releaseAt\}:bribe`\)/);
   assert.match(source,/function jailExitPromptText\(releaseAt,\{plural=false\}=\{\}\)/);
@@ -2087,10 +2088,14 @@ test('搶劫失敗小黑屋提供即時賄賂與三種逃獄選擇',()=>{
   const bribe=source.match(/function bribeJailGuard\(g,u,expectedReleaseAt\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.match(bribe,/BEGIN IMMEDIATE/);
   assert.match(bribe,/SELECT release_at FROM jail/);
-  assert.match(bribe,/changeBalanceUnlocked\(g,u,-JAIL_BRIBE_COST,'bribe',u,'賄賂獄警立即出獄'\)/);
-  assert.match(bribe,/releaseFromJail\(g,u\)/);
+  assert.match(bribe,/changeBalanceUnlocked\(g,u,-JAIL_BRIBE_COST,'bribe',u,'賄賂獄警｜35% 機率沒收不放人'\)/);
+  assert.match(bribe,/Math\.random\(\)>=JAIL_BRIBE_REFUSAL_CHANCE/);
+  assert.match(bribe,/if\(released\) releaseFromJail\(g,u\)/);
+  assert.match(bribe,/return \{next,released\}/);
   assert.match(bribe,/COMMIT/);
   assert.match(bribe,/ROLLBACK/);
+  assert.match(source,/if\(!result\.released\) return i\.reply/);
+  assert.match(source,/獄警沒收賄款/);
 
   const escape=source.match(/function attemptJailExit\(g,u,expectedReleaseAt,methodId\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.match(escape,/jail_escape/);
@@ -2112,6 +2117,11 @@ test('搶劫失敗小黑屋提供即時賄賂與三種逃獄選擇',()=>{
   assert.match(update.changes.join('\n'),/賄賂獄警/);
   assert.match(update.changes.join('\n'),/偷獄警鑰匙/);
   assert.match(update.changes.join('\n'),/舊有.*指令/);
+
+  const bribeUpdate=JSON.parse(readFileSync(new URL('../updates/2026-09-05-jail-bribe-balance.json',import.meta.url),'utf8'));
+  assert.equal(bribeUpdate.id,'2026-09-05-jail-bribe-balance');
+  assert.match(bribeUpdate.changes.join('\n'),/5,000,000/);
+  assert.match(bribeUpdate.changes.join('\n'),/35%/);
 });
 
 test('藏身處成功戰利品百分比四捨五入顯示',()=>{

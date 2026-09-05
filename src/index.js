@@ -1562,7 +1562,8 @@ function changeBalance(g, u, delta, kind, actor = null, reason = '') {
     return next;
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
-const JAIL_BRIBE_COST=500;
+const JAIL_BRIBE_COST=5_000_000;
+const JAIL_BRIBE_REFUSAL_CHANCE=0.35;
 const jailExitMethods={
   keys:{emoji:'🔑',label:'偷獄警鑰匙',chance:45,failureMs:60_000,successText:'你趁獄警交班時摸走鑰匙，無聲地打開牢門逃出小黑屋。',failureText:'獄警在巡邏時發現鑰匙不見，把你押回牢房。'},
   tunnel:{emoji:'⛏️',label:'挖地道',chance:60,failureMs:120_000,successText:'你沿著鬆動牆角挖出地道，從排水口鑽出監獄。',failureText:'地道在最後一段坍塌，巡邏隊循著聲響把你抓回去。'},
@@ -1570,13 +1571,13 @@ const jailExitMethods={
 };
 function jailExitRows(releaseAt) {
   return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`jail_exit:${releaseAt}:bribe`).setLabel(`賄賂獄警 ${JAIL_BRIBE_COST}`).setEmoji('💰').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`jail_exit:${releaseAt}:bribe`).setLabel(`賄賂獄警 ${JAIL_BRIBE_COST.toLocaleString()}`).setEmoji('💰').setStyle(ButtonStyle.Success),
     ...Object.entries(jailExitMethods).map(([methodId,method])=>new ButtonBuilder().setCustomId(`jail_exit:${releaseAt}:${methodId}`).setLabel(`${method.label} ${method.chance}%`).setEmoji(method.emoji).setStyle(methodId==='riot'?ButtonStyle.Danger:ButtonStyle.Primary))
   )];
 }
 function jailExitPromptText(releaseAt,{plural=false}={}) {
   const subject=plural?'被捕的玩家可各自':'你可以';
-  return `\n\n**🔒 小黑屋處置｜立即選擇**\n${subject}點選下方按鈕：\n💰 賄賂獄警 **${fmt(JAIL_BRIBE_COST)}**：保證立即出獄。\n🔑 偷獄警鑰匙：成功 **45%**｜失敗刑期 +1 分鐘。\n⛏️ 挖地道：成功 **60%**｜失敗刑期 +2 分鐘。\n🚨 發起監獄暴動：成功 **75%**｜失敗刑期 +3 分鐘。\n\n逃獄三種方式每次服刑僅能選擇一次；賄賂不受此限制。剩餘刑期：**${jailText(Math.max(0,releaseAt-Date.now()))}**。`;
+  return `\n\n**🔒 小黑屋處置｜立即選擇**\n${subject}點選下方按鈕：\n💰 賄賂獄警 **${fmt(JAIL_BRIBE_COST)}**：**65%** 立即出獄；**35%** 金錢會被沒收但不放人。\n🔑 偷獄警鑰匙：成功 **45%**｜失敗刑期 +1 分鐘。\n⛏️ 挖地道：成功 **60%**｜失敗刑期 +2 分鐘。\n🚨 發起監獄暴動：成功 **75%**｜失敗刑期 +3 分鐘。\n\n逃獄三種方式每次服刑僅能選擇一次；賄賂可另行嘗試。剩餘刑期：**${jailText(Math.max(0,releaseAt-Date.now()))}**。`;
 }
 function bribeJailGuard(g,u,expectedReleaseAt) {
   db.exec('BEGIN IMMEDIATE');
@@ -1585,10 +1586,11 @@ function bribeJailGuard(g,u,expectedReleaseAt) {
     if(!jail||Number(jail.release_at)!==expectedReleaseAt||Number(jail.release_at)<=Date.now()) throw new Error('這次小黑屋處置已失效，請重新進行遊戲');
     const current=ensureWallet(g,u);
     if(current<JAIL_BRIBE_COST) throw new Error(`賄賂獄警需要 ${fmt(JAIL_BRIBE_COST)}，你的金幣不足`);
-    const next=changeBalanceUnlocked(g,u,-JAIL_BRIBE_COST,'bribe',u,'賄賂獄警立即出獄');
-    releaseFromJail(g,u);
+    const next=changeBalanceUnlocked(g,u,-JAIL_BRIBE_COST,'bribe',u,'賄賂獄警｜35% 機率沒收不放人');
+    const released=Math.random()>=JAIL_BRIBE_REFUSAL_CHANCE;
+    if(released) releaseFromJail(g,u);
     db.exec('COMMIT');
-    return next;
+    return {next,released};
   } catch(error) {
     db.exec('ROLLBACK');
     throw error;
@@ -9298,8 +9300,9 @@ async function handleInteraction(i) {
     if(!Number.isSafeInteger(expectedReleaseAt)) return i.reply({content:'⚠️ 這次小黑屋處置無效，請重新進行遊戲。',ephemeral:true});
     try {
       if(methodId==='bribe') {
-        const next=bribeJailGuard(i.guildId,i.user.id,expectedReleaseAt);
-        return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔓 賄賂獄警成功！').setDescription(`獄警收下 **${fmt(JAIL_BRIBE_COST)}**，立即替你打開牢門。\n\n你已恢復自由。金庫：${fmt(next)}`)]});
+        const result=bribeJailGuard(i.guildId,i.user.id,expectedReleaseAt);
+        if(!result.released) return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('💸 獄警沒收賄款！').setDescription(`獄警收走 **${fmt(JAIL_BRIBE_COST)}**，卻沒有替你開門。\n\n剩餘刑期：**${jailText(jailRemaining(i.guildId,i.user.id))}**\n金庫：${fmt(result.next)}`)]});
+        return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔓 賄賂獄警成功！').setDescription(`獄警收下 **${fmt(JAIL_BRIBE_COST)}**，立即替你打開牢門。\n\n你已恢復自由。金庫：${fmt(result.next)}`)]});
       }
       const result=attemptJailExit(i.guildId,i.user.id,expectedReleaseAt,methodId);
       if(result.success) return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle(`🏃 ${result.method.label}成功！`).setDescription(`${result.method.successText}\n\n你已恢復自由。`)]});
