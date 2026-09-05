@@ -203,6 +203,35 @@ test('人物大廳六名全身角色使用透明 PNG 並加入商城',()=>{
   assert.match(source,/characterImage:equippedStyle\.style\.image/,'現行造型網站必須回傳完整角色圖片');
 });
 
+test('四套完整角色外觀可安全購買並顯示於個人資料卡',()=>{
+  const html=readFileSync(new URL('../activity/public/style.html',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../activity/public/style.js',import.meta.url),'utf8');
+  const looks=[
+    ['sapphire_sovereign_character','sapphire-sovereign.png','藍鑽至尊賓客','52_000_000'],
+    ['aurora_circuit_character','aurora-circuit-racer.png','極光賽道先鋒','56_000_000'],
+    ['jade_tide_character','jade-tide-captain.png','翡翠潮汐船長','60_000_000'],
+    ['starlight_archive_character','starlight-archive-curator.png','星光典藏館長','64_000_000']
+  ];
+  for(const [id,file,name,price] of looks) {
+    const data=readFileSync(new URL(`../activity/public/appearance/characters/${file}`,import.meta.url));
+    assert.match(cosmeticsSource,new RegExp(`id:'${id}',slot:'character'[^\\n]+name:'${name}'[^\\n]+price:${price}[^\\n]+image:'${file}'`));
+    assert.ok(data.length>1_000_000,`${file} 不是完整角色素材`);
+    assert.equal(data[25],6,`${file} 必須是具有 alpha 通道的 RGBA PNG`);
+  }
+  assert.match(source,/function purchaseCharacterCosmetic\(g,u,characterId\)/);
+  assert.match(source,/changeBalanceUnlocked\(g,u,-character\.price,'cosmetic_purchase',u/);
+  assert.match(source,/INSERT OR IGNORE INTO player_cosmetics\(guild_id,user_id,cosmetic_id\)/);
+  assert.match(source,/url\.pathname==='\/activity\/appearance\/purchase'/);
+  assert.match(source,/profileEmbed\.setImage\('attachment:\/\/profile-character\.png'\)/);
+  assert.match(source,/new AttachmentBuilder\(profileCharacterPath,\{name:'profile-character\.png'\}\)/);
+  assert.match(html,/id="purchase"/);
+  assert.match(js,/\/api\/appearance\/purchase/);
+  assert.match(js,/購買並套用/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-05-purchasable-character-looks.json',import.meta.url),'utf8'));
+  assert.equal(update.version,'2026.09.05.7');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  assert.match(update.summary,/自動套用/);
+});
 test('四套造型以 16 張透明穿戴素材取代 Emoji 疊圖',()=>{
   for(const theme of ['casino','transport','heist','pomeranian']) for(const slot of ['outfit','headwear','face','handheld']) {
     const file=theme==='heist'&&slot==='headwear'?'headwear-open':theme==='heist'&&slot==='face'?'face-open':slot;
