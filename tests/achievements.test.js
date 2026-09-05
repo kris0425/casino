@@ -80,14 +80,14 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   const start=source.indexOf('const commands = ['),end=source.indexOf('].map(c=>c.toJSON());',start);
   const commandBlock=start>=0&&end>start?source.slice(start,end):'';
   assert.ok(commandBlock,'缺少 Discord 指令定義');
-  for(const hub of ['玩家','日常','補給','寵物','小遊戲','交通事業']) {
+  for(const hub of ['玩家','日常','補給','寵物','交通事業']) {
     assert.match(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${hub}'\\)`),`缺少整合入口 /${hub}`);
   }
   const removed=[
     '金庫','個人資料','成就','稱號','每日增益','體力','每日回體力','每日',
     '商城','背包','購買','使用','寵物店','我的寵物','機場',
     '比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','骰盅吹牛',
-    '大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥'
+    '大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥','資產商城','購買資產','小遊戲'
   ];
   for(const name of removed) {
     assert.doesNotMatch(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${name}'\\)`),`舊指令 /${name} 仍在註冊`);
@@ -97,7 +97,7 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   assert.match(source,/補給:\{商城:'商城',背包:'背包',購買:'購買',使用:'使用'\}/);
   assert.match(source,/寵物:\{商店:'寵物店',我的:'我的寵物'\}/);
   for(const game of ['打靶','比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','骰盅吹牛','大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥']) {
-    assert.match(source,new RegExp(`command:'${game}'`),`/${game} 移除後未保留在小遊戲選單`);
+    assert.match(source,new RegExp(`command:'${game}'`),`/${game} 移除後未保留在玩法選單`);
   }
   assert.match(source,/miniGameProxyInteraction\(i,game\.command/);
 });
@@ -117,6 +117,16 @@ test('/玩法提供私人快速面板並保留完整指令導覽',()=>{
   assert.match(source,/transportHubEmbed\(g,ownerId\)/);
   assert.match(source,/if \(i\.commandName==='玩法'\) \{\s+return i\.reply\(\{ephemeral:true,\.\.\.casinoHubPayload\(g,u\)\}\);/);
   assert.match(source,/if\(action==='casino_hub_help'\) return i\.update\(\{embeds:\[commandHelpOverviewEmbed\('casino'\)\]/);
+});
+
+test('重複指令精簡公告引導玩家使用統一玩法入口',()=>{
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-05-command-cleanup.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-05-command-cleanup');
+  assert.equal(update.version,'2026.09.05.4');
+  assert.deepEqual(update.channelNames,['賭場公告']);
+  const text=[update.title,update.summary,...update.changes,update.note].join('\n');
+  for(const command of ['/資產商城','/購買資產','/小遊戲','/玩法']) assert.match(text,new RegExp(command.replace('/','\\/')));
+  assert.match(text,/38 個有效斜線指令/);
 });
 
 test('角色造型系統使用完整圖片並提供管理員上傳後台',()=>{
@@ -1529,7 +1539,7 @@ test('船運碼頭與船位可購買並限制新船舶停泊容量',()=>{
   assert.match(source,/function shippingBerthCapacity\(g,u\)/);
   assert.match(source,/function shippingBerthStatus\(g,u\)/);
   assert.match(source,/船位不足（目前船舶/);
-  assert.match(source,/請先到 \/資產商城 分類:碼頭 購買碼頭/);
+  assert.match(source,/請先到 \/玩法 的「資產商城」 購買碼頭/);
   assert.match(source,/碼頭船位：/);
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-10-maritime-docks-berths.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-08-10-maritime-docks-berths');
