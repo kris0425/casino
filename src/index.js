@@ -187,12 +187,6 @@ const luckyWheelSpinGifs={
   gold:assetPath('lucky_wheel/lucky_wheel_gold.gif'),
   diamond:assetPath('lucky_wheel/lucky_wheel_diamond.gif')
 };
-const jailRiotImage={path:assetPath('jail/prison_riot.jpg'),name:'prison_riot.jpg'};
-const jailRiotImageUrl=`attachment://${jailRiotImage.name}`;
-function jailRiotPayload(embed) {
-  embed.setImage(jailRiotImageUrl);
-  return {embeds:[embed],files:[new AttachmentBuilder(jailRiotImage.path,{name:jailRiotImage.name})]};
-}
 const jailRescueImages={
   force:{path:assetPath('jail/rescue_force.jpg'),name:'jail_rescue_force.jpg'},
   seduce:{path:assetPath('jail/rescue_seduce.jpg'),name:'jail_rescue_seduce.jpg'}
@@ -398,7 +392,6 @@ const teamInvites=new Map();
 const activeHeists=new Map();
 const burglaryLobbies=new Map();
 const dragonGateGames=new Map();
-const jailRiots=new Map();
 const mahjongRooms=new Map();
 const assetTradeOffers=new Map();
 const assetPurchaseOffers=new Map();
@@ -1569,15 +1562,54 @@ function changeBalance(g, u, delta, kind, actor = null, reason = '') {
     return next;
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
-function bribeMizi(g,u) {
+const JAIL_BRIBE_COST=500;
+const jailExitMethods={
+  keys:{emoji:'🔑',label:'偷獄警鑰匙',chance:45,failureMs:60_000,successText:'你趁獄警交班時摸走鑰匙，無聲地打開牢門逃出小黑屋。',failureText:'獄警在巡邏時發現鑰匙不見，把你押回牢房。'},
+  tunnel:{emoji:'⛏️',label:'挖地道',chance:60,failureMs:120_000,successText:'你沿著鬆動牆角挖出地道，從排水口鑽出監獄。',failureText:'地道在最後一段坍塌，巡邏隊循著聲響把你抓回去。'},
+  riot:{emoji:'🚨',label:'發起監獄暴動',chance:75,failureMs:180_000,successText:'你點燃監獄暴動，趁獄警忙著控制場面時混入人群逃走。',failureText:'鎮暴隊迅速壓制現場，你被單獨押回小黑屋。'}
+};
+function jailExitRows(releaseAt) {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`jail_exit:${releaseAt}:bribe`).setLabel(`賄賂獄警 ${JAIL_BRIBE_COST}`).setEmoji('💰').setStyle(ButtonStyle.Success),
+    ...Object.entries(jailExitMethods).map(([methodId,method])=>new ButtonBuilder().setCustomId(`jail_exit:${releaseAt}:${methodId}`).setLabel(`${method.label} ${method.chance}%`).setEmoji(method.emoji).setStyle(methodId==='riot'?ButtonStyle.Danger:ButtonStyle.Primary))
+  )];
+}
+function jailExitPromptText(releaseAt,{plural=false}={}) {
+  const subject=plural?'被捕的玩家可各自':'你可以';
+  return `\n\n**🔒 小黑屋處置｜立即選擇**\n${subject}點選下方按鈕：\n💰 賄賂獄警 **${fmt(JAIL_BRIBE_COST)}**：保證立即出獄。\n🔑 偷獄警鑰匙：成功 **45%**｜失敗刑期 +1 分鐘。\n⛏️ 挖地道：成功 **60%**｜失敗刑期 +2 分鐘。\n🚨 發起監獄暴動：成功 **75%**｜失敗刑期 +3 分鐘。\n\n逃獄三種方式每次服刑僅能選擇一次；賄賂不受此限制。剩餘刑期：**${jailText(Math.max(0,releaseAt-Date.now()))}**。`;
+}
+function bribeJailGuard(g,u,expectedReleaseAt) {
   db.exec('BEGIN IMMEDIATE');
   try {
+    const jail=db.prepare('SELECT release_at FROM jail WHERE guild_id=? AND user_id=?').get(g,u);
+    if(!jail||Number(jail.release_at)!==expectedReleaseAt||Number(jail.release_at)<=Date.now()) throw new Error('這次小黑屋處置已失效，請重新進行遊戲');
     const current=ensureWallet(g,u);
-    if(current<500) throw new Error(`賄絡需要 ${fmt(500)}，你的金幣不足`);
-    const staminaAfter=consumeStamina(g,u,5);
-    const next=changeBalanceUnlocked(g,u,-500,'bribe',u,'賄絡迷子');
+    if(current<JAIL_BRIBE_COST) throw new Error(`賄賂獄警需要 ${fmt(JAIL_BRIBE_COST)}，你的金幣不足`);
+    const next=changeBalanceUnlocked(g,u,-JAIL_BRIBE_COST,'bribe',u,'賄賂獄警立即出獄');
+    releaseFromJail(g,u);
     db.exec('COMMIT');
-    return {next,staminaAfter};
+    return next;
+  } catch(error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+function attemptJailExit(g,u,expectedReleaseAt,methodId) {
+  const method=jailExitMethods[methodId];
+  if(!method) throw new Error('找不到這個逃獄方式');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const jail=db.prepare('SELECT release_at FROM jail WHERE guild_id=? AND user_id=?').get(g,u);
+    if(!jail||Number(jail.release_at)!==expectedReleaseAt||Number(jail.release_at)<=Date.now()) throw new Error('這次小黑屋處置已失效，請重新進行遊戲');
+    const used=db.prepare('SELECT used FROM jail_escape WHERE guild_id=? AND user_id=?').get(g,u)?.used||0;
+    if(used) throw new Error('這次服刑已經嘗試過逃獄；可改用賄賂獄警立即出獄');
+    db.prepare('INSERT INTO jail_escape(guild_id,user_id,used) VALUES(?,?,1) ON CONFLICT(guild_id,user_id) DO UPDATE SET used=1').run(g,u);
+    const success=Math.random()*100<method.chance;
+    const releaseAt=success?0:Number(jail.release_at)+method.failureMs;
+    if(success) releaseFromJail(g,u);
+    else db.prepare('UPDATE jail SET release_at=? WHERE guild_id=? AND user_id=?').run(releaseAt,g,u);
+    db.exec('COMMIT');
+    return {method,success,releaseAt};
   } catch(error) {
     db.exec('ROLLBACK');
     throw error;
@@ -8189,12 +8221,6 @@ function applyMahjongClaim(game,playerId,action) {
   if(action==='kong'&&!taiwanMahjongDraw(game,playerId)) return {finished:true};
   return {finished:false};
 }
-function riotRow(token,disabled=false) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`riot_join:${token}`).setLabel('加入暴動').setEmoji('✊').setStyle(ButtonStyle.Danger).setDisabled(disabled),
-    new ButtonBuilder().setCustomId(`riot_start:${token}`).setLabel('發動暴動').setEmoji('🚨').setStyle(ButtonStyle.Primary).setDisabled(disabled)
-  );
-}
 const gameHelpDetails={
   overview:{label:'玩法總覽',emoji:'🎰',hint:'查看所有主要系統',title:'🎰 澳門最大賭場｜玩法總覽',body:`先使用 \`/日常 領取\`、\`/賺錢\` 累積金幣，再用 \`/小遊戲\` 從下拉式選單選擇喜歡的遊戲下注。\n\n🕹️ 互動機台｜夾娃娃機可操作落爪，夾取車輛、房產、槍枝與彈藥\n🎯 靶場訓練｜打靶前可選擇自己的槍枝，精準槍枝提高命中率\n🧱 風險遊戲｜抽積木、射龍門\n🃏 桌上遊戲｜比大小、大老二、麻將\n🎰 機台遊戲｜角子機、大樂透、賓果、刮刮樂、賽馬\n🎡 免費活動｜幸運輪盤每天免費 5 次，之後每次 100,000，單日最多 25 次\n🚓 團隊玩法｜最多 8 名劫匪對抗 8 名警察\n🏎️ 資產收藏｜房產與載具可提供永久增益\n\n所有 19 款遊戲統一由 \`/小遊戲\` 進入；夾娃娃機每局 **25,000 金幣／5 體力**。打靶每次消耗 **8 體力**、冷卻 10 分鐘且不消耗彈藥。一般賭場遊戲每局消耗 **10 體力**，最低下注 **${fmt(MIN_BET)}** 且沒有下注上限，也可以輸入「歐印」。`},
   highlow:{label:'比大小',emoji:'🃏',hint:'與莊家各抽一張牌',title:'🃏 比大小',body:'你與莊家各抽一張牌，點數與花色較大者獲勝。勝利獲得下注額 **2 倍**，平手退回下注，落敗則失去下注。'},
@@ -8230,7 +8256,7 @@ const commandHelpCategories={
   shop:{label:'🛒 商城與背包',description:'集中購買、查看及使用補給品',commands:['補給']},
   pets:{label:'🐾 寵物與陪伴',description:'寵物商店及同行夥伴管理',commands:['寵物']},
   assets:{label:'🏎️ 資產與交易',description:'房產、航空與交通事業、載具、改裝、展示、匿名黑市拍賣與賞金追捕',commands:['資產商城','購買資產','我的資產','藏身處','交通事業','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','回收廠','黑市拍賣','賞金獵人']},
-  heist:{label:'🚓 團隊與小黑屋',description:'隊伍搶劫、情報、救援、逃獄與暴動',commands:['隊伍','團隊搶銀行','銀行情報','賄絡迷子','減刑','逃獄','小黑屋暴動','救援同伴']},
+  heist:{label:'🚓 團隊與小黑屋',description:'隊伍搶劫、情報、入獄即時選擇與救援',commands:['隊伍','團隊搶銀行','銀行情報','減刑','救援同伴']},
   admin:{label:'🛡️ 管理員與系統',description:'玩法入口及限管理員使用的維護指令',commands:['玩法','造型後台','搶劫公告頻道','單人搶劫機率','稱號設定','資產調整','金幣調整','管理員入金','帳務紀錄','經濟監控']}
 };
 const detailedHelpCommandKeys={小遊戲:'miniGames',玩家:'playerHub',日常:'dailyHub',補給:'supplyHub',寵物:'pets',團隊搶銀行:'heist',賺錢:'money',轉帳:'transfers',資產商城:'assets',交通事業:'assets',藏身處:'hideout'};
@@ -8452,13 +8478,10 @@ const commands = [
       .addStringOption(o=>o.setName('武器').setDescription('只顯示你持有且有彈藥的槍枝').setRequired(true).setAutocomplete(true)))
     .addSubcommand(s=>s.setName('我的狀態').setDescription('查看自己的通緝值、警方懸賞與追捕冷卻')),
   new SlashCommandBuilder().setName('銀行情報').setDescription('查看今日與明日大量入金銀行'),
-  new SlashCommandBuilder().setName('賄絡迷子').setDescription('花費 500 金幣嘗試提早離開小黑屋（45% 被拒絕）'),
   new SlashCommandBuilder().setName('減刑').setDescription('選擇迷子的調教方案以縮短或解除刑期')
     .addStringOption(o=>o.setName('方式').setDescription('選擇減刑方式').setRequired(true).addChoices(
       {name:'⏳ 出賣肉體｜20 體力，剩餘刑期減半',value:'half'},
       {name:'🔓 迷子的肉體調教｜消耗目前所有體力，立即出獄',value:'full'})),
-  new SlashCommandBuilder().setName('逃獄').setDescription('每次入獄可嘗試一次逃離迷子小黑屋'),
-  new SlashCommandBuilder().setName('小黑屋暴動').setDescription('召集獄友發動暴動，成功後全員獲釋'),
   new SlashCommandBuilder().setName('救援同伴').setDescription('嘗試救出被關在迷子小黑屋的隊友')
     .addUserOption(o=>o.setName('玩家').setDescription('要救援的隊伍同伴').setRequired(true))
     .addStringOption(o=>o.setName('方法').setDescription('選擇救援方式').setRequired(true).addChoices(
@@ -9270,24 +9293,20 @@ async function handleInteraction(i) {
     const text=inside?'🎯 射中龍門！':post?'💥 撞柱！下注全失。':'❌ 沒有射中。';
     return i.update({embeds:[new EmbedBuilder().setColor(awarded?0x35C46A:0xD94A4A).setTitle('🚪 射龍門｜開出射牌').setDescription(`門牌：**${cardText(game.a)}｜${cardText(game.b)}**\n射牌：**${cardText(shot)}**\n\n${text}\n結算：${awarded?`獲得 ${fmt(settlement.credited)}`:`損失 ${fmt(game.bet)}`}${titleLuckNotice(settlement)}\n金庫：${fmt(balance(i.guildId,i.user.id))}`)],components:[]});
   }
-  if(i.isButton() && i.customId.startsWith('riot_') && i.guildId) {
-    const [action,token]=i.customId.split(':'),riot=jailRiots.get(token);
-    if(!riot) return i.reply({content:'⚠️ 這場暴動已經結束。',ephemeral:true});
-    if(action==='riot_join') {
-      if(!jailRemaining(i.guildId,i.user.id)) return i.reply({content:'⚠️ 只有正在小黑屋服刑的玩家能加入。',ephemeral:true});
-      riot.members.add(i.user.id);
-      return i.reply({content:`✊ 你已加入暴動，目前共 ${riot.members.size} 人。`,ephemeral:true});
+  if(i.isButton() && i.customId.startsWith('jail_exit:') && i.guildId) {
+    const [,releaseAtText,methodId]=i.customId.split(':'),expectedReleaseAt=Number(releaseAtText);
+    if(!Number.isSafeInteger(expectedReleaseAt)) return i.reply({content:'⚠️ 這次小黑屋處置無效，請重新進行遊戲。',ephemeral:true});
+    try {
+      if(methodId==='bribe') {
+        const next=bribeJailGuard(i.guildId,i.user.id,expectedReleaseAt);
+        return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔓 賄賂獄警成功！').setDescription(`獄警收下 **${fmt(JAIL_BRIBE_COST)}**，立即替你打開牢門。\n\n你已恢復自由。金庫：${fmt(next)}`)]});
+      }
+      const result=attemptJailExit(i.guildId,i.user.id,expectedReleaseAt,methodId);
+      if(result.success) return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle(`🏃 ${result.method.label}成功！`).setDescription(`${result.method.successText}\n\n你已恢復自由。`)]});
+      return i.reply({ephemeral:true,embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle(`🚨 ${result.method.label}失敗！`).setDescription(`${result.method.failureText}\n\n刑期增加 **${Math.floor(result.method.failureMs/60_000)} 分鐘**。目前剩餘：**${jailText(Math.max(0,result.releaseAt-Date.now()))}**。`)]});
+    } catch(error) {
+      return i.reply({content:`⚠️ ${error.message}`,ephemeral:true});
     }
-    if(i.user.id!==riot.ownerId) return i.reply({content:'⚠️ 只有發起人能下令暴動。',ephemeral:true});
-    const members=[...riot.members].filter(id=>jailRemaining(i.guildId,id));
-    const chance=Math.min(75,20+(members.length-1)*15);
-    jailRiots.delete(token);
-    if(Math.random()*100<chance) {
-      members.forEach(id=>releaseFromJail(i.guildId,id));
-      return i.update({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔥 小黑屋暴動成功！').setDescription(`眾人合力撞開鐵門、突破迷子的封鎖！\n\n成功率：${chance}%\n獲釋玩家：\n${members.map(id=>`• <@${id}>`).join('\n')}`).setImage(jailRiotImageUrl)],components:[riotRow(token,true)]});
-    }
-    for(const id of members) db.prepare('UPDATE jail SET release_at=release_at+120000 WHERE guild_id=? AND user_id=?').run(i.guildId,id);
-    return i.update({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🚨 小黑屋暴動失敗！').setDescription(`迷子帶著猛博美鎮壓現場，參與者刑期全部增加 **2 分鐘**。\n\n成功率：${chance}%\n參與人數：${members.length}`).setImage(jailRiotImageUrl)],components:[riotRow(token,true)]});
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('mahjong_discard:') && i.guildId) {
     const token=i.customId.split(':')[1],game=mahjongRooms.get(token);
@@ -9731,6 +9750,10 @@ async function handleInteraction(i) {
       const payload={...heistStagePayload(new EmbedBuilder().setColor(0xD94A4A).setTitle('🚔 警方成功阻止搶劫！').setDescription(`${policeReinforcements?'🚨 反擊驚動特勤隊，大批警力從四面包圍！':escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美死死咬住隊員的褲管並將人撲倒，整隊當場被逮捕。`:'警方掌握線報並封鎖所有出口，隊伍在最後關頭遭到包圍。'}\n${arrestText}\n\n金庫：${vault.name}（${heistVaultRewardLabel(vault)}）\n地圖：${map.name}\n逃跑載具：${vehicleName}（有效加成 +${effectiveVehicleBonus}%）\n警方人數：${heist.police.size}/8\n警方戰術：${heistPoliceTacticSummary(heist)}\n警方載具：${heistPoliceVehicleSummary(heist)}（壓制 -${combat.policeVehiclePressure}%）\n警方總壓力：-${combat.policePressure}%\n線人情報：${informantText}\n警方應對：${heist.policeStrategy==='counter'?'反擊警察':'專心逃跑'}\n逃脫事件：${escapeEvent.title}\n最終成功率：${finalChance}%\n劫匪體力消耗：${heist.robberStaminaCost}｜警察體力消耗：10\n警方獎勵：每人保底 ${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}，另平分目標獎池 ${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%\n準備費銷毀：${fmt(heist.prepFeeTotal)}｜彈藥消耗：${heist.ammoConsumed} 箱${policePayouts.length?`\n\n**警方實際入帳**\n${policePayouts.join('\n')}`:''}`),escapeImage),components:[]};
       payload.embeds[0].setDescription(payload.embeds[0].data.description+'\n\n**週行動委託**\n'+heistCampaignTeamText(campaignResults));
       payload.embeds[0].setDescription(payload.embeds[0].data.description+'\n\n**戰利品策略**\n'+(heist.lootChoice==='push'?'加碼搜刮｜額外風險已承擔':'見好就收｜穩妥撤離')+'\n\n**搶劫熱度**\n'+heistHeatTeamText(heatResults));
+      if(jailedRobbers.length) {
+        payload.embeds[0].setDescription(payload.embeds[0].data.description+jailExitPromptText(releaseAt,{plural:true}));
+        payload.components=jailExitRows(releaseAt);
+      }
       return publishLatestHeistResult(i,payload);
     }
     escapeImage='success';
@@ -10439,7 +10462,7 @@ async function handleInteraction(i) {
       db.prepare('DELETE FROM jail_training WHERE guild_id=? AND user_id=?').run(i.guildId,id);
       db.prepare('DELETE FROM jail_escape WHERE guild_id=? AND user_id=?').run(i.guildId,id);
     }
-    return i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🚨 多人闖空門失敗！').setDescription(`警報大響，全隊 ${members.map(id=>`<@${id}>`).join('、')} 都被逮捕，關進迷子的小黑屋 **2 分鐘**。`)],components:[]});
+    return i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🚨 多人闖空門失敗！').setDescription(`警報大響，全隊 ${members.map(id=>`<@${id}>`).join('、')} 都被逮捕，關進迷子的小黑屋 **2 分鐘**。${jailExitPromptText(releaseAt,{plural:true})}`)],components:jailExitRows(releaseAt)});
   }
   if(i.isButton()&&i.customId.startsWith('jenga_')&&i.guildId) {
     const [action,token,indexText]=i.customId.split(':'),session=jengaGames.get(token);
@@ -11171,39 +11194,6 @@ async function handleInteraction(i) {
         .setFooter({text:'玩家交易、黑市密封競標與偷竊屬於轉移；黑市成交手續費、房產、套房、食物、醫療、槍枝與準備費均永久離開流通。'});
       return i.reply({embeds:[embed],ephemeral:true});
     }
-    if (i.commandName==='逃獄') {
-      const remaining=jailRemaining(g,u);
-      if(!remaining) throw new Error('你目前不在迷子的小黑屋');
-      const used=db.prepare('SELECT used FROM jail_escape WHERE guild_id=? AND user_id=?').get(g,u)?.used||0;
-      if(used) throw new Error('這次服刑已經嘗試過逃獄，不能再次嘗試');
-      db.prepare('INSERT INTO jail_escape(guild_id,user_id,used) VALUES(?,?,1) ON CONFLICT(guild_id,user_id) DO UPDATE SET used=1').run(g,u);
-      await i.reply({embeds:[new EmbedBuilder().setColor(0x607D8B).setTitle('🗝️ 逃獄行動開始').setDescription('你趁迷子不注意，偷偷撬開小黑屋的門鎖……')]});
-      await sleep(1800);
-      const escapeEvent=rollEscapeEvent('jail');
-      const escapeChance=Math.min(0.45,Math.max(0.05,0.25+escapeEvent.modifier/100));
-      const jailEventEmbed=new EmbedBuilder().setColor(escapeEvent.forceFail?0xD94A4A:0xF5B942).setTitle(escapeEvent.title).setDescription(`${escapeEvent.text}\n\n${escapeEvent.forceFail?'猛博美把你撲倒在小黑屋門口，逃獄直接失敗！':`本次逃獄機率：**${Math.round(escapeChance*100)}%**`}`);
-      await i.editReply(escapeEvent.scene?heistScenePayload(jailEventEmbed,escapeEvent.scene):{embeds:[jailEventEmbed]});
-      await sleep(1800);
-      if(!escapeEvent.forceFail&&Math.random()<escapeChance) {
-        releaseFromJail(g,u);
-        await i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🏃 逃獄成功！').setDescription('你成功避開迷子的巡邏，刑期全部抵銷，恢復自由！')]});
-        scheduleInteractionReplyDeletion(i,JAIL_RESULT_DELETE_DELAY);
-        return;
-      }
-      const newRelease=Date.now()+remaining+60000;
-      db.prepare('UPDATE jail SET release_at=? WHERE guild_id=? AND user_id=?').run(newRelease,g,u);
-      const jailFailureEmbed=new EmbedBuilder().setColor(0xD94A4A).setTitle('🚨 逃獄失敗！').setDescription(`${escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美將你撲倒後大聲吠叫，迷子立刻趕到現場。`:'迷子在門口抓到你。'}\n剩餘刑期增加 **1 分鐘**。\n目前剩餘：${jailText(remaining+60000)}`);
-      await i.editReply(escapeEvent.scene?heistScenePayload(jailFailureEmbed,escapeEvent.scene):{embeds:[jailFailureEmbed]});
-      scheduleInteractionReplyDeletion(i,JAIL_RESULT_DELETE_DELAY);
-      return;
-    }
-    if(i.commandName==='小黑屋暴動') {
-      if(!jailRemaining(g,u)) throw new Error('只有正在迷子小黑屋服刑的玩家能發動暴動');
-      const token=Math.random().toString(36).slice(2,10),riot={ownerId:u,members:new Set([u])};
-      jailRiots.set(token,riot); setTimeout(()=>jailRiots.delete(token),5*60*1000);
-      const embed=new EmbedBuilder().setColor(0xD94A4A).setTitle('✊ 小黑屋暴動集結').setDescription(`${i.user} 正在召集獄友！\n\n初始成功率：**20%**\n每增加一名獄友：**+15%**\n最高成功率：**75%**\n失敗後所有參與者刑期 **+2 分鐘**。\n\n獄友先點擊「加入暴動」，發起人再按「發動暴動」。`);
-      return i.reply({...jailRiotPayload(embed),components:[riotRow(token)]});
-    }
     if (i.commandName==='救援同伴') {
       const target=i.options.getUser('玩家',true),method=i.options.getString('方法',true);
       if(target.id===u||target.bot) throw new Error('請選擇另一位玩家');
@@ -11263,24 +11253,6 @@ async function handleInteraction(i) {
       const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`jail_training:${u}`).setLabel('願意，花 20 體力換取減刑').setStyle(ButtonStyle.Danger));
       return i.reply({embeds:[new EmbedBuilder().setColor(0x9C27B0).setTitle('迷子的減刑提議').setDescription(`**你是否願意出賣肉體換取減刑?**\n\n消耗：20 體力\n效果：剩餘刑期減半\n目前刑期：${jailText(remaining)}`)],components:[row]});
     }
-    if (i.commandName==='賄絡迷子') {
-      const hospitalized=hospitalRemaining(g,u);
-      if(hospitalized) throw new Error(`殭屍病毒封鎖了醫院，你還有 ${jailText(hospitalized)} 才能行動`);
-      const remaining=jailRemaining(g,u);
-      if(!remaining) throw new Error('你目前不在迷子的小黑屋，不需要賄絡');
-      const {next,staminaAfter}=bribeMizi(g,u);
-      const refused=Math.random()<0.45;
-      await i.reply({embeds:[new EmbedBuilder().setColor(0xF5B942).setTitle('💰 嘗試賄絡迷子…').setDescription(`你悄悄遞出一袋 **500 金幣**。\n迷子正在考慮……\n體力：${staminaAfter}/${staminaMax(g,u)}`)]});
-      scheduleRandomEvent(i,g,u);
-      await sleep(1600);
-      if(refused) {
-        return i.editReply({embeds:[new EmbedBuilder().setColor(0xD94A4A).setTitle('🙅 迷子拒絕賄絡！').setDescription(`迷子沒收了 **${fmt(500)}**，但沒有放你出去。\n剩餘服刑：${jailText(jailRemaining(g,u))}\n金庫：${fmt(next)}`)]});
-      }
-      releaseFromJail(g,u);
-      await i.editReply({embeds:[new EmbedBuilder().setColor(0x35C46A).setTitle('🔓 賄絡成功！').setDescription(`迷子收下金幣並偷偷打開小黑屋，你已經恢復自由！\n金庫：${fmt(next)}`)]});
-      scheduleInteractionReplyDeletion(i);
-      return;
-    }
     if (i.commandName==='賺錢') {
       const jailed=jailRemaining(g,u);
       if(jailed) throw new Error(`你被關在迷子的小黑屋，還有 ${jailText(jailed)} 才能行動`);
@@ -11314,12 +11286,14 @@ async function handleInteraction(i) {
         const escaped=!policeReinforcements&&!escapeEvent.forceFail&&Math.random()*100<soloEscapeChance;
         let next=balance(g,u);
         let robberyEarned=0;
+        let jailReleaseAt=0;
         if(escaped) {
           const before=next;
           next=changeBalance(g,u,Math.floor(SOLO_HEIST_REWARD*heistHeatLootMultiplier(heatLevel)),'job',u,'搶銀行成功');
           robberyEarned=next-before;
         } else {
           const releaseAt=Date.now()+5*60*1000;
+          jailReleaseAt=releaseAt;
           db.prepare('INSERT INTO jail(guild_id,user_id,release_at,reason) VALUES(?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET release_at=excluded.release_at,reason=excluded.reason').run(g,u,releaseAt,'搶銀行失敗');
           db.prepare('DELETE FROM jail_training WHERE guild_id=? AND user_id=?').run(g,u);
           db.prepare('DELETE FROM jail_escape WHERE guild_id=? AND user_id=?').run(g,u);
@@ -11360,7 +11334,8 @@ async function handleInteraction(i) {
         if(escapeEvent.forceFail) incrementAchievementProgress(g,u,'pomeranianVictim');
         const failureScene=escapeEvent.scene||(escapeEvent.forceFail?'arrested':'surrounded');
         const payload=heistScenePayload(new EmbedBuilder().setColor(0x1F1F1F).setTitle('🚔 搶銀行失敗！').setDescription(`${escapeEvent.forceFail?`${POLICE_DOG_TEXT}\n猛博美將你撲倒在地，警員立刻上前逮捕。`:'你沒有逃過追捕。'}\n你被關進 **迷子的小黑屋 5 分鐘**。\n期間不能進行任何遊戲或再次賺錢。`),failureScene);
-        payload.embeds[0].setDescription(payload.embeds[0].data.description+heistCampaignResultText(campaign)+'\n\n'+heistHeatResultText(heatResult));
+        payload.embeds[0].setDescription(payload.embeds[0].data.description+heistCampaignResultText(campaign)+'\n\n'+heistHeatResultText(heatResult)+jailExitPromptText(jailReleaseAt));
+        payload.components=jailExitRows(jailReleaseAt);
         return publishLatestHeistResult(i,payload);
       }
       if(job==='rebar' || job==='wire') {

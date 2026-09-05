@@ -2062,24 +2062,56 @@ test('世界首領提供共享血量、體力挑戰、貢獻排行與寶庫比�
   assert.match(update.changes.join('\n'),/平日 12:00–14:00/);
 });
 
-test('賄絡迷子會修復舊版小數金庫並以單一交易扣除體力與金幣',()=>{
+test('搶劫失敗小黑屋提供即時賄賂與三種逃獄選擇',()=>{
   const migration=source.match(/function migrateWalletBalancesToIntegers\(\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.match(migration,/typeof\(balance\)<>'integer'/);
   assert.match(migration,/Math\.trunc\(numeric\)/);
   assert.match(migration,/'wallet_repair'/);
   assert.match(source,/migrateWalletBalancesToIntegers\(\);/);
 
-  const bribe=source.match(/function bribeMizi\(g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
+  const methods=source.match(/const jailExitMethods=\{[\s\S]+?\n\};/)?.[0]||'';
+  for(const [method,label,chance,failure] of [
+    ['keys','偷獄警鑰匙',45,'60_000'],
+    ['tunnel','挖地道',60,'120_000'],
+    ['riot','發起監獄暴動',75,'180_000']
+  ]) {
+    assert.match(methods,new RegExp(`${method}:\\{[^\\n]+label:'${label}'`));
+    assert.match(methods,new RegExp(`${method}:\\{[^\\n]+chance:${chance}`));
+    assert.match(methods,new RegExp(`${method}:\\{[^\\n]+failureMs:${failure}`));
+  }
+  assert.match(source,/const JAIL_BRIBE_COST=500/);
+  assert.match(source,/function jailExitRows\(releaseAt\)/);
+  assert.match(source,/setCustomId\(`jail_exit:\$\{releaseAt\}:bribe`\)/);
+  assert.match(source,/function jailExitPromptText\(releaseAt,\{plural=false\}=\{\}\)/);
+
+  const bribe=source.match(/function bribeJailGuard\(g,u,expectedReleaseAt\) \{[\s\S]+?\n\}/)?.[0]||'';
   assert.match(bribe,/BEGIN IMMEDIATE/);
-  assert.match(bribe,/consumeStamina\(g,u,5\)/);
-  assert.match(bribe,/changeBalanceUnlocked\(g,u,-500,'bribe',u,'賄絡迷子'\)/);
+  assert.match(bribe,/SELECT release_at FROM jail/);
+  assert.match(bribe,/changeBalanceUnlocked\(g,u,-JAIL_BRIBE_COST,'bribe',u,'賄賂獄警立即出獄'\)/);
+  assert.match(bribe,/releaseFromJail\(g,u\)/);
   assert.match(bribe,/COMMIT/);
   assert.match(bribe,/ROLLBACK/);
-  assert.match(source,/const \{next,staminaAfter\}=bribeMizi\(g,u\)/);
+
+  const escape=source.match(/function attemptJailExit\(g,u,expectedReleaseAt,methodId\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(escape,/jail_escape/);
+  assert.match(escape,/used\) throw new Error/);
+  assert.match(escape,/Math\.random\(\)\*100<method\.chance/);
+  assert.match(escape,/UPDATE jail SET release_at=\?/);
+  assert.match(source,/if\(i\.isButton\(\) && i\.customId\.startsWith\('jail_exit:'\) && i\.guildId\)/);
+  assert.match(source,/payload\.components=jailExitRows\(jailReleaseAt\)/);
+  assert.match(source,/payload\.components=jailExitRows\(releaseAt\)/);
+  assert.match(source,/jailExitPromptText\(releaseAt,\{plural:true\}\)/);
+  assert.doesNotMatch(source,/setName\('賄絡迷子'\)/);
+  assert.doesNotMatch(source,/setName\('逃獄'\)/);
+  assert.doesNotMatch(source,/setName\('小黑屋暴動'\)/);
+  assert.doesNotMatch(source,/startsWith\('riot_'\)/);
   assert.match(source,/const earned=Math\.floor\(selected\.amount\*workMultiplier\(g,u\)\)/,'合法工作收入必須維持整數');
 
-  const scheduler=source.match(/function scheduleRandomEvent\(i,g,u\) \{[\s\S]+?\n\}/)?.[0]||'';
-  assert.match(scheduler,/triggerRandomEvent\(i,g,u\)\.catch/,'延遲隨機事件不可產生未處理的 Promise rejection');
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-05-jail-exit-choices.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-05-jail-exit-choices');
+  assert.match(update.changes.join('\n'),/賄賂獄警/);
+  assert.match(update.changes.join('\n'),/偷獄警鑰匙/);
+  assert.match(update.changes.join('\n'),/舊有.*指令/);
 });
 
 test('藏身處成功戰利品百分比四捨五入顯示',()=>{
