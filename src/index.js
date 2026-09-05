@@ -2976,7 +2976,7 @@ function openShippingBlindBox(g,u) {
     ledgerKind:'shipping_blind_box',reason:'購買每日船運盲盒 x1',alreadyPurchasedMessage:'你今天已購買過船運盲盒，請於台北時間明天再來',
     beforeOpen:()=>{
       const berth=shippingBerthStatus(g,u);
-      if(!berth.docks.length) throw new Error('請先到 /玩法 的「資產商城」 購買碼頭，才能開啟船運盲盒');
+      if(!berth.docks.length) throw new Error('請先到 /資產商城 購買碼頭，才能開啟船運盲盒');
       if(berth.available<1) throw new Error(`船位不足（目前船舶 ${berth.vessels}/${berth.capacity}），請先購買船位擴建權`);
     }
   });
@@ -3486,7 +3486,7 @@ function routeDashboardMediaPayload(embed,routeId,routes,prefix) {
 function airlineDashboardEmbed(g,u,notice='') {
   const airports=ownedAirports(g,u),airliners=ownedPassengerAirliners(g,u),company=airlineCompany(g,u);
   if(!airports.length) {
-    return new EmbedBuilder().setColor(0x607D8B).setTitle('🛫 航空運輸事業').setDescription(`${notice?`${notice}\n\n`:''}你目前沒有機場。\n\n請到 \`/玩法\` 的「資產商城」 購買以下其中一座：\n${airportAssetIds.map(id=>`• ${assetCatalog[id].name}｜**${fmt(assetCatalog[id].price)}**｜營收 ×${assetCatalog[id].airlineMultiplier}`).join('\n')}\n\n購買機場後，需再支付 **${fmt(AIRLINE_REGISTRATION_FEE)}** 手續費註冊航空公司才能開啟航線。\n\n此功能已整合至 \`/交通事業\`。`);
+    return new EmbedBuilder().setColor(0x607D8B).setTitle('🛫 航空運輸事業').setDescription(`${notice?`${notice}\n\n`:''}你目前沒有機場。\n\n請到 \`/資產商城\` 購買以下其中一座：\n${airportAssetIds.map(id=>`• ${assetCatalog[id].name}｜**${fmt(assetCatalog[id].price)}**｜營收 ×${assetCatalog[id].airlineMultiplier}`).join('\n')}\n\n購買機場後，需再支付 **${fmt(AIRLINE_REGISTRATION_FEE)}** 手續費註冊航空公司才能開啟航線。\n\n此功能已整合至 \`/交通事業\`。`);
   }
   if(!company) {
     return new EmbedBuilder().setColor(0x1565C0).setTitle('🛫 航空運輸事業').setDescription(`${notice?`${notice}\n\n`:''}你已擁有 **${airports.length} 座機場**，下一步是註冊航空公司。\n\n註冊手續費：**${fmt(AIRLINE_REGISTRATION_FEE)}**\n註冊後可選擇自己的機場、客機與航線開始營運。公司起始擁有 **1 個機位**，最多可擴充至 **${AIRLINE_MAX_FLIGHT_SLOTS} 個機位**。\n\n目前金庫：**${fmt(balance(g,u))}**`);
@@ -3880,7 +3880,7 @@ function transportHubEmbed(g,u,notice='') {
     .setColor(0x0D47A1)
     .setTitle('🧭 交通事業營運總部')
     .setAuthor({name:'MACAU TRANSIT COMMAND // LIVE NETWORK'})
-    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n${snapshot.directive}\n\n**網路規模**\n${snapshot.networkMeter}｜已註冊 **${snapshot.companies}/5** 間公司｜集團總等級 **Lv.${snapshot.totalLevel}**｜場站／機場 **${snapshot.infrastructure} 座**\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路・船運**\n${groundStatus}\n\n**🚆 列車車庫・每日盲盒**\n盲盒收藏：**${trainKinds}/12 種**｜車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n商城另有 **5 款列車**可直接購買。\n\n**🚌 客運車隊・每日盲盒**\n已收藏：**${coachKinds}/20 款**｜商城直購 **10 款**、每日客運盲盒 **10 款**；配置巴士可提高城際客運營收。\n\n**⚓ 海上船運・碼頭船位**\n碼頭：**${shipStatus.docks.length} 座**｜停泊船舶：**${shipStatus.vessels}/${shipStatus.capacity} 艘**${shipStatus.overCapacity?`｜⚠️ 舊有船舶超出新船位 ${shipStatus.overCapacity} 艘，仍可使用但無法再購入`:' '}\n商城直購 **10 艘**、每日船運盲盒 **10 艘**（已收集 **${shipBlindKinds}/10 種**）；最高提供 **+48%** 船運營收。可至 \`/玩法\` 的「資產商城」 購買碼頭與船位擴建。\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
+    .setDescription(`${notice?`${notice}\n\n`:''}${snapshot.signal}\n${snapshot.directive}\n\n**網路規模**\n${snapshot.networkMeter}｜已註冊 **${snapshot.companies}/5** 間公司｜集團總等級 **Lv.${snapshot.totalLevel}**｜場站／機場 **${snapshot.infrastructure} 座**\n\n**✈️ 航空運輸**\n${airlineStatus}\n\n**🚉 陸路・船運**\n${groundStatus}\n\n**🚆 列車車庫・每日盲盒**\n盲盒收藏：**${trainKinds}/12 種**｜車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**｜最高鐵路營收加成：**${bestTrainAsset?`+${Math.round(bestTrainAsset.trainRevenueBonus*100)}%`:'尚未持有'}**\n商城另有 **5 款列車**可直接購買。\n\n**🚌 客運車隊・每日盲盒**\n已收藏：**${coachKinds}/20 款**｜商城直購 **10 款**、每日客運盲盒 **10 款**；配置巴士可提高城際客運營收。\n\n**⚓ 海上船運・碼頭船位**\n碼頭：**${shipStatus.docks.length} 座**｜停泊船舶：**${shipStatus.vessels}/${shipStatus.capacity} 艘**${shipStatus.overCapacity?`｜⚠️ 舊有船舶超出新船位 ${shipStatus.overCapacity} 艘，仍可使用但無法再購入`:' '}\n商城直購 **10 艘**、每日船運盲盒 **10 艘**（已收集 **${shipBlindKinds}/10 種**）；最高提供 **+48%** 船運營收。可至 \`/資產商城\` 購買碼頭與船位擴建。\n\n持有交通場站：**${stations.length} 座**｜金庫：**${fmt(balance(g,u))}**｜體力：**${stamina(g,u)}/${staminaMax(g,u)}**`)
     .addFields(
       {name:'🛰️ 即時調度',value:`執行中 **${snapshot.active}**｜待收 **${snapshot.ready}**`,inline:true},
       {name:'🎯 指揮優先度',value:snapshot.ready?'收取營收':'部署下一班',inline:true},
@@ -3955,7 +3955,7 @@ function transportGroundOverviewEmbed(g,u,notice='') {
       {name:'🚦 陸運調度',value:`進行中 **${snapshot.active}**｜待收 **${snapshot.ready}**`,inline:true},
       {name:'🧭 行動建議',value:snapshot.directive.slice(0,100),inline:false}
     )
-    .setFooter({text:'使用 /玩法 的「資產商城」 購買事業載具；選擇事業後可獨立註冊、配置路線、開始營運與領取收入'});
+    .setFooter({text:'使用 /資產商城 購買事業載具；選擇事業後可獨立註冊、配置路線、開始營運與領取收入'});
 }
 function transportGroundOverviewComponents(u) {
   return [
@@ -3975,7 +3975,7 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
     const stationId=transportStationIdByType[businessType],station=assetCatalog[stationId];
     const shopCategory=businessType==='shipping'?'碼頭':'房地產';
     return new EmbedBuilder().setColor(0x607D8B).setTitle(`${type.emoji} ${type.name}經營中心`)
-      .setDescription(`${notice?`${notice}\n\n`:''}你目前沒有${type.stationLabel}，請先到 \`/玩法\` 的「資產商城」 購買：\n\n${station.name}｜**${fmt(station.price)}**｜營收 ×${station.transportMultiplier}\n\n購買後需另外支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}**，註冊專屬的${type.name}公司行號。`);
+      .setDescription(`${notice?`${notice}\n\n`:''}你目前沒有${type.stationLabel}，請先到 \`/資產商城\` 購買：\n\n${station.name}｜**${fmt(station.price)}**｜營收 ×${station.transportMultiplier}\n\n購買後需另外支付 **${fmt(TRANSPORT_REGISTRATION_FEE)}**，註冊專屬的${type.name}公司行號。`);
   }
   if(!company) {
     return new EmbedBuilder().setColor(type.color).setTitle(`${type.emoji} ${type.name}經營中心`)
@@ -4006,7 +4006,7 @@ function transportBusinessDashboardEmbed(g,u,businessType,notice='') {
   const garage=businessType==='rail'?ensureTrainGarage(g,u):null;
   const garageText=garage?`\n列車車庫：**${ownedGarageTrainCount(g,u)}/${garage.capacity} 格**（配給列車不計）`:'';
   const berth=businessType==='shipping'?shippingBerthStatus(g,u):null;
-  const berthText=berth?`\n碼頭船位：**${berth.vessels}/${berth.capacity} 艘**（可用 ${berth.available} 位）｜使用 \`/玩法\` 的「資產商城」 購買碼頭或船位擴建。`:'';
+  const berthText=berth?`\n碼頭船位：**${berth.vessels}/${berth.capacity} 艘**（可用 ${berth.available} 位）｜使用 \`/資產商城\` 購買碼頭或船位擴建。`:'';
   const nextUpgrade=nextEnterpriseUpgrade(company),upgradeText=nextUpgrade?`下一級：**${fmt(nextUpgrade.cost)}**`:'已升至最高等級';
   return new EmbedBuilder()
     .setColor(operation&&Date.now()>=operation.completes_at?0x35C46A:type.color)
@@ -4367,7 +4367,7 @@ function upgradePropertyBusiness(g,u,propertyId) {
 }
 function propertyBusinessEmbed(g,u,propertyId=null,notice='') {
   const owned=ownedPropertyBusinessAssets(g,u);
-  if(!owned.length) return new EmbedBuilder().setColor(0x455A64).setTitle('🏙️ 房地產事業').setDescription(`${notice?`${notice}\n\n`:''}你尚未持有可營運的建築。請到 \`/玩法\` 的「資產商城」 購買服務式公寓、商辦中心或大飯店。\n\n房地產不是單純躺賺：每天首次招商會支付維護與保險、每週續期牌照，並可投入資金升級以提高租金。`);
+  if(!owned.length) return new EmbedBuilder().setColor(0x455A64).setTitle('🏙️ 房地產事業').setDescription(`${notice?`${notice}\n\n`:''}你尚未持有可營運的建築。請到 \`/資產商城\` 購買服務式公寓、商辦中心或大飯店。\n\n房地產不是單純躺賺：每天首次招商會支付維護與保險、每週續期牌照，並可投入資金升級以提高租金。`);
   const selected=owned.find(row=>row.asset_id===propertyId)||owned[0],asset=assetCatalog[selected.asset_id],definition=asset.propertyBusiness,business=propertyBusinessRecord(g,u,selected.asset_id),operation=propertyOperation(g,u,selected.asset_id);
   const status=!business
     ? `尚未登記公司｜一次性登記費 **${fmt(PROPERTY_REGISTRATION_FEE)}**`
@@ -4716,6 +4716,22 @@ function assetShopComponents(token,categoryKey=null,page=0,selectedAssetId=null,
   }
   return rows;
 }
+function createAssetShopSession(g,u) {
+  const token=Math.random().toString(36).slice(2,10);
+  assetShopSessions.set(token,{guildId:g,userId:u,categoryKey:null,page:0,assetId:null});
+  setTimeout(()=>assetShopSessions.delete(token),10*60*1000);
+  return token;
+}
+function assetShopLandingComponents(token) {
+  return [assetShopCategoryRow(token),new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`asset_shop_inventory:${token}`).setLabel('我的資產').setEmoji('💎').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`asset_shop_refresh:${token}`).setLabel('重新整理商城').setEmoji('🔄').setStyle(ButtonStyle.Secondary)
+  )];
+}
+function assetShopLandingPayload(g,u) {
+  const token=createAssetShopSession(g,u);
+  return {embeds:[assetShopOverviewEmbed()],components:assetShopLandingComponents(token)};
+}
 function assetPurchasePreviewEmbed(g,u,assetId,categoryKey,ammoBoxes=1,quantity=1) {
   const asset=assetCatalog[assetId],owned=assetQuantity(g,u,assetId);
   const buffId=owned?ensureAssetBuff(g,u,assetId):asset.buff||null;
@@ -4734,7 +4750,7 @@ function assetPurchasePreviewEmbed(g,u,assetId,categoryKey,ammoBoxes=1,quantity=
   return new EmbedBuilder().setColor(0xF5B942).setTitle(`🔑 ${asset.name}`).setDescription(`分類：**${assetShopCategoryLabel(categoryKey)}**\n稀有度：**${asset.rarity||'一般'}**\n商品單價：**${fmt(asset.price)}**\n數量：**${quantity}**\n總價：**${fmt(total)}**\n目前持有：**${owned}**\n目前金庫：**${fmt(balance(g,u))}**${assetSaleWindowText(asset)}${ammoText}\n\n${asset.description}\n\n${asset.combatItem?'🔫 裝備用途':'🎲 資產增益'}\n${buffPreview}\n\n${hasImage?'圖片已即時顯示於下方。':'🖼️ 此商品尚未配置圖片素材。'}確認後才會扣款；本次確認於 **5 分鐘**後失效。`);
 }
 function assetShopOverviewEmbed(categoryKey=null,page=0,sectionKey=null) {
-  if(!categoryKey) return new EmbedBuilder().setColor(0xD4AF37).setTitle('🏛️ 購買資產').setDescription('請先從下拉選單選擇分類，再選擇商品。\n\n商品被選取後，名稱、售價、用途與圖片會立即顯示；確認前不會扣除金幣。\n\n分類：**房地產／汽車／飛行器／列車／卡車／機車／船隻／武器與彈藥／限時資產拍賣**');
+  if(!categoryKey) return new EmbedBuilder().setColor(0xD4AF37).setTitle('🏛️ 資產商城｜互動採購中心').setDescription('請先從下拉選單選擇分類，再選擇商品。\n\n商品被選取後，名稱、售價、用途與圖片會立即顯示；確認前不會扣除金幣。\n\n💎 使用「我的資產」查看收藏與總值；使用「重新整理商城」可隨時返回此分類首頁。\n\n分類：**房地產／碼頭・船位／汽車／飛行器／列車／客運巴士／卡車／機車／船隻／武器與彈藥／限時資產拍賣**');
   if(categoryKey==='armory'&&!sectionKey) return new EmbedBuilder().setColor(0x1565C0).setTitle('🔫 武器與彈藥').setDescription('請從第二個下拉選單選擇：**突擊步槍／手槍／狙擊槍／黃金武器／黃金手槍／黃金狙擊槍／其他武器／彈藥**。\n\n選擇分類後，第三個下拉選單會顯示該分類的槍械或彈藥。');
   const info=assetShopPageInfo(categoryKey,page,sectionKey),start=info.page*ASSET_SHOP_PAGE_SIZE;
   const list=info.entries.slice(start,start+ASSET_SHOP_PAGE_SIZE).map(([,asset])=>`• ${asset.name}｜**${fmt(asset.price)}**${asset.saleEndsAt?`｜⏳ <t:${Math.floor(asset.saleEndsAt/1000)}:R>`:''}`).join('\n');
@@ -5363,11 +5379,11 @@ function buyAsset(g,u,assetId,quantity,ammoBoxes=1) {
     if(asset.unique&&owned>0) throw new Error(`${asset.name} 每位玩家限持有 1 件`);
     if(asset.maxOwned&&owned+quantity>asset.maxOwned) throw new Error(`${asset.name} 每位玩家最多持有 ${asset.maxOwned} 件`);
     if(assetId===SHIPPING_BERTH_EXPANSION_ID&&!ownedShippingDockRows(g,u).length) {
-      throw new Error('請先到 /玩法 的「資產商城」 購買至少一座碼頭，才能擴建船位');
+      throw new Error('請先到 /資產商城 購買至少一座碼頭，才能擴建船位');
     }
     if(shippingVesselIds.includes(assetId)) {
       const berth=shippingBerthStatus(g,u);
-      if(!berth.docks.length) throw new Error('請先到 /玩法 的「資產商城」 購買碼頭，才能購入船舶');
+      if(!berth.docks.length) throw new Error('請先到 /資產商城 購買碼頭，才能購入船舶');
       if(berth.vessels+quantity>berth.capacity) throw new Error(`船位不足（目前船舶 ${berth.vessels}/${berth.capacity}），請先購買船位擴建權`);
     }
     if(asset.category==='列車') {
@@ -8403,10 +8419,10 @@ const gameHelpDetails={
   wheel:{label:'幸運輪盤',emoji:'🎡',hint:'每天 5 次免費｜最多 25 次',title:'🎡 幸運輪盤',body:'每天前 **5 次免費**，第 6～25 次每次 **100,000 金幣**，台北時間 00:00 重置。整體中獎率 **75%**、隱藏車大獎率 **8%**；當期大獎每 **3 天**更新一次。'},
   mahjong:{label:'麻將',emoji:'🀄',hint:'台式 16 張｜吃、碰、槓、胡與補花',title:'🀄 台式 16 張麻將',body:'採用四家台式 16 張核心規則：莊家 17 張先出，其他家 16 張摸 1 打 1；花牌會自動補花。輪到自己時從下拉選單選擇出牌；他家打出牌後可依規則選擇吃、碰、槓或胡。單人不足座位由三名電腦補齊，多人桌不足四位也會補電腦。胡牌依 **五組面子加一對將** 判定；流局會退回真人玩家本金。單人胡牌基本派彩 **4 倍**，多人胡牌取得真人玩家獎池；週六獎金 ×1.5。'},
   duel:{label:'PvP 輪盤決鬥',emoji:'⚔️',hint:'指定玩家進行虛構槍械決鬥',title:'⚔️ PvP 輪盤決鬥',body:'指定另一名玩家並下注，選擇左輪或霰彈槍模式。對方接受後輪流行動，勝者取得雙方獎池。'},
-  heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/玩法\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、戰術耗材、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
+  heist:{label:'團隊搶銀行',emoji:'🚓',hint:'8v8 警匪團隊玩法',title:'🚓 8v8 團隊搶銀行',body:`先用 \`/隊伍 建立\` 與 \`/隊伍 邀請\` 組隊，再由隊長使用 \`/團隊搶銀行\`。劫匪與警方各最多 8 人；參戰前必須先從 \`/資產商城\` 的「武器與彈藥」分類購買槍枝及對應彈藥。槍枝永久持有，每次行動消耗一箱彈藥。警員加入並選槍後，必須選擇「正面對抗劫匪」或「呼叫增援」，並在「警方部署」中秘密選擇戰術與追捕載具。可調派標準巡邏車、高速攔截車、特勤裝甲車、警用直升機或警犬運輸車；載具若成功克制劫匪逃跑路線會提高壓制，團隊載具壓制最高 10%。沒有玩家加入警方時仍會出現 NPC 基礎警力。警方勝利每人保底 **${fmt(TEAM_HEIST_POLICE_BASE_REWARD)}**，另平分目標獎池 **${(TEAM_HEIST_POLICE_POOL_RATE*100).toFixed(0)}%**。準備期間隊長可從自己的車庫選擇汽車、機車、飛行器或船隻作為逃跑載具；載具登記的搶劫增益會套用到成功率。建立行動時每名劫匪支付 **${fmt(TEAM_HEIST_PREP_FEE)}** 準備費；地圖、武器、戰術耗材、線人、方案、警方戰術、警方載具與逃跑路線都會影響結果。`},
   money:{label:'賺錢與體力',emoji:'💼',hint:'工作、每日獎勵與體力規則',title:'💼 賺錢與體力',body:`使用 \`/日常 領取\` 取得每日獎勵，或用 \`/賺錢\` 選擇合法工作與冒險行動。可用 \`/日常 體力\` 查看狀態，並從 \`/補給\` 購買及使用恢復用品。`},
   transfers:{label:'玩家轉帳',emoji:'💸',hint:'轉帳、手續費與隨機事件',title:'💸 玩家轉帳',body:'使用 `/轉帳` 指定收款人與金額。轉出玩家需支付原始金額與 **2% 手續費**（小數向上取整，最低 1 金幣），手續費會存入賭場中央寶庫。每筆轉帳有 **5%** 機率遭迷子盜領，可由原轉帳玩家選擇追擊取回本金或放棄；另有 **5%** 機率發生「多按一個 0」，收款人會收到原始金額的 **10 倍**，額外 9 倍由賭場寶庫支付。寶庫不足時不會觸發多按一個 0。'},
-  assets:{label:'資產系統',emoji:'🏎️',hint:'房產、載具、機場、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/玩法\` 的「資產商城」 查看房產、載具、**21 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運、貨運與船運營運統一由 \`/交通事業\` 進入。可在 \`/玩法\` 的「資產商城」 購買遊艇碼頭、國際港、深水碼頭與船位擴建；持有任一碼頭即可獨立註冊船運公司，船位決定後續可購入與停泊的船舶數量。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n使用 \`/房地產\` 經營服務式公寓、商辦與飯店：每日首次招商支付維護與保險、每週續期牌照，並可升級至 Lv.10 提高租金；市場事件與建築狀況會影響每期收益。交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
+  assets:{label:'資產系統',emoji:'🏎️',hint:'獨立商城、房產、載具、交通事業與交易',title:'🏎️ 資產收藏',body:`使用 \`/資產商城\` 查看房產、載具、**21 輛貨運卡車**與 **5 款可直接購買的列車**，購買前可先看圖片。卡車會在物流貨運任務中自動套用持有車輛的最高營收加成，不會重複疊加。資產會附帶永久增益，也能在 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 展示；機場航空、火車、客運、貨運與船運營運統一由 \`/交通事業\` 進入。可在 \`/資產商城\` 購買遊艇碼頭、國際港、深水碼頭與船位擴建；持有任一碼頭即可獨立註冊船運公司，船位決定後續可購入與停泊的船舶數量。交通事業首頁另設列車車庫與每日盲盒，每盒 **50,000**、每日限購 **1 盒**；12 輛盲盒列車最高為傳說，鐵路班次會在配給、盲盒與商城列車之間自動套用最高營收加成。航空公司起始有 **1 個機位**，可購買額外機位，同時派遣多架實際持有的客機執飛。\n\n使用 \`/房地產\` 經營服務式公寓、商辦與飯店：每日首次招商支付維護與保險、每週續期牌照，並可升級至 Lv.10 提高租金；市場事件與建築狀況會影響每期收益。交通公司每天首次營運時會結算維修與保險，每 7 天續期牌照；企業等級、航空機位及鐵路車庫越大，維持成本越高。同一事業每日前 3 趟為完整營收，第 4 趟起每趟降低 5%，最低 50%，台北時間午夜重置。`},
   hideout:{label:'藏身處系統',emoji:'🏚️',hint:'升級據點、展示收藏並抵抗警察攻堅',title:'🏚️ 藏身處建設',body:'使用 `/藏身處`，從自己永久持有的房地產中選擇目前據點。地下金庫提升成功戰利品；武器庫、秘密車庫與保全系統提高團隊搶劫成功率。成功搶劫後的警察攻堅率最高 65%；保全系統每級降低 5%，Lv.5 時為 40%，並會縮短失敗刑期。觸發攻堅後玩家須在 5 分鐘內回到藏身處，選擇持有且有彈藥的武器反擊。藏身處選單也能展示自己的武器、汽機車、飛行器與船隻收藏。'},
   playerHub:{label:'玩家中心',emoji:'👤',hint:'金庫、資料、賭城生涯、成就、造型與稱號',title:'👤 玩家中心',body:'使用 `/玩家 金庫`、`/玩家 資料`、`/玩家 生涯`、`/玩家 成就`、`/玩家 造型` 與 `/玩家 稱號`，集中管理角色資訊、每日與每週城市合約、區域聲望及外觀。'},
   dailyHub:{label:'日常中心',emoji:'📅',hint:'每日獎勵、增益與體力',title:'📅 日常中心',body:'使用 `/日常 領取` 領每日獎勵；`/日常 增益` 查看輪替效果；`/日常 體力` 與 `/日常 回體力` 管理每日體力。'},
@@ -8418,7 +8434,7 @@ const commandHelpCategories={
   account:{label:'👤 玩家與經濟',description:'玩家中心、轉帳、銀行與日常',commands:['玩家','轉帳','銀行','日常']},
   shop:{label:'🛒 商城與背包',description:'集中購買、查看及使用補給品',commands:['補給']},
   pets:{label:'🐾 寵物與陪伴',description:'寵物商店及同行夥伴管理',commands:['寵物']},
-  assets:{label:'🏎️ 資產與交易',description:'房產、航空與交通事業、載具、改裝、展示、匿名黑市拍賣與賞金追捕',commands:['我的資產','藏身處','交通事業','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','回收廠','黑市拍賣','賞金獵人']},
+  assets:{label:'🏎️ 資產與交易',description:'房產、航空與交通事業、載具、改裝、展示、匿名黑市拍賣與賞金追捕',commands:['資產商城','我的資產','藏身處','交通事業','汽車盲盒','汽車盲盒內容','車庫','改裝','停機坪','碼頭','資產交易','回收廠','黑市拍賣','賞金獵人']},
   heist:{label:'🚓 團隊與小黑屋',description:'隊伍搶劫、情報、入獄即時選擇與救援',commands:['隊伍','團隊搶銀行','銀行情報','減刑','救援同伴']},
   admin:{label:'🛡️ 管理員與系統',description:'玩法入口及限管理員使用的維護指令',commands:['玩法','造型後台','搶劫公告頻道','單人搶劫機率','稱號設定','資產調整','金幣調整','管理員入金','帳務紀錄','經濟監控']}
 };
@@ -8646,6 +8662,7 @@ const commands = [
     .addIntegerOption(o=>o.setName('數量').setDescription('下拉選擇購買數量，未填寫時預設為 1').setMinValue(1).setMaxValue(10).addChoices(...integerChoiceOptions(10))),
   new SlashCommandBuilder().setName('汽車盲盒內容').setDescription('查看指定車包內的所有車款、圖片、機率與增益')
     .addStringOption(o=>o.setName('車包').setDescription('選擇要查看的汽車盲盒').addChoices(...blindBoxPackChoices)),
+  new SlashCommandBuilder().setName('資產商城').setDescription('開啟私人互動資產商城，瀏覽並安全購買資產'),
   new SlashCommandBuilder().setName('我的資產').setDescription('查看玩家擁有的房地產與載具').addUserOption(o=>o.setName('玩家').setDescription('預設為自己')),
   new SlashCommandBuilder().setName('房地產').setDescription('經營公寓、商辦與飯店，管理租金、維護與升級'),
   new SlashCommandBuilder().setName('藏身處').setDescription('將現有房地產設為藏身處並進行高階升級'),
@@ -8921,13 +8938,8 @@ async function handleInteraction(i) {
         .slice(0,25)
         .map(value=>({name:`${value<0?'扣除':'選擇'} ${Math.abs(value).toLocaleString('zh-TW')}`,value})));
     }
-    if(!['資產商城','購買資產','資產交易','黑市拍賣','回收廠','車庫','改裝','停機坪','碼頭','資產調整'].includes(i.commandName)) return i.respond([]);
+    if(!['資產交易','黑市拍賣','回收廠','車庫','改裝','停機坪','碼頭','資產調整'].includes(i.commandName)) return i.respond([]);
     let entries=Object.entries(assetCatalog);
-    if(i.commandName==='資產商城') {
-      const category=i.options.getString('分類');
-      if(category) entries=entries.filter(([,asset])=>asset.category===category);
-    }
-    if(['資產商城','購買資產'].includes(i.commandName)) entries=entries.filter(([,asset])=>assetIsForSale(asset));
     if(['資產交易','黑市拍賣'].includes(i.commandName)&&i.guildId) {
       const owned=new Set(assetsOf(i.guildId,i.user.id).map(row=>row.asset_id));
       entries=entries.filter(([assetId])=>owned.has(assetId));
@@ -9083,10 +9095,8 @@ async function handleInteraction(i) {
       return i.update({...payload,components:[casinoHubActionRow(ownerId,action),...petProfileComponents(g,ownerId),casinoHubFooterRow(ownerId)]});
     }
     if(action==='asset_shop') {
-      const token=Math.random().toString(36).slice(2,10);
-      assetShopSessions.set(token,{guildId:g,userId:ownerId,categoryKey:null,page:0,assetId:null});
-      setTimeout(()=>assetShopSessions.delete(token),10*60*1000);
-      return render(assetShopOverviewEmbed(),assetShopComponents(token));
+      const payload=assetShopLandingPayload(g,ownerId);
+      return render(payload.embeds[0],payload.components);
     }
     if(action==='assets') return render(casinoHubAssetsEmbed(g,ownerId));
     if(action==='garage') return render(casinoHubGarageEmbed(g,ownerId));
@@ -9372,19 +9382,27 @@ async function handleInteraction(i) {
   if(i.isButton()&&i.customId.startsWith('asset_auction_refresh:')&&i.guildId) {
     const [,ownerId,token]=i.customId.split(':'),session=assetShopSessions.get(token);
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的資產拍賣面板。',ephemeral:true});
-    if(!session||session.guildId!==i.guildId||session.userId!==ownerId) return i.reply({content:'⚠️ 這個拍賣面板已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId||session.userId!==ownerId) return i.reply({content:'⚠️ 這個拍賣面板已失效，請重新使用 `/資產商城`。',ephemeral:true});
     return i.update({...assetAuctionPayload(i.guildId,ownerId,token),attachments:[]});
   }
   if(i.isButton()&&i.customId.startsWith('asset_auction_shop:')&&i.guildId) {
     const [,ownerId,token]=i.customId.split(':'),session=assetShopSessions.get(token);
     if(i.user.id!==ownerId) return i.reply({content:'⚠️ 請使用自己的資產拍賣面板。',ephemeral:true});
-    if(!session||session.guildId!==i.guildId||session.userId!==ownerId) return i.reply({content:'⚠️ 這個拍賣面板已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId||session.userId!==ownerId) return i.reply({content:'⚠️ 這個拍賣面板已失效，請重新使用 `/資產商城`。',ephemeral:true});
     Object.assign(session,{categoryKey:null,sectionKey:null,page:0,assetId:null});
-    return i.update({embeds:[assetShopOverviewEmbed()],components:assetShopComponents(token),attachments:[],files:[]});
+    return i.update({embeds:[assetShopOverviewEmbed()],components:assetShopLandingComponents(token),attachments:[],files:[]});
+  }
+  if(i.isButton() && (i.customId.startsWith('asset_shop_inventory:')||i.customId.startsWith('asset_shop_refresh:')) && i.guildId) {
+    const [action,token]=i.customId.split(':'),session=assetShopSessions.get(token);
+    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/資產商城`。',ephemeral:true});
+    if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以操作這組按鈕。',ephemeral:true});
+    if(action==='asset_shop_inventory') return i.reply({embeds:[casinoHubAssetsEmbed(i.guildId,i.user.id)],ephemeral:true});
+    Object.assign(session,{categoryKey:null,sectionKey:null,page:0,assetId:null});
+    return i.update({embeds:[assetShopOverviewEmbed()],components:assetShopLandingComponents(token),attachments:[],files:[]});
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('asset_shop_category:') && i.guildId) {
     const token=i.customId.split(':')[1],session=assetShopSessions.get(token),categoryKey=i.values[0];
-    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/資產商城`。',ephemeral:true});
     if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以操作這組選單。',ephemeral:true});
     if(categoryKey!=='auction'&&!assetShopCategories[categoryKey]) return i.reply({content:'⚠️ 找不到這個資產分類。',ephemeral:true});
     session.categoryKey=categoryKey;
@@ -9396,7 +9414,7 @@ async function handleInteraction(i) {
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('asset_shop_armory_section:') && i.guildId) {
     const token=i.customId.split(':')[1],session=assetShopSessions.get(token),sectionKey=i.values[0];
-    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/資產商城`。',ephemeral:true});
     if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以操作這組選單。',ephemeral:true});
     if(session.categoryKey!=='armory'||!armoryShopSections[sectionKey]) return i.reply({content:'⚠️ 找不到這個武器商城分類。',ephemeral:true});
     session.sectionKey=sectionKey;
@@ -9406,7 +9424,7 @@ async function handleInteraction(i) {
   }
   if(i.isButton() && i.customId.startsWith('asset_shop_page:') && i.guildId) {
     const [,token,categoryKey,pageText]=i.customId.split(':'),session=assetShopSessions.get(token);
-    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/資產商城`。',ephemeral:true});
     if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以操作這組按鈕。',ephemeral:true});
     if(!assetShopCategories[categoryKey]) return i.reply({content:'⚠️ 找不到這個資產分類。',ephemeral:true});
     const sectionKey=categoryKey==='armory'?session.sectionKey:null;
@@ -9418,7 +9436,7 @@ async function handleInteraction(i) {
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('asset_shop_product:') && i.guildId) {
     const [,token,pageText]=i.customId.split(':'),session=assetShopSessions.get(token),assetId=i.values[0],asset=assetCatalog[assetId];
-    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!session||session.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產商城瀏覽已失效，請重新使用 `/資產商城`。',ephemeral:true});
     if(session.userId!==i.user.id) return i.reply({content:'⚠️ 只有開啟商城的玩家可以選擇商品。',ephemeral:true});
     const categoryKey=session.categoryKey,sectionKey=categoryKey==='armory'?session.sectionKey:null,page=assetShopPageInfo(session.categoryKey,Number(pageText),sectionKey).page;
     if(!asset||!assetIsForSale(asset)||!assetShopEntries(categoryKey,sectionKey).some(([id])=>id===assetId)) return i.reply({content:'⚠️ 這項資產目前無法在此分類購買，可能已經結束限時販售。',ephemeral:true});
@@ -9439,7 +9457,7 @@ async function handleInteraction(i) {
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('asset_purchase_ammo:') && i.guildId) {
     const purchaseToken=i.customId.split(':')[1],offer=assetPurchaseOffers.get(purchaseToken);
-    if(!offer||offer.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產購買確認已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!offer||offer.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產購買確認已失效，請重新使用 `/資產商城`。',ephemeral:true});
     if(i.user.id!==offer.userId) return i.reply({content:'⚠️ 只有發起購買的玩家可以選擇彈藥數量。',ephemeral:true});
     const asset=assetCatalog[offer.assetId],ammoBoxes=Number(i.values[0]);
     if(asset?.category!=='武器'||![1,5,10,20,50].includes(ammoBoxes)) return i.reply({content:'⚠️ 無效的彈藥箱數量。',ephemeral:true});
@@ -9451,7 +9469,7 @@ async function handleInteraction(i) {
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('asset_purchase_quantity:') && i.guildId) {
     const purchaseToken=i.customId.split(':')[1],offer=assetPurchaseOffers.get(purchaseToken);
-    if(!offer||offer.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產購買確認已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!offer||offer.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產購買確認已失效，請重新使用 `/資產商城`。',ephemeral:true});
     if(i.user.id!==offer.userId) return i.reply({content:'⚠️ 只有發起購買的玩家可以選擇購買數量。',ephemeral:true});
     const asset=assetCatalog[offer.assetId],quantity=Number(i.values[0]);
     if(asset?.category!=='彈藥'||![1,5,10,20,50].includes(quantity)) return i.reply({content:'⚠️ 無效的彈藥箱數量。',ephemeral:true});
@@ -9463,7 +9481,7 @@ async function handleInteraction(i) {
   }
   if(i.isStringSelectMenu() && i.customId.startsWith('rental_suite_select:') && i.guildId) {
     const token=i.customId.split(':')[1],offer=assetPurchaseOffers.get(token);
-    if(!offer||offer.guildId!==i.guildId||offer.rootAssetId!=='daily_rental_suite') return i.reply({content:'⚠️ 這次日租套房選擇已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!offer||offer.guildId!==i.guildId||offer.rootAssetId!=='daily_rental_suite') return i.reply({content:'⚠️ 這次日租套房選擇已失效，請重新使用 `/資產商城`。',ephemeral:true});
     if(i.user.id!==offer.userId) return i.reply({content:'⚠️ 只有發起租用的玩家可以選擇房型。',ephemeral:true});
     const variantId=i.values[0],variant=rentalSuiteVariants[variantId];
     if(!variant) return i.reply({content:'⚠️ 找不到這個日租套房房型。',ephemeral:true});
@@ -9484,7 +9502,7 @@ async function handleInteraction(i) {
   }
   if(i.isButton() && i.customId.startsWith('asset_purchase_') && i.guildId) {
     const [action,token]=i.customId.split(':'),offer=assetPurchaseOffers.get(token);
-    if(!offer||offer.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產購買確認已失效，請重新使用 `/玩法`。',ephemeral:true});
+    if(!offer||offer.guildId!==i.guildId) return i.reply({content:'⚠️ 這次資產購買確認已失效，請重新使用 `/資產商城`。',ephemeral:true});
     if(i.user.id!==offer.userId) return i.reply({content:'⚠️ 只有發起購買的玩家可以操作這組按鈕。',ephemeral:true});
     const asset=assetCatalog[offer.assetId],variant=offer.variantId?rentalSuiteVariants[offer.variantId]:null;
     const displayName=variant?`${asset.name}｜${variant.name}`:asset.name;
@@ -11007,19 +11025,7 @@ async function handleInteraction(i) {
     if(routedCommand==='寵物店') return i.reply({embeds:[petShopOverviewEmbed()],components:petShopSelectRows(u)});
     if(routedCommand==='我的寵物') return i.reply({...petProfilePayload(g,u),components:petProfileComponents(g,u)});
     if(i.commandName==='資產商城') {
-      const category=i.options.getString('分類'),assetId=i.options.getString('商品');
-      if(assetId) {
-        const asset=assetCatalog[assetId];
-        if(!asset) throw new Error('找不到這項資產，請從搜尋建議中選擇');
-        if(!assetIsForSale(asset)) throw new Error('這項資產目前沒有開放販售，或限時販售已經結束');
-        const embed=new EmbedBuilder().setColor(asset.rarity?.includes('限時')?0xFF2D95:asset.rarity==='限定'?0xFF2D95:asset.rarity==='神話'?0x9C27B0:asset.rarity==='傳說'?0xF5B942:0x1565C0).setTitle(asset.name).setDescription(`分類：**${asset.category}**\n稀有度：**${asset.rarity||'一般'}**\n${asset.temporaryHours?'租金':'價格'}：**${fmt(asset.price)}**${asset.temporaryHours?`\n使用期限：**${asset.temporaryHours} 小時**`:''}${assetSaleWindowText(asset)}\n\n${asset.description}\n\n使用 \`/玩法 資產:${asset.name}\` 完成${asset.temporaryHours?'租用':'購買'}。`);
-        return i.reply(assetMediaPayload(embed,assetId,asset));
-      }
-      const groups=assetCategories.filter(c=>!category||c===category).map(c=>{
-        const items=Object.values(assetCatalog).filter(asset=>asset.category===c&&assetIsForSale(asset)).map(asset=>`${asset.name}｜**${fmt(asset.price)}**${asset.rarity?`｜${asset.rarity}`:''}${asset.saleEndsAt?`｜⏳ <t:${Math.floor(asset.saleEndsAt/1000)}:R>`:''}\n└ ${asset.description}`).join('\n');
-        return `**${c}**\n${items}`;
-      }).join('\n\n');
-      return i.reply({embeds:[new EmbedBuilder().setColor(0xD4AF37).setTitle('🏛️ 豪華資產商城').setDescription(`${groups}\n\n🎁 **汽車盲盒｜共 7 種主題車包**\n使用 \`/汽車盲盒\` 可選擇綜合、福特、都會通勤、街頭競速、JDM 經典、豪華旗艦與神話超跑汽車盲盒；各車包有獨立售價、體力消耗、車款與機率。\n使用 \`/汽車盲盒內容\` 可先查看公開獎池與圖片。\n\n使用 \`/玩法\` 的「資產商城」 查看大圖，再用 \`/玩法\` 購買；永久持有的資產可透過 \`/資產交易\` 出售。`)]});
+      return i.reply({ephemeral:true,...assetShopLandingPayload(g,u)});
     }
     if(i.commandName==='汽車盲盒內容') {
       const packId=i.options.getString('車包')||'standard',pack=blindBoxPacks[packId]||blindBoxPacks.standard;
@@ -11039,12 +11045,6 @@ async function handleInteraction(i) {
         embed.setImage(`attachment://${imageName}`);
       }
       return i.reply(payload);
-    }
-    if(i.commandName==='購買資產') {
-      const token=Math.random().toString(36).slice(2,10);
-      assetShopSessions.set(token,{guildId:g,userId:u,categoryKey:null,page:0,assetId:null});
-      setTimeout(()=>assetShopSessions.delete(token),10*60*1000);
-      return i.reply({embeds:[assetShopOverviewEmbed()],components:assetShopComponents(token)});
     }
     if(i.commandName==='我的資產') {
       const target=i.options.getUser('玩家')||i.user,rows=assetBonusRows(g,target.id);
@@ -11123,7 +11123,7 @@ async function handleInteraction(i) {
         return i.reply(assetMediaPayload(embed,selected,asset));
       }
       const title=isHangar?'🛬 我的停機坪':isMarina?'⚓ 我的碼頭':'🏎️ 我的車庫';
-      const empty=isHangar?'停機坪目前空空的，請到 `/玩法 的「資產商城」` 選購。':isMarina?'碼頭目前沒有船隻，請到 `/玩法 的「資產商城」` 選購。':'車庫目前空空的，請到 `/玩法 的「資產商城」` 選購汽車或機車。';
+      const empty=isHangar?'停機坪目前空空的，請到 `/資產商城` 選購。':isMarina?'碼頭目前沒有船隻，請到 `/資產商城` 選購。':'車庫目前空空的，請到 `/資產商城` 選購汽車或機車。';
       const totalValue=rows.reduce((sum,row)=>sum+assetCatalog[row.asset_id].price*row.quantity,0);
       const list=rows.length?rows.map(row=>{const asset=assetCatalog[row.asset_id];return `${asset.name} × **${row.quantity}**\n└ ${assetBuffLabel(row.asset_id,row.buff_id)}｜${assetBuffDescription(row.asset_id,row.buff_id)}`;}).join('\n\n'):empty;
       const bonuses=isHangar?`搶劫加成：**+${assetHeistBonus(g,u)}%**｜體力上限：**${staminaMax(g,u)}**`:isMarina?`商城折扣：**${Math.round(assetShopDiscount(g,u)*100)}%**｜賭場派彩：**×${assetCasinoBonus(g,u).toFixed(2)}**`:`搶劫加成：**+${assetHeistBonus(g,u)}%**｜工作倍率：**×${assetWorkBonus(g,u).toFixed(2)}**`;

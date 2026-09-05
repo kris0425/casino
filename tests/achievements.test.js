@@ -80,14 +80,14 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   const start=source.indexOf('const commands = ['),end=source.indexOf('].map(c=>c.toJSON());',start);
   const commandBlock=start>=0&&end>start?source.slice(start,end):'';
   assert.ok(commandBlock,'缺少 Discord 指令定義');
-  for(const hub of ['玩家','日常','補給','寵物','交通事業']) {
+  for(const hub of ['玩家','日常','補給','寵物','交通事業','資產商城']) {
     assert.match(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${hub}'\\)`),`缺少整合入口 /${hub}`);
   }
   const removed=[
     '金庫','個人資料','成就','稱號','每日增益','體力','每日回體力','每日',
     '商城','背包','購買','使用','寵物店','我的寵物','機場',
     '比大小','射龍門','賽馬','競速','寵物競賽','競速pvp','寵物競速pvp','骰盅吹牛',
-    '大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥','資產商城','購買資產','小遊戲'
+    '大老二','角子機','幸運輪盤','大樂透','賓果','刮刮樂','麻將','決鬥','購買資產','小遊戲'
   ];
   for(const name of removed) {
     assert.doesNotMatch(commandBlock,new RegExp(`new SlashCommandBuilder\\(\\)\\.setName\\('${name}'\\)`),`舊指令 /${name} 仍在註冊`);
@@ -1614,7 +1614,7 @@ test('船運碼頭與船位可購買並限制新船舶停泊容量',()=>{
   assert.match(source,/function shippingBerthCapacity\(g,u\)/);
   assert.match(source,/function shippingBerthStatus\(g,u\)/);
   assert.match(source,/船位不足（目前船舶/);
-  assert.match(source,/請先到 \/玩法 的「資產商城」 購買碼頭/);
+  assert.match(source,/請先到 \/資產商城 購買碼頭/);
   assert.match(source,/碼頭船位：/);
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-10-maritime-docks-berths.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-08-10-maritime-docks-berths');
@@ -2486,4 +2486,20 @@ test('玩法小遊戲提供賓果賽馬射龍門的快速入口',()=>{
   assert.equal(update.version,'2026.09.05.9');
   assert.match(update.summary,/賓果、賽馬或射龍門/);
   assert.match(update.changes.join('\n'),/快速入口/);
+});
+test('資產商城提供獨立私人互動入口與資產快捷操作',()=>{
+  const start=source.indexOf('const commands = ['),end=source.indexOf('].map(c=>c.toJSON());',start);
+  const commandBlock=source.slice(start,end);
+  assert.match(commandBlock,/new SlashCommandBuilder\(\)\.setName\('資產商城'\)/);
+  assert.doesNotMatch(commandBlock,/new SlashCommandBuilder\(\)\.setName\('購買資產'\)/);
+  assert.match(source,/function createAssetShopSession\(g,u\)/);
+  assert.match(source,/function assetShopLandingComponents\(token\)/);
+  assert.match(source,/asset_shop_inventory:\$\{token\}/);
+  assert.match(source,/asset_shop_refresh:\$\{token\}/);
+  assert.match(source,/if\(i\.commandName==='資產商城'\) \{\s+return i\.reply\(\{ephemeral:true,\.\.\.assetShopLandingPayload\(g,u\)\}\);/);
+  assert.match(source,/只有開啟商城的玩家可以操作這組按鈕/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-05-independent-asset-shop.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-05-independent-asset-shop');
+  assert.equal(update.version,'2026.09.05.10');
+  assert.match(update.changes.join('\n'),/我的資產/);
 });
