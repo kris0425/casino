@@ -102,6 +102,23 @@ test('玩家常用功能整合為主指令並移除重複舊指令',()=>{
   assert.match(source,/miniGameProxyInteraction\(i,game\.command/);
 });
 
+test('/玩法提供私人快速面板並保留完整指令導覽',()=>{
+  assert.match(source,/const casinoHubActions=\[/);
+  for(const action of ['daily_claim','stamina_restore','pet_shop','pets','asset_shop','assets','transport','career','games','heist']) {
+    assert.match(source,new RegExp(`value:'${action}'`),`快速面板缺少 ${action}`);
+  }
+  assert.match(source,/setCustomId\(`casino_hub_action:\$\{ownerId\}`\)/);
+  assert.match(source,/setCustomId\(`casino_hub_help:\$\{ownerId\}`\)/);
+  assert.match(source,/i\.customId\.startsWith\('casino_hub_action:'\)/);
+  assert.match(source,/if\(i\.user\.id!==ownerId\) return i\.reply\(\{content:'⚠️ 這是其他玩家的私人快速面板/);
+  assert.match(source,/if\(action==='asset_shop'\)/);
+  assert.match(source,/assetShopSessions\.set\(token/);
+  assert.match(source,/if\(action==='transport'\)/);
+  assert.match(source,/transportHubEmbed\(g,ownerId\)/);
+  assert.match(source,/if \(i\.commandName==='玩法'\) \{\s+return i\.reply\(\{ephemeral:true,\.\.\.casinoHubPayload\(g,u\)\}\);/);
+  assert.match(source,/if\(action==='casino_hub_help'\) return i\.update\(\{embeds:\[commandHelpOverviewEmbed\('casino'\)\]/);
+});
+
 test('角色造型系統使用完整圖片並提供管理員上傳後台',()=>{
   const html=readFileSync(new URL('../activity/public/style.html',import.meta.url),'utf8');
   const css=readFileSync(new URL('../activity/public/style.css',import.meta.url),'utf8');

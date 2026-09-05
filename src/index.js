@@ -8370,6 +8370,71 @@ function petProfileComponents(g,u) {
   if(active) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`pet_rename:${u}`).setLabel('替同行寵物命名').setStyle(ButtonStyle.Primary)));
   return rows;
 }
+const casinoHubActions=[
+  {value:'home',label:'賭場首頁',emoji:'🎰',description:'更新個人快捷面板'},
+  {value:'wallet',label:'金庫與信用',emoji:'🏦',description:'查看金幣、負債與可借額度'},
+  {value:'profile',label:'玩家資料',emoji:'🪪',description:'查看個人狀態與今日增益'},
+  {value:'daily_claim',label:'領取每日獎勵',emoji:'🎁',description:'直接領取今天的免費金幣'},
+  {value:'stamina_restore',label:'每日回體力',emoji:'⚡',description:'直接使用今天的免費體力恢復'},
+  {value:'supplies',label:'補給總覽',emoji:'🛒',description:'查看體力補給與售價'},
+  {value:'inventory',label:'我的背包',emoji:'🎒',description:'查看持有的補給品'},
+  {value:'pet_shop',label:'寵物商店',emoji:'🐾',description:'直接挑選寵物或用品'},
+  {value:'pets',label:'我的寵物',emoji:'🐶',description:'切換同行夥伴並照顧牠'},
+  {value:'asset_shop',label:'資產商城',emoji:'🏛️',description:'直接挑選並購買資產'},
+  {value:'assets',label:'我的資產',emoji:'💎',description:'查看收藏與永久增益'},
+  {value:'garage',label:'車庫與載具',emoji:'🏎️',description:'查看汽機車、飛行器與船隻'},
+  {value:'transport',label:'交通事業',emoji:'🧭',description:'開啟航空、鐵路、客運、貨運與船運'},
+  {value:'career',label:'賭城生涯',emoji:'🌆',description:'接取每日與每週城市合約'},
+  {value:'games',label:'小遊戲大廳',emoji:'🎮',description:'從選單進入 19 款遊戲'},
+  {value:'heist',label:'搶劫日誌',emoji:'🕵️',description:'查看本週搶劫委託與進度'}
+];
+function casinoHubActionRow(ownerId,selected='home') {
+  return new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+    .setCustomId(`casino_hub_action:${ownerId}`)
+    .setPlaceholder('選擇要直接開啟的功能')
+    .addOptions(casinoHubActions.map(action=>({label:action.label,value:action.value,emoji:action.emoji,description:action.description,default:action.value===selected}))));
+}
+function casinoHubFooterRow(ownerId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`casino_hub_refresh:${ownerId}`).setLabel('返回賭場首頁').setEmoji('🎰').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`casino_hub_help:${ownerId}`).setLabel('完整指令導覽').setEmoji('📖').setStyle(ButtonStyle.Primary)
+  );
+}
+function casinoHubOverviewEmbed(g,u,notice='') {
+  const pet=activePet(g,u),status=jailRemaining(g,u)?`🔒 小黑屋 ${jailText(jailRemaining(g,u))}`:hospitalRemaining(g,u)?`🏥 醫院 ${jailText(hospitalRemaining(g,u))}`:'🟢 可自由行動';
+  return new EmbedBuilder().setColor(0xD4AF37).setTitle('🎰 澳門最大賭場｜個人快速面板').setDescription(`${notice?`${notice}\n\n`:''}從下方選單直接開啟常用功能；不再需要記住一長串指令。\n\n🏦 金庫：**${fmt(balance(g,u))}**｜⚡ 體力：**${stamina(g,u)}/${staminaMax(g,u)}**\n🐾 同行夥伴：**${pet?petDisplayName(pet.petId,pet.nickname):'尚未設定'}**\n📍 狀態：**${status}**\n${todayBuff().icon} 今日增益：**${todayBuff().name}**\n\n需要轉帳、銀行借還款、隊伍邀請、指定搶劫目標等需要輸入對象或金額的操作，仍保留原本斜線指令，避免誤觸。`).setFooter({text:'這是你的私人面板，其他玩家無法操作'});
+}
+function casinoHubWalletEmbed(g,u) {
+  const currentDebt=debt(g,u),credit=loanCreditProfile(g,u,currentDebt),available=Math.max(0,credit.limit-currentDebt);
+  return new EmbedBuilder().setColor(0x1565C0).setTitle('🏦 金庫與信用').setDescription(`金庫餘額：**${fmt(balance(g,u))}**\n目前負債：**${fmt(currentDebt)}**\n信用評等：**${credit.rating}**\n可借額度：**${fmt(available)}**／${fmt(credit.limit)}\n\n借款、還款與轉帳需要輸入金額或收款人，請繼續使用 \`/銀行\`、\`/轉帳\`。`);
+}
+function casinoHubProfileEmbed(g,u) {
+  const pet=activePet(g,u),team=getTeam(g,u),status=jailRemaining(g,u)?`小黑屋｜${jailText(jailRemaining(g,u))}`:hospitalRemaining(g,u)?`醫院｜${jailText(hospitalRemaining(g,u))}`:'自由行動';
+  return new EmbedBuilder().setColor(0x5865F2).setTitle('🪪 我的即時狀態').setDescription(`⚡ 體力：**${stamina(g,u)}/${staminaMax(g,u)}**\n🐾 同行夥伴：**${pet?petDisplayName(pet.petId,pet.nickname):'尚未設定'}**\n👥 搶劫隊伍：**${team?`${teamDisplayName(team)}｜${team.members.length}/8 人`:'尚未加入'}**\n📍 行動狀態：**${status}**\n\n${todayBuff().icon} **${todayBuff().name}**\n${todayBuff().text}`);
+}
+function casinoHubSupplyEmbed(g,u) {
+  const list=Object.values(shopItems).map(item=>`• **${item.name}**｜${fmt(item.price)}｜${item.fullRestore?'回滿體力':item.maxBonus?`當日上限 +${item.maxBonus}`:`回復 ${item.stamina} 體力`}`).join('\n');
+  return new EmbedBuilder().setColor(0x9C27B0).setTitle('🛒 補給總覽').setDescription(`${list}\n\n目前體力：**${stamina(g,u)}/${staminaMax(g,u)}**\n購買與使用時需要選擇品項、數量，請使用 \`/補給 購買\` 或 \`/補給 使用\`。`);
+}
+function casinoHubInventoryEmbed(g,u) {
+  const rows=db.prepare('SELECT item_id,quantity FROM inventory WHERE guild_id=? AND user_id=? AND quantity>0').all(g,u);
+  const list=rows.length?rows.map(row=>`• ${shopItems[row.item_id]?.name||row.item_id} × **${row.quantity}**`).join('\n'):'背包目前是空的。';
+  return new EmbedBuilder().setColor(0x795548).setTitle('🎒 我的背包').setDescription(`${list}\n\n目前體力：**${stamina(g,u)}/${staminaMax(g,u)}**`);
+}
+function casinoHubAssetsEmbed(g,u) {
+  const rows=assetBonusRows(g,u),totalValue=rows.filter(row=>!row.temporary).reduce((sum,row)=>sum+(assetCatalog[row.asset_id]?.price||0)*row.quantity,0);
+  const list=rows.slice(0,20).map(row=>{const asset=assetCatalog[row.asset_id];return `• **${asset?.name||row.asset_id}** × ${row.quantity}｜${assetBuffLabel(row.asset_id,row.buff_id)}`;}).join('\n')||'目前沒有任何房地產或載具。';
+  const overflow=rows.length>20?`\n…另有 ${rows.length-20} 項收藏，請使用 \`/我的資產\` 查看完整清單。`:'';
+  return new EmbedBuilder().setColor(0x1565C0).setTitle('💎 我的資產').setDescription(`${list}${overflow}\n\n永久資產原價總值：**${fmt(totalValue)}**`);
+}
+function casinoHubGarageEmbed(g,u) {
+  const categories=['汽車','機車','飛行器','郵輪'],rows=assetBonusRows(g,u).filter(row=>categories.includes(assetCatalog[row.asset_id]?.category));
+  const list=categories.map(category=>{const owned=rows.filter(row=>assetCatalog[row.asset_id]?.category===category);return owned.length?`**${category}**｜${owned.map(row=>`${assetCatalog[row.asset_id].name} × ${row.quantity}`).join('、')}`:null;}).filter(Boolean).join('\n')||'目前沒有可展示的載具。';
+  return new EmbedBuilder().setColor(0x3949AB).setTitle('🏎️ 車庫與載具').setDescription(`${list}\n\n查看單一載具圖片或進行改裝，請繼續使用 \`/車庫\`、\`/停機坪\`、\`/碼頭\` 或 \`/改裝\`。`);
+}
+function casinoHubPayload(g,u,{embed=casinoHubOverviewEmbed(g,u),selected='home',extraComponents=[]}={}) {
+  return {embeds:[embed],components:[casinoHubActionRow(u,selected),...extraComponents,casinoHubFooterRow(u)]};
+}
 
 const playerTitleChoices=[
   {name:'🐣 萌禽',value:'cute_bird'},{name:'🐶 萌犬',value:'cute_dog'},{name:'🐕 猛犬',value:'fierce_dog'},{name:'🦅 猛禽',value:'fierce_bird'},
@@ -8825,6 +8890,56 @@ async function handleInteraction(i) {
     return i.update({embeds:[new EmbedBuilder().setColor(session.totalReward?0x35C46A:0x95A5A6).setTitle(session.totalReward?'🏁 打靶三發結算':'💨 打靶三發結算｜未命中').setDescription(
       `使用槍枝：**${weapon.name}**${weapon.owned?'':'（靶場提供）'}\n\n${shots}\n\n總環數：**${session.totalScore}**\n${session.totalReward?`總獎勵：**${fmt(session.totalReward)} 金幣**`:'本次未獲得獎勵。'}\n\n下次靶場訓練可於 <t:${Math.floor((Date.now()+TARGET_SHOOTING_COOLDOWN_MS)/1000)}:R> 再進行。`
     )],components:[]});
+  }
+  if(i.isStringSelectMenu()&&i.customId.startsWith('casino_hub_action:')&&i.guildId) {
+    const ownerId=i.customId.split(':')[1];
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 這是其他玩家的私人快速面板，請使用 `/玩法` 開啟自己的面板。',ephemeral:true});
+    const g=i.guildId,action=i.values[0],render=(embed,extraComponents=[])=>i.update(casinoHubPayload(g,ownerId,{embed,selected:action,extraComponents}));
+    if(action==='home') return i.update(casinoHubPayload(g,ownerId));
+    if(action==='wallet') return render(casinoHubWalletEmbed(g,ownerId));
+    if(action==='profile') return render(casinoHubProfileEmbed(g,ownerId));
+    if(action==='daily_claim') {
+      const key=`${g}:${ownerId}`,now=Date.now(),last=daily.get(key)||0,wait=86400000-(now-last);
+      if(wait>0) throw new Error(`距離下次領取還有 ${Math.ceil(wait/3600000)} 小時`);
+      const reward=taipeiWeekday()===0?1000:500,before=balance(g,ownerId);
+      daily.set(key,now);
+      const next=changeBalance(g,ownerId,reward,'daily',ownerId,'每日獎勵');
+      return render(casinoHubOverviewEmbed(g,ownerId,`🎁 已領取 **${fmt(next-before)}** 每日獎勵${reward===1000?'（週日雙倍）':''}。`));
+    }
+    if(action==='stamina_restore') {
+      const result=claimDailyStaminaRestore(g,ownerId);
+      return render(casinoHubOverviewEmbed(g,ownerId,`⚡ 已免費恢復 **${result.restored}** 體力，目前 **${result.stamina}/${result.max}**。`));
+    }
+    if(action==='supplies') return render(casinoHubSupplyEmbed(g,ownerId));
+    if(action==='inventory') return render(casinoHubInventoryEmbed(g,ownerId));
+    if(action==='pet_shop') return render(petShopOverviewEmbed(),petShopSelectRows(ownerId));
+    if(action==='pets') {
+      const payload=petProfilePayload(g,ownerId);
+      return i.update({...payload,components:[casinoHubActionRow(ownerId,action),...petProfileComponents(g,ownerId),casinoHubFooterRow(ownerId)]});
+    }
+    if(action==='asset_shop') {
+      const token=Math.random().toString(36).slice(2,10);
+      assetShopSessions.set(token,{guildId:g,userId:ownerId,categoryKey:null,page:0,assetId:null});
+      setTimeout(()=>assetShopSessions.delete(token),10*60*1000);
+      return render(assetShopOverviewEmbed(),assetShopComponents(token));
+    }
+    if(action==='assets') return render(casinoHubAssetsEmbed(g,ownerId));
+    if(action==='garage') return render(casinoHubGarageEmbed(g,ownerId));
+    if(action==='transport') {
+      await i.update(casinoHubPayload(g,ownerId,{embed:transportHubEmbed(g,ownerId),selected:action,extraComponents:transportHubComponents(g,ownerId)}));
+      scheduleTransportPanelDeletion(i.message);
+      return;
+    }
+    if(action==='career') return render(careerHomeEmbed(g,ownerId),careerHomeComponents(g,ownerId));
+    if(action==='games') return render(miniGameLauncherEmbed(),[miniGameMenuRow(ownerId)]);
+    if(action==='heist') return render(heistCampaignEmbed(g,ownerId));
+    return i.update(casinoHubPayload(g,ownerId));
+  }
+  if(i.isButton()&&i.customId.startsWith('casino_hub_')&&i.guildId) {
+    const [action,ownerId]=i.customId.split(':');
+    if(i.user.id!==ownerId) return i.reply({content:'⚠️ 這是其他玩家的私人快速面板，請使用 `/玩法` 開啟自己的面板。',ephemeral:true});
+    if(action==='casino_hub_help') return i.update({embeds:[commandHelpOverviewEmbed('casino')],components:commandHelpComponents('casino'),attachments:[]});
+    return i.update(casinoHubPayload(i.guildId,ownerId));
   }
   if(i.isStringSelectMenu() && i.customId==='game_help_category') {
     const categoryKey=i.values[0] in commandHelpCategories?i.values[0]:'casino';
@@ -10933,7 +11048,7 @@ async function handleInteraction(i) {
       return i.reply({embeds:[targetShootingEmbed(session)],components:targetShootingRows(session)});
     }
     if (i.commandName==='玩法') {
-      return i.reply({embeds:[commandHelpOverviewEmbed('casino')],components:commandHelpComponents('casino')});
+      return i.reply({ephemeral:true,...casinoHubPayload(g,u)});
     }
     if (i.commandName==='隊伍') {
       const action=i.options.getSubcommand(),team=getTeam(g,u);
