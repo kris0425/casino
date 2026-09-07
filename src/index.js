@@ -12137,10 +12137,43 @@ let lastBankAnnouncement='';
 const sundayVaultAnnouncementHours=new Set([12,14,16,18,20,22]);
 const AUTONOMOUS_HOUSEKEEPING_HOUR=22;
 const autonomousHousekeepingTasks=[
-  {id:'wipe',emoji:'🧽',title:'深夜自主巡邏｜賭桌亮到能照出明日財運',text:'今晚連一枚籌碼都沒敢吵醒大廳。機器人戴上白手套，把賭桌擦到連莊家都要先補妝。'},
-  {id:'sweep',emoji:'🧹',title:'深夜自主巡邏｜正在搜刮地上的「差一點就贏」',text:'掃帚剛掃到角落，就發現三張落單的幸運貼紙和一張寫著「下把一定贏」的紙條。已收進失物招領，絕對不是獎池。'},
-  {id:'mop',emoji:'🪣',title:'深夜自主巡邏｜拖地中，請勿把拖把當傳說裝備',text:'機器人用月光調配地板蠟，從大廳一路拖到輪盤旁。地板目前滑得能讓企鵝順利完成一圈賽馬。'}
+  {id:'fortune_glass',emoji:'🧽',title:'深夜自主巡邏｜賭桌亮到能照出明日財運',text:'今晚連一枚籌碼都沒敢吵醒大廳。機器人戴上白手套，把賭桌擦到連莊家都要先補妝。'},
+  {id:'close_call_sweep',emoji:'🧹',title:'深夜自主巡邏｜正在搜刮地上的「差一點就贏」',text:'掃帚剛掃到角落，就發現三張落單的幸運貼紙和一張寫著「下把一定贏」的紙條。已收進失物招領，絕對不是獎池。'},
+  {id:'legendary_mop',emoji:'🪣',title:'深夜自主巡邏｜拖地中，請勿把拖把當傳說裝備',text:'機器人用月光調配地板蠟，從大廳一路拖到輪盤旁。地板目前滑得能讓企鵝順利完成一圈賽馬。'},
+  {id:'roulette_polish',emoji:'🎡',title:'深夜自主巡邏｜輪盤正在接受鏡面拋光',text:'輪盤反射出的光太亮，機器人差點以為自己中了頭獎。確認只是燈光，於是繼續擦。'},
+  {id:'carpet_vacuum',emoji:'🌀',title:'深夜自主巡邏｜紅毯吸塵，吸走昨日的緊張',text:'吸塵器剛吸到一聲「啊我差一點全壓」，機器人已把那段回憶封存在集塵盒最底層。'},
+  {id:'chip_alignment',emoji:'🪙',title:'深夜自主巡邏｜籌碼排隊，誰也不准插隊',text:'每一枚籌碼都被排成完美直線。第七枚想耍叛逆，已被溫柔地請回隊伍。'},
+  {id:'slot_screen',emoji:'🕹️',title:'深夜自主巡邏｜老虎機螢幕擦到會眨眼',text:'機器人擦掉螢幕上的指紋，順手向三個櫻桃點頭致意；它們沒有回話，但看起來很有禮貌。'},
+  {id:'chandelier_dust',emoji:'✨',title:'深夜自主巡邏｜水晶燈除塵，星星也得打卡',text:'梯子升到最高處時，機器人發現一粒灰塵正在假裝流星，仍依法請它離場。'},
+  {id:'card_straighten',emoji:'🃏',title:'深夜自主巡邏｜撲克牌歸位，禁止私奔',text:'黑桃 A 和紅心 Q 被放回牌盒時還想牽手；機器人表示明天開局前再談感情。'},
+  {id:'lobby_wax',emoji:'🛼',title:'深夜自主巡邏｜大廳打蠟，反光等級已超標',text:'地板亮到機器人看見自己的倒影，確認制服沒有沾灰後才滿意地點頭。'},
+  {id:'lucky_note',emoji:'📝',title:'深夜自主巡邏｜整理幸運紙條與豪語',text:'角落找到「今天必翻本」和「最後一把」兩張紙條。機器人把它們摺好，交給明天的勇氣保管。'},
+  {id:'door_handle',emoji:'🚪',title:'深夜自主巡邏｜門把消毒，迎接明日手氣',text:'每個門把都擦得發亮。機器人還在入口放了想像中的幸運光環，請放心，它不收費。'},
+  {id:'vip_cushion',emoji:'🛋️',title:'深夜自主巡邏｜VIP 沙發除塵，保留尊榮屁股印',text:'靠墊被拍得蓬鬆如雲；只有那張最常被坐的椅子，似乎還在回味昨晚的豪氣。'},
+  {id:'dice_rescue',emoji:'🎲',title:'深夜自主巡邏｜營救桌底迷路骰子',text:'機器人從桌下救出兩顆骰子。一顆說自己在探險，另一顆堅稱是在研究地心引力。'},
+  {id:'bar_counter',emoji:'🍸',title:'深夜自主巡邏｜吧台拋光，檸檬也得站直',text:'吧台亮到能映出杯墊的心事。機器人把歪掉的檸檬片扶正，夜班秩序恢復。'},
+  {id:'neon_tuning',emoji:'💡',title:'深夜自主巡邏｜霓虹招牌擦亮，晚安仍然閃爍',text:'招牌上的燈泡互相眨眼，機器人提醒它們：節能模式不是深情對望模式。'},
+  {id:'poker_table',emoji:'♠️',title:'深夜自主巡邏｜撲克桌除屑，清空桌面情緒',text:'機器人把餅乾屑、紙屑和一點點不甘心都掃進畚箕，只留下明天再戰的空位。'},
+  {id:'staircase_mop',emoji:'🪜',title:'深夜自主巡邏｜樓梯拖地，請慢走別滑成主角',text:'每一階都拖得乾淨俐落，機器人還貼上空氣警示牌：此處地板比運氣更滑。'},
+  {id:'coin_lost_found',emoji:'🔎',title:'深夜自主巡邏｜失物招領發現一枚害羞硬幣',text:'硬幣躲在盆栽後面，說自己只是想安靜增值。機器人將它放回失物櫃，沒有算利息。'},
+  {id:'speaker_dust',emoji:'🔊',title:'深夜自主巡邏｜音響除塵，連低音都喘口氣',text:'擦完最後一顆按鈕，音響輕輕播出一段不存在的掌聲。機器人鞠躬，假裝一切很正常。'},
+  {id:'napkin_fold',emoji:'🧻',title:'深夜自主巡邏｜餐巾折成幸運小天鵝',text:'第八隻天鵝的脖子有點歪，機器人說這叫限量版，立刻被擺在最顯眼的位置。'},
+  {id:'wheel_calibration',emoji:'🎯',title:'深夜自主巡邏｜輪盤邊框清潔，請勿詢問結果',text:'機器人用軟布繞著輪盤走了一圈，什麼數字都沒有偷看；它有職業操守，也沒有眼皮。'},
+  {id:'towel_restock',emoji:'🧺',title:'深夜自主巡邏｜補滿毛巾，連毛巾都有編制',text:'每條毛巾都被摺成同一個角度。最旁邊那條想逃班，已被機器人安排到明天第一排。'},
+  {id:'velvet_brush',emoji:'🪮',title:'深夜自主巡邏｜天鵝絨沙發除毛，貴賓感回來了',text:'滾筒黏走一根不明羽毛，機器人決定不追問它從哪裡來，夜班有夜班的默契。'},
+  {id:'mirror_polish',emoji:'🪞',title:'深夜自主巡邏｜鏡子擦亮，照見的是自信不是餘額',text:'鏡面終於乾淨得能反射微笑。機器人對鏡子比了個讚，鏡子很配合地回了一個。'},
+  {id:'air_filter',emoji:'🌬️',title:'深夜自主巡邏｜空調濾網清潔，清新到像新手村',text:'灰塵被請出通風管，冷氣送出一口清爽的風。連假想中的金主都說空氣不錯。'},
+  {id:'red_carpet',emoji:'🟥',title:'深夜自主巡邏｜紅毯深層清潔，腳步聲已升級',text:'機器人把紅毯刷得柔順，明天每一步都會聽起來像剛贏完一場大局。'},
+  {id:'broom_training',emoji:'🧹',title:'深夜自主巡邏｜掃帚排練圓舞曲',text:'左掃、右掃、轉身收屑。掃帚表演完畢，唯一的觀眾是角落那顆不肯離開的爆米花。'},
+  {id:'floor_inspection',emoji:'🔍',title:'深夜自主巡邏｜地板巡檢，連灰塵都要出示證件',text:'機器人蹲下比對每一塊磁磚，發現一粒灰塵沒有通行證，已依法請它離開賭場。'},
+  {id:'moonlight_wax',emoji:'🌙',title:'深夜自主巡邏｜月光地板蠟最後一層',text:'最後一筆蠟抹下去，月光剛好落進大廳。機器人宣布：今夜的地板，值得一張藝術照。'},
+  {id:'closing_bow',emoji:'🎩',title:'深夜自主巡邏｜閉館鞠躬與明日開場彩排',text:'全場整理完畢，機器人對空椅子鞠躬三次。空椅子沒有鼓掌，但氣氛非常專業。'}
 ];
+function autonomousHousekeepingTaskForDay(day) {
+  const index=Number(day)-1;
+  if(!Number.isInteger(index)||index<0||index>=autonomousHousekeepingTasks.length) throw new Error('自主清潔巡邏日期無效');
+  return autonomousHousekeepingTasks[index];
+}
 function recordCasinoPlayerActivity(g,u,now=Date.now()) {
   if(!g||!u) return;
   db.prepare(`INSERT INTO casino_daily_player_activity(guild_id,day_key,last_activity_at) VALUES(?,?,?)
@@ -12158,7 +12191,7 @@ async function runAutonomousHousekeeping() {
   const day=`${parts.year}-${parts.month}-${parts.day}`;
   for(const guildId of client.guilds.cache.keys()) {
     if(casinoHadPlayerActivityToday(guildId,day)) continue;
-    const task=autonomousHousekeepingTasks[Math.floor(Math.random()*autonomousHousekeepingTasks.length)];
+    const task=autonomousHousekeepingTaskForDay(parts.day);
     const claimed=db.prepare('INSERT OR IGNORE INTO casino_housekeeping_runs(guild_id,day_key,task_id,sent_at) VALUES(?,?,?,?)').run(guildId,day,task.id,Date.now());
     if(!claimed.changes) continue;
     try {

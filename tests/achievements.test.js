@@ -2402,12 +2402,22 @@ test('全天無玩家互動時，機器人會在夜間自主清潔賭場',()=>{
   assert.match(housekeeping,/casinoAnnouncementChannel\(guildId\)/);
   assert.match(housekeeping,/allowedMentions:\{parse:\[\]\}/);
   assert.match(housekeeping,/金幣、體力、資產或遊戲進度/);
-  for(const task of ['明日財運','差一點就贏','傳說裝備']) assert.match(source,new RegExp(task));
+  const taskBlock=source.match(/const autonomousHousekeepingTasks=\[([\s\S]*?)\n\];/)?.[1]||'';
+  const taskIds=[...taskBlock.matchAll(/id:'([^']+)'/g)].map(([,id])=>id);
+  assert.equal(taskIds.length,31,'每月必須準備 31 種清潔小劇場');
+  assert.equal(new Set(taskIds).size,31,'每種清潔小劇場必須有唯一識別');
+  for(const task of ['明日財運','差一點就贏','傳說裝備','水晶燈除塵','閉館鞠躬']) assert.match(source,new RegExp(task));
+  assert.match(source,/function autonomousHousekeepingTaskForDay\(day\)/);
+  assert.match(housekeeping,/const task=autonomousHousekeepingTaskForDay\(parts\.day\);/);
+  assert.doesNotMatch(housekeeping,/Math\.random/);
   assert.match(source,/setInterval\(\(\)=>runAutonomousHousekeeping\(\)/);
   const update=JSON.parse(readFileSync(new URL('../updates/2026-09-07-autonomous-housekeeping.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-09-07-autonomous-housekeeping');
   assert.equal(update.channelNames[0],'賭場公告');
   assert.match(update.changes.join('\n'),/22:00/);
+  const rotationUpdate=JSON.parse(readFileSync(new URL('../updates/2026-09-07-housekeeping-monthly-rotation.json',import.meta.url),'utf8'));
+  assert.equal(rotationUpdate.version,'2026.09.07.2');
+  assert.match(rotationUpdate.changes.join('\n'),/31 種/);
 });
 
 test('搶劫加入不完整情報、加碼搜刮與持續熱度',()=>{
