@@ -2388,6 +2388,28 @@ test('幸運輪盤採三日大獎、每日五次免費與二十五次上限',()=
   assert.match(wheelUpdate.changes.join('\n'),/每天自動推送一次/);
 });
 
+test('全天無玩家互動時，機器人會在夜間自主清潔賭場',()=>{
+  for(const table of ['casino_daily_player_activity','casino_housekeeping_runs']) {
+    assert.match(source,new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
+  assert.match(source,/function recordCasinoPlayerActivity\(g,u,now=Date\.now\(\)\)/);
+  assert.match(source,/function casinoHadPlayerActivityToday\(g,day=taipeiDay\(\)\)/);
+  assert.match(source,/i\.inGuild\(\)&&!i\.user\.bot&&!i\.isAutocomplete\(\)\) recordCasinoPlayerActivity\(i\.guildId,i\.user\.id\);/);
+  assert.match(source,/const AUTONOMOUS_HOUSEKEEPING_HOUR=22/);
+  const housekeeping=source.match(/async function runAutonomousHousekeeping\(\) \{[\s\S]+?\n\}/)?.[0]||'';
+  assert.match(housekeeping,/casinoHadPlayerActivityToday\(guildId,day\)/);
+  assert.match(housekeeping,/INSERT OR IGNORE INTO casino_housekeeping_runs/);
+  assert.match(housekeeping,/casinoAnnouncementChannel\(guildId\)/);
+  assert.match(housekeeping,/allowedMentions:\{parse:\[\]\}/);
+  assert.match(housekeeping,/金幣、體力、資產或遊戲進度/);
+  for(const task of ['擦地中','掃地中','拖地中']) assert.match(source,new RegExp(task));
+  assert.match(source,/setInterval\(\(\)=>runAutonomousHousekeeping\(\)/);
+  const update=JSON.parse(readFileSync(new URL('../updates/2026-09-07-autonomous-housekeeping.json',import.meta.url),'utf8'));
+  assert.equal(update.id,'2026-09-07-autonomous-housekeeping');
+  assert.equal(update.channelNames[0],'賭場公告');
+  assert.match(update.changes.join('\n'),/22:00/);
+});
+
 test('搶劫加入不完整情報、加碼搜刮與持續熱度',()=>{
   for(const constant of ['HEIST_HEAT_MAX','HEIST_HEAT_CHANCE_PENALTY','HEIST_HEAT_LOOT_BONUS','HEIST_PUSH_LOOT_MULTIPLIER','HEIST_PUSH_CHANCE_PENALTY']) assert.match(source,new RegExp(`const ${constant} = Number\\(process\\.env\\.${constant}`));
   assert.match(source,/CREATE TABLE IF NOT EXISTS heist_heat/);

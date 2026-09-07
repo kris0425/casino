@@ -581,6 +581,15 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (guild_id, kind, slot)
   );
+  CREATE TABLE IF NOT EXISTS casino_daily_player_activity (
+    guild_id TEXT PRIMARY KEY, day_key TEXT NOT NULL,
+    last_activity_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS casino_housekeeping_runs (
+    guild_id TEXT NOT NULL, day_key TEXT NOT NULL, task_id TEXT NOT NULL,
+    sent_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, day_key)
+  );
   CREATE TABLE IF NOT EXISTS solo_heist_settings (
     guild_id TEXT PRIMARY KEY, base_chance INTEGER NOT NULL DEFAULT 35
   );
@@ -12111,6 +12120,7 @@ async function handleInteraction(i) {
   } catch(e) { const msg=`⚠️ ${e.message}`; if(i.replied||i.deferred) await i.followUp({content:msg,ephemeral:true}); else await i.reply({content:msg,ephemeral:true}); }
 }
 client.on('interactionCreate',i=>{
+  if(i.inGuild()&&!i.user.bot&&!i.isAutocomplete()) recordCasinoPlayerActivity(i.guildId,i.user.id);
   if(i.inGuild()&&i.isChatInputCommand()&&!i.user.bot) {
     grantGamblerRoleForInteraction(i).catch(error=>console.error('賭徒身分組自動補發失敗 guild='+i.guildId+' user='+i.user.id+': '+error.message));
   }
@@ -12125,8 +12135,49 @@ client.on('interactionCreate',i=>{
 });
 let lastBankAnnouncement='';
 const sundayVaultAnnouncementHours=new Set([12,14,16,18,20,22]);
+const AUTONOMOUS_HOUSEKEEPING_HOUR=22;
+const autonomousHousekeepingTasks=[
+  {id:'wipe',emoji:'🧽',title:'深夜自主巡邏｜擦地中',text:'今天賭場沒有玩家進場，機器人把桌邊指紋一一擦亮。'},
+  {id:'sweep',emoji:'🧹',title:'深夜自主巡邏｜掃地中',text:'今天賭場沒有玩家進場，機器人正安靜掃走走道上的籌碼紙屑。'},
+  {id:'mop',emoji:'🪣',title:'深夜自主巡邏｜拖地中',text:'今天賭場沒有玩家進場，機器人把大廳拖得一塵不染，等明天再熱鬧起來。'}
+];
+function recordCasinoPlayerActivity(g,u,now=Date.now()) {
+  if(!g||!u) return;
+  db.prepare(`INSERT INTO casino_daily_player_activity(guild_id,day_key,last_activity_at) VALUES(?,?,?)
+    ON CONFLICT(guild_id) DO UPDATE SET day_key=excluded.day_key,last_activity_at=excluded.last_activity_at`).run(g,taipeiDay(),now);
+}
+function casinoHadPlayerActivityToday(g,day=taipeiDay()) {
+  return db.prepare('SELECT day_key FROM casino_daily_player_activity WHERE guild_id=?').get(g)?.day_key===day;
+}
 function taipeiClockParts() {
   return Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Taipei',hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit'}).formatToParts(new Date()).map(part=>[part.type,part.value]));
+}
+async function runAutonomousHousekeeping() {
+  const parts=taipeiClockParts(),hour=Number(parts.hour),minute=Number(parts.minute);
+  if(hour!==AUTONOMOUS_HOUSEKEEPING_HOUR||minute>=5) return;
+  const day=`${parts.year}-${parts.month}-${parts.day}`;
+  for(const guildId of client.guilds.cache.keys()) {
+    if(casinoHadPlayerActivityToday(guildId,day)) continue;
+    const task=autonomousHousekeepingTasks[Math.floor(Math.random()*autonomousHousekeepingTasks.length)];
+    const claimed=db.prepare('INSERT OR IGNORE INTO casino_housekeeping_runs(guild_id,day_key,task_id,sent_at) VALUES(?,?,?,?)').run(guildId,day,task.id,Date.now());
+    if(!claimed.changes) continue;
+    try {
+      const channel=await casinoAnnouncementChannel(guildId);
+      if(!channel) throw new Error('找不到「賭場公告」文字頻道');
+      const message=await channel.send({
+        embeds:[new EmbedBuilder().setColor(0x5A9C83).setTitle(`${task.emoji} ${task.title}`).setDescription(`${task.text}\n\n✨ **賭場已由自主巡邏整理完畢。**\n這只是夜間情境公告，不會改動任何玩家的金幣、體力、資產或遊戲進度。`).setFooter({text:`台北時間 ${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}｜每日最多一次`}).setTimestamp()],
+        allowedMentions:{parse:[]}
+      });
+      if(channel.type===ChannelType.GuildAnnouncement) {
+        try { await message.crosspost(); }
+        catch(error) { console.error(`自主清潔公告發布失敗 guild=${guildId}: ${error.message}`); }
+      }
+      console.log(`自主清潔巡邏完成 guild=${guildId} channel=${channel.id} task=${task.id} day=${day}`);
+    } catch(error) {
+      db.prepare('DELETE FROM casino_housekeeping_runs WHERE guild_id=? AND day_key=?').run(guildId,day);
+      console.error(`自主清潔巡邏傳送失敗 guild=${guildId}: ${error.message}`);
+    }
+  }
 }
 async function announceTomorrowBank() {
   const parts=taipeiClockParts();
@@ -12208,6 +12259,7 @@ client.once('clientReady',()=>{
   setInterval(announceTomorrowBank,60000);
   setInterval(announceSundayCasinoVault,60000);
   setInterval(()=>announceLuckyWheelGrandPrize().catch(error=>console.error(`幸運輪盤每日大獎排程失敗：${error.message}`)),60000);
+  setInterval(()=>runAutonomousHousekeeping().catch(error=>console.error(`自主清潔巡邏排程失敗：${error.message}`)),60000);
   setInterval(notifyCompletedAirlineFlights,60000);
   setInterval(notifyCompletedTransportOperations,60000);
   setInterval(notifyPendingAllInHeroUnlocks,60000);
@@ -12221,6 +12273,7 @@ client.once('clientReady',()=>{
   announceTomorrowBank();
   announceSundayCasinoVault();
   announceLuckyWheelGrandPrize().catch(error=>console.error(`啟動幸運輪盤大獎公告失敗：${error.message}`));
+  runAutonomousHousekeeping().catch(error=>console.error(`啟動自主清潔巡邏失敗：${error.message}`));
   notifyCompletedAirlineFlights();
   notifyCompletedTransportOperations();
   notifyPendingAllInHeroUnlocks();
