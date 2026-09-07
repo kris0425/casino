@@ -12137,9 +12137,9 @@ let lastBankAnnouncement='';
 const sundayVaultAnnouncementHours=new Set([12,14,16,18,20,22]);
 const AUTONOMOUS_HOUSEKEEPING_HOUR=22;
 const autonomousHousekeepingTasks=[
-  {id:'wipe',emoji:'🧽',title:'深夜自主巡邏｜擦地中',text:'今天賭場沒有玩家進場，機器人把桌邊指紋一一擦亮。'},
-  {id:'sweep',emoji:'🧹',title:'深夜自主巡邏｜掃地中',text:'今天賭場沒有玩家進場，機器人正安靜掃走走道上的籌碼紙屑。'},
-  {id:'mop',emoji:'🪣',title:'深夜自主巡邏｜拖地中',text:'今天賭場沒有玩家進場，機器人把大廳拖得一塵不染，等明天再熱鬧起來。'}
+  {id:'wipe',emoji:'🧽',title:'深夜自主巡邏｜賭桌亮到能照出明日財運',text:'今晚連一枚籌碼都沒敢吵醒大廳。機器人戴上白手套，把賭桌擦到連莊家都要先補妝。'},
+  {id:'sweep',emoji:'🧹',title:'深夜自主巡邏｜正在搜刮地上的「差一點就贏」',text:'掃帚剛掃到角落，就發現三張落單的幸運貼紙和一張寫著「下把一定贏」的紙條。已收進失物招領，絕對不是獎池。'},
+  {id:'mop',emoji:'🪣',title:'深夜自主巡邏｜拖地中，請勿把拖把當傳說裝備',text:'機器人用月光調配地板蠟，從大廳一路拖到輪盤旁。地板目前滑得能讓企鵝順利完成一圈賽馬。'}
 ];
 function recordCasinoPlayerActivity(g,u,now=Date.now()) {
   if(!g||!u) return;
@@ -12165,7 +12165,7 @@ async function runAutonomousHousekeeping() {
       const channel=await casinoAnnouncementChannel(guildId);
       if(!channel) throw new Error('找不到「賭場公告」文字頻道');
       const message=await channel.send({
-        embeds:[new EmbedBuilder().setColor(0x5A9C83).setTitle(`${task.emoji} ${task.title}`).setDescription(`${task.text}\n\n✨ **賭場已由自主巡邏整理完畢。**\n這只是夜間情境公告，不會改動任何玩家的金幣、體力、資產或遊戲進度。`).setFooter({text:`台北時間 ${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}｜每日最多一次`}).setTimestamp()],
+        embeds:[new EmbedBuilder().setColor(0x5A9C83).setTitle(`${task.emoji} ${task.title}`).setDescription(`${task.text}\n\n🛎️ **夜班回報：賭場已整理完畢。**\n明天開門前，地板會比你的下注紀錄還乾淨。\n\n這只是夜間情境公告，不會改動任何玩家的金幣、體力、資產或遊戲進度。`).setFooter({text:`台北時間 ${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}｜每日最多一次`}).setTimestamp()],
         allowedMentions:{parse:[]}
       });
       if(channel.type===ChannelType.GuildAnnouncement) {

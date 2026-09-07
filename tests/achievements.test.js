@@ -2402,7 +2402,7 @@ test('全天無玩家互動時，機器人會在夜間自主清潔賭場',()=>{
   assert.match(housekeeping,/casinoAnnouncementChannel\(guildId\)/);
   assert.match(housekeeping,/allowedMentions:\{parse:\[\]\}/);
   assert.match(housekeeping,/金幣、體力、資產或遊戲進度/);
-  for(const task of ['擦地中','掃地中','拖地中']) assert.match(source,new RegExp(task));
+  for(const task of ['明日財運','差一點就贏','傳說裝備']) assert.match(source,new RegExp(task));
   assert.match(source,/setInterval\(\(\)=>runAutonomousHousekeeping\(\)/);
   const update=JSON.parse(readFileSync(new URL('../updates/2026-09-07-autonomous-housekeeping.json',import.meta.url),'utf8'));
   assert.equal(update.id,'2026-09-07-autonomous-housekeeping');
