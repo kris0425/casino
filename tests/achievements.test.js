@@ -985,11 +985,11 @@ test('限時資產拍賣全系統同時只保留一場並安全整併重複場�
   assert.match(migration,/superseded_at/);
   assert.match(source,/function activeAssetAuction\(\) \{/);
   assert.match(source,/全系統同時只有一場系統拍賣/);
-  assert.match(scheduler,/removeSupersededAssetAuctionAnnouncements/);
+  assert.match(scheduler,/settleAssetAuction\(auction.id,now\)/);
   assert.doesNotMatch(scheduler,/for\(const guildId of guildIds\) ensureActiveAssetAuction/);
 });
 
-test('限時資產拍賣公告可由所有玩家直接公開出價',()=>{
+test('既有公開競標按鈕仍可由玩家出價，但不再主動推播',()=>{
   const bidBlock=source.match(/function placeAssetAuctionBid\([\s\S]+?\n\}/)?.[0]||'';
   const bidModal=source.match(/if\(i\.isModalSubmit\(\)&&i\.customId\.startsWith\('asset_auction_bid_modal:'\)[\s\S]+?\n  \}/)?.[0]||'';
   assert.match(bidModal,/await i\.deferReply\(\{ephemeral:true\}\)/,'拍賣出價表單必須立即確認互動');
@@ -999,9 +999,8 @@ test('限時資產拍賣公告可由所有玩家直接公開出價',()=>{
   assert.match(bidBlock,/WHERE id=\? AND status='active'/);
   assert.match(bidBlock,/current_bidder_guild_id=\?/);
   assert.match(source,/asset_auction_public_bid:/);
-  assert.match(source,/function assetAuctionAnnouncementComponents\(auction\)/);
-  assert.match(source,/function refreshActiveAssetAuctionAnnouncementControls\(\)/);
-  assert.match(source,/publishAssetAuctionAnnouncement\(result\.auction,'🔨/);
+  assert.doesNotMatch(source,/function assetAuctionAnnouncementComponents\(auction\)/);
+  assert.doesNotMatch(bidModal,/publishAssetAuctionAnnouncement|notifyAssetAuctionOutbid/);
 });
 
 test('限時拍賣停止舊重複輪替並只啟用 15 款交通工具典藏 II',()=>{
@@ -1019,7 +1018,7 @@ test('限時拍賣停止舊重複輪替並只啟用 15 款交通工具典藏 II'
   assert.match(source,/const activeAuctionLimitedVehicleDefinitions=auctionLimitedVehicleDefinitions\.filter\(vehicle=>vehicle\.auctionSeries===currentAuctionSeries\)/);
   assert.match(source,/const retiredAuctionLimitedVehicleIds=auctionLimitedVehicleDefinitions\.filter\(vehicle=>vehicle\.auctionSeries!==currentAuctionSeries\)/);
   assert.match(source,/const auctionLimitedVehicleIds=activeAuctionLimitedVehicleDefinitions\.map\(vehicle=>vehicle\.id\)/);
-  assert.match(source,/交通工具典藏 II｜全新無重複輪替已開始/);
+  assert.match(source,/const assetAuctionPool=\[\.\.\.auctionLimitedVehicleIds\]/);
   assert.match(source,/auctionOnly:true/);
   const wave2Update=JSON.parse(readFileSync(new URL('../updates/2026-09-01-transport-auction-wave-2.json',import.meta.url),'utf8'));
   assert.equal(wave2Update.version,'2026.09.01.2');
@@ -1072,7 +1071,7 @@ test('GitHub Actions 可用 Secrets 自動增量部署 Oracle',()=>{
   assert.doesNotMatch(deployScript,/BEGIN (?:RSA|OPENSSH) PRIVATE KEY/);
 });
 
-test('賭場強化保全與限時拍賣每六小時提醒',()=>{
+test('賭場強化保全保留，限時拍賣仍結算但不發送提醒',()=>{
   assert.match(source,/const CASINO_VAULT_LOOT_RATE=0\.50/);
   assert.match(source,/const CASINO_VAULT_MAX_SUCCESS_RATE=25/);
   assert.match(source,/const CASINO_SECURITY_BASE_HP=24/);
@@ -1086,17 +1085,12 @@ test('賭場強化保全與限時拍賣每六小時提醒',()=>{
   assert.match(source,/casinoVaultBalance\(i\.guildId\)\*CASINO_VAULT_LOOT_RATE/);
   assert.doesNotMatch(source,/casinoVaultBalance\([^\n]+\*0\.8/);
 
-  assert.match(source,/last_reminder_at INTEGER/);
-  assert.match(source,/announcement_message_id TEXT/);
-  assert.match(source,/publishAssetAuctionAnnouncement/);
-  assert.match(source,/notifyAssetAuctionOutbid/);
-  assert.match(source,/ALTER TABLE asset_auctions ADD COLUMN last_reminder_at INTEGER/);
-  assert.match(source,/const ASSET_AUCTION_REMINDER_MS=6\*60\*60\*1000/);
   const scheduler=source.match(/async function processAssetAuctions\(\) \{[\s\S]+?\n\}/)?.[0]||'';
-  assert.match(scheduler,/COALESCE\(last_reminder_at,announced_at\)<=\?/);
-  assert.match(scheduler,/now-ASSET_AUCTION_REMINDER_MS/);
-  assert.match(scheduler,/每 6 小時即時提醒/);
-  assert.match(scheduler,/UPDATE asset_auctions SET last_reminder_at=\?/);
+  assert.match(scheduler,/retireLegacyAssetAuctions\(now\)/);
+  assert.match(scheduler,/settleAssetAuction\(auction.id,now\)/);
+  assert.match(scheduler,/ensureActiveAssetAuction\(auctionOwnerId,now\)/);
+  assert.doesNotMatch(scheduler,/channel\.send|publishAssetAuctionAnnouncement|reminders|closed_announced_at/);
+  assert.doesNotMatch(source,/notifyAssetAuctionOutbid|publishAssetAuctionAnnouncement|ASSET_AUCTION_REMINDER_MS/);
 
   const update=JSON.parse(readFileSync(new URL('../updates/2026-08-01-casino-security-auction-reminders.json',import.meta.url),'utf8'));
   assert.equal(update.version,'2026.08.01.11');
@@ -1165,12 +1159,11 @@ test('高額團隊搶劫具有獨立成本、風險上限與經濟保護',()=>{
   assert.ok(twoPlayerUpdate.changes.some(change=>change.includes('最低組隊人數統一改為 2 人')));
 });
 
-test('限時資產拍賣可指定跨伺服器公告頻道',()=>{
+test('競標停止跨伺服器公告，玩家仍可主動開啟商城',()=>{
   const scheduler=source.match(/async function processAssetAuctions\(\) \{[\s\S]+?\n\}/)?.[0]||'';
-  assert.match(source,/async function casinoAuctionAnnouncementChannel\(guildId\)/);
-  assert.match(source,/跨服拍賣公告頻道設定無效/);
-  assert.match(scheduler,/casinoAuctionAnnouncementChannel\(auction\.guild_id\)/);
-  assert.doesNotMatch(scheduler,/casinoAnnouncementChannel\(auction\.guild_id\)/);
+  assert.doesNotMatch(source,/async function casinoAuctionAnnouncementChannel\(guildId\)/);
+  assert.doesNotMatch(scheduler,/casinoAnnouncementChannel|channel\.send/);
+  assert.match(source,/asset_auction_refresh:/);
 });
 
 test('團隊搶劫降低警方壓制並提高合作逃脫率',()=>{
@@ -2374,13 +2367,9 @@ test('幸運輪盤採三日大獎、每日五次免費與二十五次上限',()=
   assert.match(spin,/ROLLBACK/);
   assert.match(source,/function luckyWheelGrandPrizeInfo\(now=new Date\(\)\)/);
   assert.match(source,/cycleMs=LUCKY_WHEEL_CYCLE_DAYS\*24\*60\*60\*1000/);
-  assert.match(source,/function announceLuckyWheelGrandPrize\(\)/);
-  assert.match(source,/const configured=CASINO_ANNOUNCEMENT_CHANNEL_ID\?await client\.channels\.fetch/);
-  assert.match(source,/targets\.push\(\{guildId:configured\.guildId,channel:configured\}\)/);
-  assert.match(source,/for\(const \{guildId,channel\} of targets\)/);
-  assert.match(source,/INSERT OR IGNORE INTO scheduled_announcements\(guild_id,kind,slot\)/);
-  assert.match(source,/'lucky_wheel_grand_prize'/);
-  assert.match(source,/setInterval\(\(\)=>announceLuckyWheelGrandPrize\(\)/);
+  assert.doesNotMatch(source,/function announceLuckyWheelGrandPrize\(\)/);
+  assert.doesNotMatch(source,/setInterval\(\(\)=>announceLuckyWheelGrandPrize\(\)/);
+  assert.match(source,/function luckyWheelGrandPrizeInfo\(now=new Date\(\)\)/);
   const wheelUpdate=JSON.parse(readFileSync(new URL('../updates/2026-08-27-lucky-wheel-three-day-jackpot.json',import.meta.url),'utf8'));
   assert.equal(wheelUpdate.version,'2026.08.27.2');
   assert.match(wheelUpdate.changes.join('\n'),/前 5 次免費/);

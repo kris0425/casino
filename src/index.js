@@ -2785,7 +2785,6 @@ const HIGH_STAKE_RAKE_TIERS=[
   {minimum:1_000_000,rate:0.01}
 ];
 const ASSET_AUCTION_DURATION_MS=12*60*60*1000;
-const ASSET_AUCTION_REMINDER_MS=6*60*60*1000;
 const ASSET_AUCTION_EXTENSION_MS=5*60*1000;
 const ASSET_AUCTION_MIN_INCREMENT=100000;
 const ASSET_AUCTION_MIN_INCREMENT_RATE=0.05;
@@ -4934,85 +4933,6 @@ function assetAuctionBidModal(auction) {
   const input=new TextInputBuilder().setCustomId('amount').setLabel(`出價金額｜最低 ${fmt(minimum)}`).setPlaceholder(String(minimum)).setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(16).setRequired(true);
   return new ModalBuilder().setCustomId(`asset_auction_bid_modal:${auction.id}`).setTitle('🔥 限時資產拍賣出價').addComponents(new ActionRowBuilder().addComponents(input));
 }
-function assetAuctionAnnouncementComponents(auction) {
-  return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`asset_auction_public_bid:${auction.id}`).setLabel(`立即出價｜最低 ${fmt(minimumAssetAuctionBid(auction))}`).setEmoji('💰').setStyle(ButtonStyle.Success)
-  )];
-}
-async function notifyAssetAuctionOutbid(result) {
-  if(!result.previousBidderId) return;
-  const asset=assetCatalog[result.assetId];
-  try {
-    const user=await client.users.fetch(result.previousBidderId);
-    await user.send({embeds:[new EmbedBuilder()
-      .setColor(0xE74C3C)
-      .setTitle('🔔 限時資產拍賣｜你的出價已被超越')
-      .setDescription('拍賣資產：**'+(asset?.name||result.assetId)+'**\n你原本的出價：**'+fmt(result.previousBid)+'**\n目前最高價：**'+fmt(result.amount)+'**\n\n你的託管金幣已全額退回。拍賣結束：<t:'+Math.floor(result.auction.ends_at/1000)+':R>\n請使用 `/玩法` →「限時資產拍賣」重新出價。')
-      .setTimestamp()]});
-  } catch(error) {
-    console.warn('拍賣超標通知傳送失敗 auction='+result.auction.id+' user='+result.previousBidderId+': '+error.message);
-  }
-}
-async function publishAssetAuctionAnnouncement(auction,notice) {
-  const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
-  if(!channel) throw new Error('找不到賭場公告頻道');
-  const asset=assetCatalog[auction.asset_id],embed=assetAuctionEmbed(auction.guild_id,null,auction,notice);
-  embed.setDescription(embed.data.description+'\n\n使用 `/玩法`，在分類選擇「限時資產拍賣」即可參加。');
-  if(auction.announcement_channel_id===channel.id&&auction.announcement_message_id) {
-    try {
-      const message=await channel.messages.fetch(auction.announcement_message_id);
-      const imageUrl=message.embeds[0]?.image?.url;
-      if(imageUrl) embed.setImage(imageUrl);
-      await message.edit({embeds:[embed],components:assetAuctionAnnouncementComponents(auction),allowedMentions:{parse:[]}});
-      return {channelId:channel.id,messageId:message.id,updated:true};
-    } catch(error) {
-      console.warn('拍賣公告原訊息無法更新 auction='+auction.id+': '+error.message);
-    }
-  }
-  const message=await channel.send({...assetMediaPayload(embed,auction.asset_id,asset),components:assetAuctionAnnouncementComponents(auction),allowedMentions:{parse:[]}});
-  return {channelId:channel.id,messageId:message.id,updated:false};
-}
-async function adoptExistingAssetAuctionAnnouncement(auction) {
-  if(auction.announcement_message_id||!auction.announced_at) return;
-  const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
-  if(!channel?.messages?.fetch) return;
-  const title='🔥 限時資產拍賣｜'+(assetCatalog[auction.asset_id]?.name||auction.asset_id);
-  const messages=await channel.messages.fetch({limit:50});
-  const matches=[...messages.values()]
-    .filter(message=>message.author?.id===client.user?.id&&message.createdTimestamp>=Number(auction.starts_at)-60_000&&message.createdTimestamp<=Number(auction.ends_at)&&message.embeds.some(embed=>embed.title===title))
-    .sort((a,b)=>b.createdTimestamp-a.createdTimestamp);
-  const [keep,...duplicates]=matches;
-  if(!keep) return;
-  for(const message of duplicates) await message.delete().catch(error=>console.warn('拍賣重複公告清理失敗 auction='+auction.id+' message='+message.id+': '+error.message));
-  db.prepare('UPDATE asset_auctions SET announcement_channel_id=?,announcement_message_id=? WHERE id=? AND announcement_message_id IS NULL').run(channel.id,keep.id,auction.id);
-}
-async function removeSupersededAssetAuctionAnnouncements() {
-  const auctions=db.prepare("SELECT * FROM asset_auctions WHERE superseded_at IS NOT NULL AND superseded_message_deleted_at IS NULL AND announcement_channel_id IS NOT NULL AND announcement_message_id IS NOT NULL").all();
-  for(const auction of auctions) {
-    try {
-      const channel=await client.channels.fetch(auction.announcement_channel_id);
-      if(channel?.messages?.fetch) {
-        const message=await channel.messages.fetch(auction.announcement_message_id).catch(()=>null);
-        if(message) await message.delete();
-      }
-      db.prepare('UPDATE asset_auctions SET superseded_message_deleted_at=? WHERE id=? AND superseded_message_deleted_at IS NULL').run(Date.now(),auction.id);
-    } catch(error) {
-      console.warn('多餘拍賣公告清理失敗 auction='+auction.id+': '+error.message);
-    }
-  }
-}
-async function refreshActiveAssetAuctionAnnouncementControls() {
-  const auctions=db.prepare("SELECT * FROM asset_auctions WHERE status='active' AND announcement_channel_id IS NOT NULL AND announcement_message_id IS NOT NULL").all();
-  for(const auction of auctions) {
-    try {
-      const channel=await client.channels.fetch(auction.announcement_channel_id);
-      const message=channel?.messages?.fetch?await channel.messages.fetch(auction.announcement_message_id):null;
-      if(message) await message.edit({components:assetAuctionAnnouncementComponents(auction)});
-    } catch(error) {
-      console.warn('拍賣公告互動按鈕更新失敗 auction='+auction.id+': '+error.message);
-    }
-  }
-}
 let assetAuctionProcessing=false;
 async function processAssetAuctions() {
   if(assetAuctionProcessing) return;
@@ -5022,55 +4942,8 @@ async function processAssetAuctions() {
     const retired=retireLegacyAssetAuctions(now);
     if(retired) console.log(`已下架 ${retired} 場舊版限時拍賣，並完成託管退款`);
     for(const auction of db.prepare("SELECT id FROM asset_auctions WHERE status='active' AND ends_at<=? ORDER BY ends_at").all(now)) settleAssetAuction(auction.id,now);
-    await removeSupersededAssetAuctionAnnouncements();
-    await refreshActiveAssetAuctionAnnouncementControls();
     const auctionOwnerId=db.prepare('SELECT guild_id FROM asset_auctions ORDER BY id DESC LIMIT 1').get()?.guild_id||[...guildIds].sort()[0];
     if(auctionOwnerId) ensureActiveAssetAuction(auctionOwnerId,now);
-    const legacyAnnouncements=db.prepare("SELECT * FROM asset_auctions WHERE status='active' AND announced_at IS NOT NULL AND announcement_message_id IS NULL").all();
-    for(const auction of legacyAnnouncements) {
-      try { await adoptExistingAssetAuctionAnnouncement(auction); }
-      catch(error) { console.warn('拍賣舊公告接管失敗 auction='+auction.id+': '+error.message); }
-    }
-    const starts=db.prepare("SELECT * FROM asset_auctions WHERE status='active' AND announced_at IS NULL ORDER BY id").all();
-    for(const auction of starts) {
-      const claim=db.prepare('UPDATE asset_auctions SET announced_at=? WHERE id=? AND status=\'active\' AND announced_at IS NULL').run(Date.now(),auction.id);
-      if(Number(claim.changes)!==1) continue;
-      try {
-        const published=await publishAssetAuctionAnnouncement(assetAuctionById(auction.id),'✨ **交通工具典藏 II｜全新無重複輪替已開始！**');
-        const announcedAt=Date.now();
-        db.prepare("UPDATE asset_auctions SET announced_at=?,last_reminder_at=?,announcement_channel_id=?,announcement_message_id=? WHERE id=? AND status='active'").run(announcedAt,announcedAt,published.channelId,published.messageId,auction.id);
-      } catch(error) {
-        db.prepare('UPDATE asset_auctions SET announced_at=NULL WHERE id=? AND announcement_message_id IS NULL').run(auction.id);
-        console.error('限時資產拍賣開場公告失敗 auction='+auction.id+': '+error.message);
-      }
-    }
-    const reminders=db.prepare(`SELECT * FROM asset_auctions
-      WHERE status='active' AND announced_at IS NOT NULL AND ends_at>?
-        AND COALESCE(last_reminder_at,announced_at)<=?
-      ORDER BY id`).all(now,now-ASSET_AUCTION_REMINDER_MS);
-    for(const auction of reminders) {
-      try {
-        if(!auction.announcement_message_id) {
-          db.prepare("UPDATE asset_auctions SET last_reminder_at=? WHERE id=? AND status='active'").run(Date.now(),auction.id);
-          continue;
-        }
-        const published=await publishAssetAuctionAnnouncement(auction,'⏰ **限時資產拍賣｜每 6 小時即時提醒（更新原公告）**');
-        db.prepare("UPDATE asset_auctions SET last_reminder_at=?,announcement_channel_id=?,announcement_message_id=? WHERE id=? AND status='active'").run(Date.now(),published.channelId,published.messageId,auction.id);
-      } catch(error) { console.error(`限時資產拍賣定時提醒失敗 auction=${auction.id}: ${error.message}`); }
-    }
-    const closed=db.prepare("SELECT * FROM asset_auctions WHERE status IN ('completed','expired') AND closed_announced_at IS NULL ORDER BY id").all();
-    for(const auction of closed) {
-      try {
-        const channel=await casinoAuctionAnnouncementChannel(auction.guild_id);
-        if(!channel) throw new Error('找不到賭場公告頻道');
-        const asset=assetCatalog[auction.asset_id],won=auction.status==='completed'&&auction.winner_id;
-        const embed=new EmbedBuilder().setColor(won?0xFFD700:0x607D8B).setTitle(won?'🏆 限時資產拍賣結標':'⌛ 限時資產拍賣流標')
-          .setDescription(won?`得標玩家：<@${auction.winner_id}>\n得標資產：**${asset.name}**\n成交價格：**${fmt(auction.final_price)}**\n\n資產已自動登記，託管金幣已由系統回收。下一場拍賣已經開始。`:`拍賣資產：**${asset.name}**\n本場無人出價，已由系統收回。下一場拍賣已經開始。`)
-          .setTimestamp(new Date(auction.settled_at||Date.now()));
-        await channel.send({...assetMediaPayload(embed,auction.asset_id,asset),allowedMentions:won?{users:[auction.winner_id]}:{parse:[]}});
-        db.prepare('UPDATE asset_auctions SET closed_announced_at=? WHERE id=? AND closed_announced_at IS NULL').run(Date.now(),auction.id);
-      } catch(error) { console.error(`限時資產拍賣結標公告失敗 auction=${auction.id}: ${error.message}`); }
-    }
   } finally {
     assetAuctionProcessing=false;
   }
@@ -6129,17 +6002,6 @@ async function casinoAllInPushChannel(guildId) {
   const fetched=await guild.channels.fetch();
   matches=casinoAllInPushTextChannels([...fetched.values()].filter(Boolean));
   return matches[0]||null;
-}
-async function casinoAuctionAnnouncementChannel(guildId) {
-  if(CASINO_ANNOUNCEMENT_CHANNEL_ID) {
-    const configured=await client.channels.fetch(CASINO_ANNOUNCEMENT_CHANNEL_ID).catch(()=>null);
-    if(configured
-      &&[ChannelType.GuildText,ChannelType.GuildAnnouncement].includes(configured.type)
-      &&typeof configured.send==='function'
-    ) return configured;
-    console.warn(`跨服拍賣公告頻道設定無效 channel=${CASINO_ANNOUNCEMENT_CHANNEL_ID}`);
-  }
-  return casinoAnnouncementChannel(guildId);
 }
 async function announceCasinoAllInEvent(eventId) {
   if(allInBroadcastsInFlight.has(eventId)) return false;
@@ -9381,8 +9243,6 @@ async function handleInteraction(i) {
       const result=placeAssetAuctionBid(i.guildId,i.user.id,Number(auctionIdText),amount);
       const notice=`💰 **出價成功！**\n本次最高出價：**${fmt(result.amount)}**｜新增託管：**${fmt(result.escrowNeeded)}**${result.extended?'\n⏱️ 因最後 5 分鐘出價，結束時間已延長 5 分鐘。':''}`;
       await i.editReply({content:notice});
-      await publishAssetAuctionAnnouncement(result.auction,'🔨 **有人成功出價！** 公開面板已更新目前最高價。');
-      void notifyAssetAuctionOutbid(result);
       return;
     } catch(error) {
       return i.editReply({content:`⚠️ 出價失敗：${error.message}`});
@@ -12251,47 +12111,11 @@ async function announceSundayCasinoVault() {
     }
   }
 }
-async function announceLuckyWheelGrandPrize() {
-  const slot=taipeiDay(),grandPrize=luckyWheelGrandPrizeInfo(),asset=grandPrize.asset;
-  const configured=CASINO_ANNOUNCEMENT_CHANNEL_ID?await client.channels.fetch(CASINO_ANNOUNCEMENT_CHANNEL_ID).catch(()=>null):null;
-  const targets=[];
-  if(configured&&[ChannelType.GuildText,ChannelType.GuildAnnouncement].includes(configured.type)&&typeof configured.send==='function') {
-    targets.push({guildId:configured.guildId,channel:configured});
-  } else {
-    for(const guildId of client.guilds.cache.keys()) {
-      const channel=await casinoAnnouncementChannel(guildId);
-      if(channel) targets.push({guildId,channel});
-    }
-  }
-  for(const {guildId,channel} of targets) {
-    const claimed=db.prepare('INSERT OR IGNORE INTO scheduled_announcements(guild_id,kind,slot) VALUES(?,?,?)').run(guildId,'lucky_wheel_grand_prize',slot);
-    if(!claimed.changes) continue;
-    try {
-      const extension=asset.image.split('.').pop(),imageName=`lucky-wheel-grand-prize.${extension}`;
-      const message=await channel.send({
-        embeds:[new EmbedBuilder().setColor(0xFFD700).setTitle('🎡 今日幸運輪盤｜本期傳說大獎')
-          .setDescription(`**${asset.name}**\n${asset.description}\n\n🏆 隱藏車大獎率：**${LUCKY_WHEEL_JACKPOT_RATE}%**\n✨ 整體中獎率：**${LUCKY_WHEEL_TOTAL_WIN_RATE}%**\n🎟️ 每日前 ${LUCKY_WHEEL_FREE_SPINS} 次免費，第 ${LUCKY_WHEEL_FREE_SPINS+1}～${LUCKY_WHEEL_MAX_SPINS} 次每次 **${fmt(LUCKY_WHEEL_PAID_SPIN_PRICE)} 金幣**\n🔄 本期開始：**${grandPrize.startsOn}**｜<t:${Math.floor(grandPrize.endsAt/1000)}:F> 更新（<t:${Math.floor(grandPrize.endsAt/1000)}:R>）`)
-          .setImage(`attachment://${imageName}`).setFooter({text:'幸運輪盤大獎每日推送｜獎池每 3 天更新'}).setTimestamp()],
-        files:[new AttachmentBuilder(assetPath(asset.image),{name:imageName})],
-        allowedMentions:{parse:[]}
-      });
-      if(channel.type===ChannelType.GuildAnnouncement) {
-        try { await message.crosspost(); }
-        catch(error) { console.error(`幸運輪盤大獎公告發布失敗 guild=${guildId}: ${error.message}`); }
-      }
-      console.log(`幸運輪盤大獎公告完成 guild=${guildId} channel=${channel.id} prize=${grandPrize.assetId} slot=${slot}`);
-    } catch(error) {
-      db.prepare('DELETE FROM scheduled_announcements WHERE guild_id=? AND kind=? AND slot=?').run(guildId,'lucky_wheel_grand_prize',slot);
-      console.error(`幸運輪盤大獎公告傳送失敗 guild=${guildId}: ${error.message}`);
-    }
-  }
-}
 client.once('clientReady',()=>{
   console.log(`已登入：${client.user.tag}`);
   syncGamblerRoles().catch(error=>console.error('啟動賭徒身分組同步失敗：'+error.message));
   setInterval(announceTomorrowBank,60000);
   setInterval(announceSundayCasinoVault,60000);
-  setInterval(()=>announceLuckyWheelGrandPrize().catch(error=>console.error(`幸運輪盤每日大獎排程失敗：${error.message}`)),60000);
   setInterval(()=>runAutonomousHousekeeping().catch(error=>console.error(`自主清潔巡邏排程失敗：${error.message}`)),60000);
   setInterval(notifyCompletedAirlineFlights,60000);
   setInterval(notifyCompletedTransportOperations,60000);
@@ -12305,7 +12129,6 @@ client.once('clientReady',()=>{
   },60000);
   announceTomorrowBank();
   announceSundayCasinoVault();
-  announceLuckyWheelGrandPrize().catch(error=>console.error(`啟動幸運輪盤大獎公告失敗：${error.message}`));
   runAutonomousHousekeeping().catch(error=>console.error(`啟動自主清潔巡邏失敗：${error.message}`));
   notifyCompletedAirlineFlights();
   notifyCompletedTransportOperations();
