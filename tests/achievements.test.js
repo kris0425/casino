@@ -2449,6 +2449,17 @@ test('搶劫加入不完整情報、加碼搜刮與持續熱度',()=>{
   assert.match(update.changes.join('\n'),/搶劫熱度/);
 });
 
+test('保全擊倒後戰利品按鈕可獨立回應並進入搶劫結算',()=>{
+  const security=source.indexOf("if(i.isButton() && i.customId.startsWith('heist_security:')");
+  const loot=source.indexOf("if(i.isButton() && i.customId.startsWith('heist_loot:')");
+  const execute=source.indexOf("if(i.isButton() && i.customId.startsWith('heist_execute:')");
+  assert.ok(security>=0&&security<loot&&loot<execute);
+  const handler=source.slice(loot,execute);
+  assert.match(handler,/heist\.lootChoice=choice/);
+  assert.match(handler,/return i\.update\(\{\.\.\.heistScenePayload\(finalPlanEmbed,[^\n]+components:\[row\]\}\);\s*\}\s*$/);
+  assert.match(source.slice(execute,execute+1100),/if\(!heist\.scheme\|\|!heist\.plan\|\|!heist\.policeStrategy\|\|!heist\.lootChoice\)/);
+});
+
 test('新增五種社區合法工作並套用既有次數與收益規則',()=>{
   for(const [id,label,amount] of [
     ['street_cleanup','路邊撿垃圾',900],

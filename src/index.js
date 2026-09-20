@@ -9821,8 +9821,6 @@ async function handleInteraction(i) {
       .setDescription(`使用武器：${weaponSummary}\n全隊武器火力：**${attack.firepower}**\n本輪傷害：**${attack.damage}**${attack.critical?'｜💥 弱點重擊！':''}\n保全耐久：**${heist.securityHp}/${casinoSecurityMaxHp(heist)}**\n交戰輪數：**${heist.securityRounds}**\n\n${heist.securityDefeated?'通往賭場中央寶庫的道路已經打開；請選擇見好就收或加碼搜刮。':'保全尚未倒下，下一步仍被鎖定；必須繼續使用武器壓制。'}`);
     return i.update({...heistScenePayload(embed,'assault'),components:rows});
   }
-  if(i.isButton() && i.customId.startsWith('heist_execute:') && i.guildId) {
-    const token=i.customId.split(':')[1], heist=activeHeists.get(token);
   if(i.isButton() && i.customId.startsWith('heist_loot:') && i.guildId) {
     const [,token,choice]=i.customId.split(':'),heist=activeHeists.get(token);
     if(!heist) return i.reply({content:'⚠️ 這次搶劫計畫已失效。',ephemeral:true});
@@ -9835,6 +9833,8 @@ async function handleInteraction(i) {
     const finalPlanEmbed=new EmbedBuilder().setColor(choice==='push'?0xD94A4A:0x35C46A).setTitle('✅ 最終行動計畫完成').setDescription(`警方應對：**${heist.policeStrategy==='counter'?'🔫 反擊警察':'🏃 專心逃跑'}**\n逃跑載具：**${selectedHeistVehicleName(heist)}**（成功率 +${selectedHeistVehicleBonus(heist)}%）\n戰術耗材：**${heistTacticalSummary(heist)}**\n戰利品策略：**${choiceText}**\n${heistHeatSummary(heist.heatLevel||0)}\n\n隊長可以開始行動。`);
     return i.update({...heistScenePayload(finalPlanEmbed,heist.museumScene||'planning'),components:[row]});
   }
+  if(i.isButton() && i.customId.startsWith('heist_execute:') && i.guildId) {
+    const token=i.customId.split(':')[1], heist=activeHeists.get(token);
     if(!heist) return i.reply({content:'⚠️ 這次搶劫計畫已失效。',ephemeral:true});
     if(i.user.id!==heist.leaderId) return i.reply({content:'⚠️ 只有隊長能執行搶劫。',ephemeral:true});
     if(!heist.scheme||!heist.plan||!heist.policeStrategy||!heist.lootChoice) return i.reply({content:'⚠️ 搶劫方案、逃跑計畫、警方應對或戰利品策略尚未完成。',ephemeral:true});
