@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { summarizeWebAssets } from '../src/game-data/web-game.js';
 import { WEB_CITY_SIZE, WEB_CITY_TOOLS, WEB_REAL_ESTATE_BUILDINGS, WEB_REAL_ESTATE_PLOTS, createWebCityTiles, webCityStats, webRealEstateUpgradeCost, webRealEstateRevenue } from '../src/game-data/web-real-estate.js';
 
@@ -1204,6 +1205,26 @@ test('團隊搶劫準備階段的戰術耗材只能本次購買並結算',()=>{
   assert.equal(grenadeUpdate.version,'2026.09.05.6');
   assert.match([grenadeUpdate.title,grenadeUpdate.summary,...grenadeUpdate.changes,grenadeUpdate.note].join('\n'),/手榴彈/);
   assert.doesNotMatch(source,/setName\('戰術耗材'\)/);
+});
+test('團隊搶劫準備面板只有五排且保留所有按鈕',()=>{
+  const lobbySource=source.match(/function heistLobbyRows\(token,heist\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(lobbySource);
+  const fakeRow=(...ids)=>new ActionRowBuilder().addComponents(ids.map(id=>
+    new ButtonBuilder().setCustomId(id).setLabel(id).setStyle(ButtonStyle.Secondary)
+  ));
+  const lobbyRows=new Function(
+    'ActionRowBuilder','ButtonBuilder','ButtonStyle','heistWeaponCategoryRow',
+    'heistTacticalShopRow','heistVehicleRow','heistPrepRow',
+    `return (${lobbySource});`
+  )(
+    ActionRowBuilder,ButtonBuilder,ButtonStyle,
+    ()=>fakeRow('weapon'),()=>fakeRow('tactical'),()=>fakeRow('vehicle'),
+    ()=>fakeRow('status','prep')
+  );
+  const rows=lobbyRows('test',{});
+  assert.deepEqual(rows.map(row=>row.components.length),[2,1,5,1,3]);
+  for(const row of rows) assert.doesNotThrow(()=>row.toJSON());
+  assert.deepEqual(rows[4].components.map(component=>component.data.custom_id),['status','prep','tactical']);
 });
 test('搶劫難易度下調並保留週日寶庫風險上限',()=>{
   assert.match(source,/const SOLO_HEIST_DEFAULT_BASE_CHANCE = Number\(process\.env\.SOLO_HEIST_DEFAULT_BASE_CHANCE \|\| 35\)/);

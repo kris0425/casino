@@ -6874,9 +6874,8 @@ function heistLobbyRows(token,heist) {
       new ButtonBuilder().setCustomId(`heist_police_tactic_menu:${token}`).setLabel('警方部署').setEmoji('🗺️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`heist_scout:${token}:menu`).setLabel('偵查行動情報').setEmoji('🔎').setStyle(ButtonStyle.Secondary)
     ),
-    heistTacticalShopRow(token,heist),
     heistVehicleRow(token,heist),
-    heistPrepRow(token)
+    heistPrepRow(token).addComponents(...heistTacticalShopRow(token,heist).components)
   ];
 }
 function heistReadiness(heist) {
